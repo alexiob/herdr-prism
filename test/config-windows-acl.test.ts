@@ -12,6 +12,15 @@ const api=security as unknown as {
 const user='S-1-5-21-100-200-300-1001',admin='S-1-5-32-544',system='S-1-5-18';
 const snapshot=(patch={})=>({userSid:user,ownerSid:user,tokenOwnerSid:admin,reparse:false,allowSids:[user],nullDacl:false,protected:true,...patch});
 
+test('recursive private directory creation protects every new intermediate without adopting an existing parent',{skip:process.platform!=='win32'},async t=>{
+ const root=await mkdtemp(join(tmpdir(),'prism-intermediate-acl-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const before=await security.readWindowsAcl(root);
+ const state=join(root,'state'),servers=join(state,'servers'),leaf=join(servers,'endpoint');
+ await security.privateDir(leaf);
+ for(const directory of [state,servers,leaf])security.assertWindowsAcl(await security.readWindowsAcl(directory),{strict:true});
+ assert.deepEqual(await security.readWindowsAcl(root),before);
+});
+
 test('Windows ACL parser validates SID fields, arrays and null-DACL status rather than extracting a SID from arbitrary text',()=>{
  assert.equal(typeof api.parseWindowsAcl,'function');
  assert.deepEqual(api.parseWindowsAcl('\ufeff'+JSON.stringify(snapshot())),snapshot());

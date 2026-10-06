@@ -61,7 +61,11 @@ export class StateStore {
             const info = await lstat(filename);
             if (!info.isFile() || info.isSymbolicLink() || info.size > 4096)
                 throw new Error('Unsafe collector lease');
-            const old = JSON.parse(await readFile(filename, 'utf8'));
+            const text=await readFile(filename,'utf8');
+            // Exclusive creation precedes the owner-record write. An empty file
+            // is uncertain ownership, never permission to reclaim a lease.
+            if(text.length===0)throw new Error('Collector lease initialization in progress; owner is uncertain');
+            const old = JSON.parse(text);
             if (typeof old.token !== 'string' || old.token.length > 128 || !processIsAbsent(old.pid))
                 throw new Error('Collector owner is live or uncertain; open its existing panel or use doctor');
             // Serialize recovery for this exact lease generation. A reused live PID is

@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { parseArguments } from "../runtime/actions.js";
+import { parseArguments, windowsPaneEnvironment } from "../runtime/actions.js";
 import { serviceContext } from "../runtime/service.js";
 import { acquireAdmission } from "../runtime/admission.js";
 import { FollowSelection, inspectorVisible } from "../runtime/follow.js";
@@ -311,7 +311,7 @@ export async function main(argv = process.argv.slice(2)) {
                         const text = message ? `${message.role}\n${message.text}\n${(message.tools ?? []).map(t => `${t.status} ${t.name}: ${t.summary ?? ''}`).join('\n')}` : action.text ?? 'No detail';
                         if (message && action.sessionKey) {
                             try {
-                                await rpc.call('plugin.pane.open', { plugin_id: 'iob.herdr-prism', entrypoint: 'detail', placement: 'popup', env: { HAT_DETAIL_SESSION: action.sessionKey, HAT_DETAIL_MESSAGE: action.id }, focus: true });
+                                await rpc.call('plugin.pane.open', { plugin_id: 'iob.herdr-prism', entrypoint: 'detail', placement: 'popup', env: { ...(process.platform === 'win32' ? windowsPaneEnvironment() : {}), HAT_DETAIL_SESSION: action.sessionKey, HAT_DETAIL_MESSAGE: action.id }, focus: true });
                                 return;
                             }
                             catch { /* ui_busy or unsupported popup uses the in-panel detail. */ }

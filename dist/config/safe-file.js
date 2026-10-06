@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { windowsInspector } from "./windows-inspection.js";
 const exec = promisify(execFile);
 // Fixed readonly script: paths only enter LiteralPath through the environment.
 // Return typed data so command, parsing and policy failures remain distinguishable.
@@ -51,7 +52,8 @@ export function windowsAclCommands(path, sid, directory, allowSids = []) {
         commands.push([path, '/remove:g', ...foreign.map(value => '*' + value)]);
     return commands;
 }
-export async function readWindowsAcl(path) { const result = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(aclInspection, 'utf16le').toString('base64')], { windowsHide: true, timeout: 15000, maxBuffer: 65536, encoding: 'utf8', env: { ...process.env, HAT_PRIVATE_PATH: path } }); return parseWindowsAcl(result.stdout); }
+const inspectWindows = windowsInspector(aclInspection);
+export async function readWindowsAcl(path) { return parseWindowsAcl(await inspectWindows(path)); }
 async function ownedPath(path, allowTokenOwner = false) { const info = await lstat(path); if (info.isSymbolicLink())
     throw new Error('Refusing symlink state path'); if (process.platform === 'win32')
     assertWindowsAcl(await readWindowsAcl(path), { allowTokenOwner });
@@ -75,8 +77,18 @@ export async function restrict(path, created = true) {
         const acl = await readWindowsAcl(path);
         assertWindowsAcl(acl, { allowTokenOwner: created });
         if (created) {
-            for (const args of windowsAclCommands(path, acl.userSid, info.isDirectory(), acl.allowSids)) {
-                stage = args[1] === '/setowner' ? 'owner normalization' : args[1] === '/remove:g' ? 'foreign grant removal' : 'DACL restriction';
+            for (const args of windowsAclCommands(path, acl.userSid, info.isDirectory())) {
+                stage = args[1] === '/setowner' ? 'owner normalization' : 'DACL restriction';
+                await exec('icacls.exe', args, { windowsHide: true, timeout: 5000, maxBuffer: 65536 });
+            }
+            // Inherited grants are gone now. An unmapped SID in the original inherited
+            // ACL cannot be resolved by icacls even though it no longer needs removal.
+            // Inspect again and remove only grants that actually survived protection.
+            stage = 'residual grant inspection';
+            const residual = await readWindowsAcl(path);
+            assertWindowsAcl(residual);
+            for (const args of windowsAclCommands(path, acl.userSid, info.isDirectory(), residual.allowSids).slice(2)) {
+                stage = 'foreign grant removal';
                 await exec('icacls.exe', args, { windowsHide: true, timeout: 5000, maxBuffer: 65536 });
             }
         }
@@ -89,7 +101,34 @@ export async function restrict(path, created = true) {
         throw new Error(`Cannot ensure current-user-only Windows ACL (${stage}: ${detail}); use a new plugin-owned state directory or secure its ACL explicitly`, { cause: error });
     }
 }
-export async function privateDir(path) { const created = await mkdir(path, { recursive: true, mode: 0o700 }); await restrict(path, created !== undefined); }
+export async function privateDir(path) {
+    if (process.platform !== 'win32') {
+        const created = await mkdir(path, { recursive: true, mode: 0o700 });
+        await restrict(path, created !== undefined);
+        return;
+    }
+    // Nonrecursive mkdir proves which exact directory this invocation created.
+    // Protect each missing parent before creating children, without adopting any
+    // existing ancestor or treating a concurrent creator's path as our artifact.
+    let created = false;
+    try {
+        await mkdir(path, { mode: 0o700 });
+        created = true;
+    }
+    catch (error) {
+        const code = error.code;
+        if (code === 'ENOENT') {
+            const parent = dirname(path);
+            if (parent === path)
+                throw error;
+            await privateDir(parent);
+            return privateDir(path);
+        }
+        if (code !== 'EEXIST')
+            throw error;
+    }
+    await restrict(path, created);
+}
 export const ensurePrivateDir = privateDir;
 /** Herdr activation authorizes only this plugin's exact environment namespaces,
  * for both ordinary GitHub installs and managed installs. A managed receipt is

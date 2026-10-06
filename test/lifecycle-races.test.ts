@@ -1,12 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, unlink, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { StateStore, identityName } from '../src/state/store.ts';
 import { RpcError } from '../src/herdr/client.ts';
 import { activate, deactivate } from '../src/runtime/lifecycle.ts';
 import { MailboxServer } from '../src/state/mailbox.ts';
+import {freshPrivateDirectory} from './helpers/private-dir.ts';
+import {acquireAdmission} from '../src/runtime/admission.ts';
+
+test('admission waits for an exclusively created lease to finish rather than parsing or reclaiming its empty owner record',async t=>{
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'prism-lease-initializing-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const lock=path.join(dir,'admission.lock');await writeFile(lock,'');
+ let settled=false;const pending=acquireAdmission(dir,{timeoutMs:1000}).then(value=>{settled=true;return value;});
+ // Observe the rejection immediately too, so the red regression has no unhandled promise.
+ const observed=pending.catch(error=>error);
+ await new Promise(resolve=>setTimeout(resolve,100));assert.equal(await readFile(lock,'utf8'),'','An uncertain initializer must remain untouched');
+ await unlink(lock);const lease=await observed;if(lease instanceof Error)throw lease;
+ assert.equal(settled,true);await lease.release();
+});
 
 test('activation replaces an owned inspector that exits between snapshot and close', async t => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'prism-pane-race-'));

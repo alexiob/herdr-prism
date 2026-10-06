@@ -12,7 +12,7 @@ export async function acquireAdmission(stateDir: string, options: {
             lease = await store.acquire({ name: 'admission', create: false });
         }
         catch (error) {
-            if (/owner is live|recovery in progress|now owns/.test((error as Error).message)) {
+            if (/owner is live|recovery in progress|lease initialization in progress|now owns/.test((error as Error).message)) {
                 await sleep(25);
                 continue;
             }

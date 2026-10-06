@@ -61,6 +61,10 @@ export async function liveHerdrTest({release,herdr=process.env.HERDR_BIN_PATH??'
   const version=(await exec(herdr,['--version'],{env,encoding:'utf8'})).stdout.trim();
   const evidence={kind:'actual-herdr-live-lifecycle',version,protocol:before.protocol,node:process.version,platform:process.platform,arch:process.arch,elapsedMs:Date.now()-startedAt,install:true,rightSplit:true,nativeFocusPreserved:true,restartClosedOldOwnedPane:true,uninstall:true,registryRemoved:true,ownedDirectoriesPurged:true,configExactlyRestored:true,preservedOriginalPane:true,collectorsStopped:true,beforePanes:before.panes.length,afterRestartPanes:after.panes.length,afterUninstallPanes:final.panes.length};
   await writeFile(path.join(proof,'lifecycle.json'),JSON.stringify(evidence,null,2)+'\n',{mode:0o600});success=true;return evidence;
+ }catch(error){
+  const failure={error:String(error),platform:process.platform,node:process.version};
+  try{failure.snapshot=(await rpc.call('session.snapshot')).snapshot;failure.logs=(await cli(['plugin','log','list','--plugin','iob.herdr-prism','--limit','64'])).logs;failure.paneText=[];for(const pane of failure.snapshot.panes){const output=await exec(herdr,['--session',name,'pane','read',pane.pane_id,'--source','visible','--lines','60'],{env:options.env,encoding:'utf8',timeout:30000,windowsHide:true});failure.paneText.push({paneId:pane.pane_id,text:output.stdout});}}catch{}
+  await writeFile(path.join(proof,'failure.json'),JSON.stringify(failure,null,2)+'\n');throw error;
  }finally{
   if(installed){try{await liveUninstall(options);}catch(error){await writeFile(path.join(proof,'cleanup-error.txt'),String(error)+'\n',{mode:0o600});}}
   // A failed activation may be registered without returning installed; attempt its

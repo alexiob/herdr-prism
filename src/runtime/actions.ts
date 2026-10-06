@@ -56,5 +56,8 @@ export async function openPanel(rpc: Rpc, options: {
     }
     if (!target)
         throw new Error('No tiled pane available for the right-side dashboard');
-    return rpc.call('plugin.pane.open', { plugin_id: pluginId, entrypoint: 'inspector', placement: 'split', direction: 'right', target_pane_id: target, focus: false });
+    return rpc.call('plugin.pane.open', { plugin_id: pluginId, entrypoint: 'inspector', placement: 'split', direction: 'right', target_pane_id: target, focus: false, ...(process.platform==='win32'?{env:windowsPaneEnvironment()}: {}) });
 }
+/** Herdr's pane environment may have a different PATH from its finite action.
+ * Carry the already-running Node runtime into ConPTY executable resolution. */
+export function windowsPaneEnvironment():Record<string,string>{return {PATH:path.dirname(process.execPath)+';'+(process.env.PATH??''),PATHEXT:process.env.PATHEXT??'.EXE;.CMD;.BAT'};}
