@@ -31,6 +31,15 @@ execution-policy change is required. Existing plugin state and permissions are
 handled by Herdr's normal installation flow. An existing Prism installation is
 left in place; follow the deactivation/reinstallation commands below for updates.
 
+After installation (including reruns), the Windows installer adds **Ctrl+B, then I**
+(`prefix+i`) to open Prism and reloads Herdr's configuration. With a custom prefix,
+use that prefix followed by I. Press **Q** in the focused Prism panel to close it.
+The installer preserves existing config bytes and ACLs, saves the original as
+`config.toml.prism-shortcut.bak`, and skips the shortcut with a warning if it is
+already assigned. Reruns do not duplicate the binding. `-PrepareOnly` does not
+configure it. The shortcut remains available after Prism deactivation; remove its
+`[[keys.command]]` block if uninstalling Prism permanently.
+
 Use `-Yes` to accept the reviewed plugin manifest without a prompt, `-Ref <commit>`
 to choose a Git revision (default `main`), or `-PrepareOnly` to set up prerequisites
 without installing the plugin. The script does not restart an existing Herdr

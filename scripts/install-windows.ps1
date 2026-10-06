@@ -89,6 +89,87 @@ namespace PrismInstaller {
     catch { Write-Verbose 'PATH was saved; restart the terminal if its launcher retains the old environment.' }
 }
 
+function Set-PrismShortcut {
+    param([string]$ConfigPath, [string]$NodeExe, [string]$PluginRoot)
+    $ConfigPath = [IO.Path]::GetFullPath($ConfigPath)
+    Assert-PrismRegularPath (Split-Path -Parent $ConfigPath) $true
+    $exists = Test-Path -LiteralPath $ConfigPath
+    if ($exists) {
+        Assert-PrismRegularPath $ConfigPath $false
+        $owner = [IO.File]::GetAccessControl($ConfigPath).GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if ($owner -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) { throw 'Refusing to edit a Herdr config owned by another identity.' }
+    }
+    # Hold an exclusive handle through inspection and append; preserve the original
+    # file's bytes, owner and ACL instead of replacing it with an inherited file.
+    $mode = if ($exists) { [IO.FileMode]::Open } else { [IO.FileMode]::CreateNew }
+    $stream = [IO.File]::Open($ConfigPath, $mode, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    try {
+        if ($stream.Length -gt 2097152) { throw 'Herdr configuration exceeds 2 MiB.' }
+        $bytes = New-Object byte[] ([int]$stream.Length)
+        $offset = 0
+        while ($offset -lt $bytes.Length) {
+            $count = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+            if ($count -eq 0) { throw 'Incomplete configuration read.' }
+            $offset += $count
+        }
+        $inspect = @'
+import {pathToFileURL} from 'node:url';
+import {join} from 'node:path';
+import {readFileSync} from 'node:fs';
+const {scanToml}=await import(pathToFileURL(join(process.argv[1],'dist/config/toml.js')));
+const text=new TextDecoder('utf-8',{fatal:true}).decode(Buffer.from(readFileSync(0,'utf8').trim(),'base64'));
+const doc=scanToml(text);
+const string=value=>{if(value.startsWith("'".repeat(3)))return undefined;if(value.startsWith('"')){try{return JSON.parse(value)}catch{return undefined}}if(value.startsWith("'")&&value.endsWith("'"))return value.slice(1,-1)};
+const bindings=doc.entries.filter(e=>e.path.startsWith('keys.')&&string(e.value)?.toLowerCase()==='prefix+i');
+let result='add';
+if(bindings.length){result=bindings.length===1&&doc.entries.some(e=>e.tablePath===bindings[0].tablePath&&e.path.endsWith('.command')&&string(e.value)==='iob.herdr-prism.open')&&doc.entries.some(e=>e.tablePath===bindings[0].tablePath&&e.path.endsWith('.type')&&string(e.value)==='plugin_action')?'existing':'conflict'}
+if(doc.entries.some(e=>e.path==='keys'||e.path==='keys.command')||doc.tables.some(t=>t.path==='keys.command'))result='conflict';
+// TOML allows string forms beyond JSON. Preserve config rather than guess at
+// an opaque binding containing multiline strings or TOML-only escapes.
+if(doc.entries.some(e=>e.path.startsWith('keys.')&&/^["']/.test(e.value)&&string(e.value)===undefined))result='conflict';
+console.log(result);
+'@
+        # Encode the fixed module to avoid legacy PowerShell native quote loss.
+        # Only the small module enters the environment; config bytes use stdin.
+        $env:PRISM_SHORTCUT_CODE = 'data:text/javascript;base64,' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($inspect))
+        $decision = ([Convert]::ToBase64String($bytes) | & $NodeExe --input-type=module --eval 'await import(process.env.PRISM_SHORTCUT_CODE)' $PluginRoot | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot safely inspect Herdr shortcut configuration; file unchanged.' }
+        if ($decision -eq 'conflict') { Write-Warning 'prefix+i is already assigned or keys.command uses unsupported syntax; existing configuration preserved.'; return $false }
+        if ($decision -eq 'existing') { Write-Host 'Prism shortcut already configured: prefix+i (default Ctrl+B, then I).'; return $false }
+        if ($decision -ne 'add') { throw 'Unexpected shortcut inspection result.' }
+        $backupPath = $ConfigPath + '.prism-shortcut.bak'
+        if ($exists -and -not (Test-Path -LiteralPath $backupPath)) {
+            $backup = [IO.File]::Open($backupPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try {
+                [IO.File]::SetAccessControl($backupPath, [IO.File]::GetAccessControl($ConfigPath))
+                $backup.Write($bytes, 0, $bytes.Length); $backup.Flush($true)
+            } finally { $backup.Dispose() }
+        }
+        $newline = if ([Text.Encoding]::UTF8.GetString($bytes).Contains("`r`n")) { "`r`n" } else { "`n" }
+        $block = $newline + '# Prism Windows installer shortcut' + $newline + '[[keys.command]]' + $newline + 'key = "prefix+i"' + $newline + 'type = "plugin_action"' + $newline + 'command = "iob.herdr-prism.open"' + $newline + 'description = "Open Prism"' + $newline
+        $addition = [Text.Encoding]::UTF8.GetBytes($block)
+        try { $stream.Position = $stream.Length; $stream.Write($addition, 0, $addition.Length); $stream.Flush($true) }
+        catch { $stream.SetLength($bytes.Length); $stream.Flush($true); throw }
+        Write-Host 'Configured Prism: prefix+i (default Ctrl+B, then I). Close the focused Prism panel with Q.'
+        return $true
+    } finally {
+        $stream.Dispose()
+        Remove-Item Env:PRISM_SHORTCUT_CODE -ErrorAction SilentlyContinue
+    }
+}
+
+function Enable-PrismShortcut([string]$HerdrExe, [string]$NodeExe, [string]$PluginRoot) {
+    $configPath = $env:HERDR_CONFIG_PATH
+    if (-not $configPath) {
+        $base = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { $env:APPDATA }
+        $configPath = Join-Path $base 'herdr/config.toml'
+    }
+    if (Set-PrismShortcut -ConfigPath $configPath -NodeExe $NodeExe -PluginRoot $PluginRoot) {
+        & $HerdrExe server reload-config
+        if ($LASTEXITCODE -ne 0) { Write-Warning 'Shortcut saved. Start or reload Herdr to use it.' }
+    }
+}
+
 function Invoke-PrismWindowsInstall {
     param([string]$InstallRef = 'main', [switch]$AssumeYes, [switch]$OnlyPrepare)
     $architecture = $env:PROCESSOR_ARCHITEW6432
@@ -114,7 +195,7 @@ function Invoke-PrismWindowsInstall {
         Set-PrismNodePath $directory
         $version = (& $nodeExe --version | Out-String).Trim()
         if ($LASTEXITCODE -ne 0 -or -not (Test-PrismNodeVersion $version)) { throw 'Installed Node runtime failed verification.' }
-    }
+    } else { $nodeExe = $node.Source }
     Write-Host "Ready: $herdrVersion; Node $version"
     if ($OnlyPrepare) { return }
     Write-Host 'If Herdr was running before Node setup, restart it when convenient before invoking plugin actions.'
@@ -123,12 +204,17 @@ function Invoke-PrismWindowsInstall {
     $plugins = ($listing | Out-String | ConvertFrom-Json).result.plugins
     if (@($plugins).Count -gt 0) {
         Write-Host 'Prism is already installed. For updates, deactivate it before reinstalling; see docs/install.md.'
+        Enable-PrismShortcut $herdr.Source $nodeExe $plugins[0].plugin_root
         return
     }
     $arguments = @('plugin', 'install', 'alexiob/herdr-prism', '--ref', $InstallRef)
     if ($AssumeYes) { $arguments += '--yes' }
     & $herdr.Source @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Herdr plugin installation failed.' }
+    $listing = & $herdr.Source plugin list --plugin iob.herdr-prism --json
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect installed Prism registration.' }
+    $installed = ($listing | Out-String | ConvertFrom-Json).result.plugins
+    Enable-PrismShortcut $herdr.Source $nodeExe $installed[0].plugin_root
     Write-Host 'Install complete. Activate in your chosen Herdr session:'
     Write-Host '  herdr plugin action invoke activate-overview --plugin iob.herdr-prism'
 }

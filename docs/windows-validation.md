@@ -1,5 +1,23 @@
 # Windows x64 validation, 2026-10-06
 
+## Windows installer shortcut
+
+The standalone installer now configures `prefix+i` (default Ctrl+B, then I)
+for `iob.herdr-prism.open`, including when Prism is already installed. Herdr
+0.9.3's default `prefix+p` and `prefix+shift+p` remain untouched. Existing config
+bytes, ownership and ACLs are preserved through exclusive in-place append with
+an original-file backup. Conflicting bindings and unsupported TOML string forms
+are skipped; reruns are idempotent.
+
+Six focused installer tests passed on both Node 22.23.3 and 24.21.0, including
+custom/built-in conflicts, escaped and multiline strings, BOM/CRLF/ACL preservation,
+idempotence, and a 40 KiB configuration. TypeScript checking passed. A disposable
+Herdr 0.9.3 server starting without Node completed fresh pinned Node setup,
+standard GitHub installation at `2e68d55`, shortcut creation, and configuration
+reload with zero diagnostics. The actual existing installation likewise accepted
+the shortcut and a second run added nothing. A server launched before Node setup
+still needs a user-initiated restart for normal plugin actions to inherit PATH.
+
 Windows work resumed locally on Windows 11 x64 (NT build 26200), using
 checksum-verified portable Node 22.23.3 and 24.21.0, Rust MSVC 1.90.0 and
 the checksum-pinned official Herdr 0.9.3 binary (protocol 22).

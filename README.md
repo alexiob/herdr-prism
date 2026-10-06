@@ -20,6 +20,9 @@ Windows x64, in PowerShell:
 irm https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/install-windows.ps1 | iex
 ```
 
+The Windows installer configures **Ctrl+B, then I** to open Prism when the
+shortcut is free. Press **Q** in the focused Prism panel to close it.
+
 Install from GitHub with Herdr's standard command:
 
 ```sh
