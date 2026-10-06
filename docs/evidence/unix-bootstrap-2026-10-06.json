@@ -100,8 +100,8 @@
     }
   ],
   "targetedTests": {
-    "total": 49,
-    "passed": 49,
+    "total": 51,
+    "passed": 51,
     "failed": 0
   },
   "macosStrictSuite": {
@@ -118,18 +118,120 @@
     "immutable GitHub revision/archive offline fixtures",
     "corrupt Node and Herdr rejection",
     "array/whitespace shortcut conflict regression",
-    "delayed RPC open/focus regression"
+    "delayed RPC open/focus regression",
+    "physical macOS source path regression",
+    "committed helper staging and tamper rejection regression"
   ],
   "limits": [
     "Actual live runs on macOS arm64 and Linux arm64 in Podman; x64 dependency archives and binary digests verified without claiming a new x64 live run.",
-    "Full public-source bootstrap smoke is run after the installer is available on GitHub.",
     "Windows bootstrap is independently owned/tested on the other machine; this record does not certify its latest revision.",
-    "Native sidebar pixels and host visibility API boundaries remain outside this installer proof."
+    "Native sidebar pixels and host visibility API boundaries remain outside this installer proof.",
+    "Public-source macOS pipeline passed at 56f2ee9; Linux passed at e617f0c. The later committed-helper source selection is macOS-only; no later Linux live run is claimed."
   ],
   "linuxStrictSuite": {
     "total": 299,
     "passed": 281,
     "failed": 0,
     "skipped": 18
-  }
+  },
+  "publicSource": [
+    {
+      "platform": "darwin",
+      "arch": "arm64",
+      "source": {
+        "kind": "actual-GitHub-download",
+        "commit": "56f2ee993214adef9874669bc8262c84b7977e7e"
+      },
+      "checks": {
+        "liveInstall": {
+          "pipeline": true,
+          "pinnedNode": "24.21.0",
+          "nodeAbsentFromServerPath": true,
+          "allManifestCommandsAbsolute": true,
+          "authenticatedActive": true,
+          "existingServerPreserved": true,
+          "shortcutConfigured": true
+        },
+        "shortcutPTY": {
+          "ok": true,
+          "actualControllingPTY": true,
+          "rawInput": true,
+          "ownForegroundGroup": true,
+          "prefix": "ctrl+b",
+          "key": "i",
+          "prismOpened": true,
+          "capturedBytes": 26738
+        },
+        "completeRemoval": {
+          "registryRemoved": true,
+          "managedFilesRemoved": true,
+          "stateAndConfigRemoved": true,
+          "shortcutAndLayoutRestored": true,
+          "sharedNodeRetained": true,
+          "existingServerPreserved": true
+        },
+        "repeatDependencySetup": {
+          "verifiedPrivateNodeReused": true
+        },
+        "freshSetup": {
+          "officialHerdrDownloadVerified": true,
+          "pinnedHerdr": "0.9.3",
+          "headlessServerStarted": true,
+          "initialWorkspaceCreated": true,
+          "inspectorOnlyShortcutConfigured": true,
+          "completeRemoval": true,
+          "sharedDependenciesRetained": true
+        }
+      }
+    },
+    {
+      "platform": "linux",
+      "arch": "arm64",
+      "source": {
+        "kind": "actual-GitHub-download",
+        "commit": "e617f0c71d7ae95479beb20688698f5e35829792"
+      },
+      "checks": {
+        "liveInstall": {
+          "pipeline": true,
+          "pinnedNode": "24.21.0",
+          "nodeAbsentFromServerPath": true,
+          "allManifestCommandsAbsolute": true,
+          "authenticatedActive": true,
+          "existingServerPreserved": true,
+          "shortcutConfigured": true
+        },
+        "shortcutPTY": {
+          "ok": true,
+          "actualControllingPTY": true,
+          "rawInput": true,
+          "ownForegroundGroup": true,
+          "prefix": "ctrl+b",
+          "key": "i",
+          "prismOpened": true,
+          "capturedBytes": 24335
+        },
+        "completeRemoval": {
+          "registryRemoved": true,
+          "managedFilesRemoved": true,
+          "stateAndConfigRemoved": true,
+          "shortcutAndLayoutRestored": true,
+          "sharedNodeRetained": true,
+          "existingServerPreserved": true
+        },
+        "repeatDependencySetup": {
+          "verifiedPrivateNodeReused": true
+        },
+        "freshSetup": {
+          "officialHerdrDownloadVerified": true,
+          "pinnedHerdr": "0.9.3",
+          "headlessServerStarted": true,
+          "initialWorkspaceCreated": true,
+          "inspectorOnlyShortcutConfigured": true,
+          "completeRemoval": true,
+          "sharedDependenciesRetained": true
+        }
+      }
+    }
+  ]
 }
