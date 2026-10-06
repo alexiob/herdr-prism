@@ -23,6 +23,12 @@ irm https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/install-w
 The Windows installer configures **Ctrl+B, then I** to open Prism when the
 shortcut is free. Press **Q** in the focused Prism panel to close it.
 
+To uninstall on Windows and remove the installer-owned shortcut:
+
+```powershell
+irm https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/uninstall-windows.ps1 | iex
+```
+
 Install from GitHub with Herdr's standard command:
 
 ```sh

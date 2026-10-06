@@ -47,6 +47,26 @@ test('Windows shortcut supports config larger than the Windows environment varia
  assert.ok((await readFile(config,'utf8')).startsWith(original));assert.match(await readFile(config,'utf8'),/key = "prefix\+i"/);
 });
 
+test('Windows uninstall removes only its exact shortcut and preserves unrelated edits and ACL',windows,async t=>{
+ const root=await mkdtemp(join(tmpdir(),'prism-shortcut-remove-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const config=join(root,'config.toml'),original='\ufeff# original\r\n[keys]\r\nprevious_tab = "prefix+p"\r\n';await writeFile(config,original);
+ await run('Set-PrismShortcut -ConfigPath '+literal(config)+' -NodeExe '+literal(process.execPath)+' -PluginRoot '+literal(resolve('.')));
+ const extra='\r\n[[keys.command]]\r\nkey = "prefix+u"\r\ntype = "shell"\r\ncommand = "echo keep"\r\n';await writeFile(config,(await readFile(config,'utf8'))+extra);
+ const call='Remove-PrismShortcut -ConfigPath '+literal(config);
+ await run('$before=(Get-Acl -LiteralPath '+literal(config)+').Sddl; '+call+'; '+call+'; if ((Get-Acl -LiteralPath '+literal(config)+').Sddl -ne $before) { throw "ACL changed" }');
+ assert.equal(await readFile(config,'utf8'),original+extra);
+});
+
+test('Windows uninstall refuses an edited owned shortcut and preserves a user-owned Prism shortcut',windows,async t=>{
+ const root=await mkdtemp(join(tmpdir(),'prism-shortcut-edited-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const config=join(root,'config.toml');await writeFile(config,'');await run('Set-PrismShortcut -ConfigPath '+literal(config)+' -NodeExe '+literal(process.execPath)+' -PluginRoot '+literal(resolve('.')));
+ const installed=await readFile(config,'utf8');
+ for(const edited of [installed.replace('prefix+i','prefix+d'),installed+'extra = true\n',installed+installed.replace('prefix+i','prefix+d')]){
+  await writeFile(config,edited);await assert.rejects(run('Remove-PrismShortcut -ConfigPath '+literal(config)));assert.equal(await readFile(config,'utf8'),edited);
+ }
+ const userOwned=installed.replace('# Prism Windows installer shortcut\n','');await writeFile(config,userOwned);await run('Remove-PrismShortcut -ConfigPath '+literal(config));assert.equal(await readFile(config,'utf8'),userOwned);
+});
+
 test('Windows bootstrap enforces Node minimum and rejects malformed versions',windows,async()=>{
  const result=await run("@('v22.12.9','v22.13.0','v24.21.0','garbage','v24.0.0-beta') | ForEach-Object { Test-PrismNodeVersion $_ }");
  assert.deepEqual(result.stdout.trim().split(/\r?\n/),['False','True','True','False','False']);

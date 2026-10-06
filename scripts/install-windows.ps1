@@ -3,7 +3,8 @@
 param(
     [string]$Ref = 'main',
     [switch]$Yes,
-    [switch]$PrepareOnly
+    [switch]$PrepareOnly,
+    [switch]$Uninstall
 )
 
 $ErrorActionPreference = 'Stop'
@@ -219,18 +220,83 @@ function Set-PrismInstalledRuntime([string]$PluginRoot, [string]$NodeExe) {
     return ($manifestChanged -or $actionChanged)
 }
 
-function Enable-PrismShortcut([string]$HerdrExe, [string]$NodeExe, [string]$PluginRoot) {
-    $runtimeChanged = Set-PrismInstalledRuntime $PluginRoot $NodeExe
+function Get-PrismHerdrConfigPath {
     $configPath = $env:HERDR_CONFIG_PATH
     if (-not $configPath) {
         $base = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { $env:APPDATA }
         $configPath = Join-Path $base 'herdr/config.toml'
     }
+    return $configPath
+}
+
+function Remove-PrismShortcut {
+    param([string]$ConfigPath, [switch]$CheckOnly)
+    if (-not (Test-Path -LiteralPath $ConfigPath)) { return $false }
+    return (Update-PrismInstalledFile $ConfigPath {
+        param($text)
+        if (-not $text.Contains('# Prism Windows installer shortcut')) { return $text }
+        if ([regex]::Matches($text, [regex]::Escape('# Prism Windows installer shortcut')).Count -ne 1) { throw 'Installer-owned Prism shortcut marker was duplicated; configuration and registration preserved.' }
+        $pattern = '\r?\n# Prism Windows installer shortcut\r?\n\[\[keys\.command\]\]\r?\nkey = "prefix\+i"\r?\ntype = "plugin_action"\r?\ncommand = "iob\.herdr-prism\.open"\r?\ndescription = "Open Prism"\r?\n'
+        $matches = [regex]::Matches($text, $pattern)
+        if ($matches.Count -ne 1) { throw 'Installer-owned Prism shortcut was edited or duplicated; configuration and registration preserved.' }
+        $match = $matches[0]
+        $tail = $text.Substring($match.Index + $match.Length)
+        $next = [regex]::Match($tail, '\A(?:[ \t]*(?:#[^\r\n]*)?\r?\n)*[ \t]*(?<line>[^\r\n]*)').Groups['line'].Value
+        if ($next -and -not $next.StartsWith('[')) { throw 'Installer-owned Prism shortcut has additional fields; configuration and registration preserved.' }
+        if ($CheckOnly) { return $text }
+        return $text.Remove($match.Index, $match.Length)
+    })
+}
+
+function Enable-PrismShortcut([string]$HerdrExe, [string]$NodeExe, [string]$PluginRoot) {
+    $runtimeChanged = Set-PrismInstalledRuntime $PluginRoot $NodeExe
+    $configPath = Get-PrismHerdrConfigPath
     $shortcutChanged = Set-PrismShortcut -ConfigPath $configPath -NodeExe $NodeExe -PluginRoot $PluginRoot
     if ($runtimeChanged -or $shortcutChanged) {
         & $HerdrExe server reload-config
         if ($LASTEXITCODE -ne 0) { Write-Warning 'Shortcut saved. Start or reload Herdr to use it.' }
     }
+}
+
+function Invoke-PrismWindowsUninstall {
+    if ($env:OS -ne 'Windows_NT') { throw 'This uninstaller supports Windows only.' }
+    $env:PATH += ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $herdr = Get-Command herdr.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
+    $configPath = Get-PrismHerdrConfigPath
+    [void](Remove-PrismShortcut -ConfigPath $configPath -CheckOnly)
+    $listing = & $herdr.Source plugin list --plugin iob.herdr-prism --json
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect Prism registration; nothing removed.' }
+    $plugins = ($listing | Out-String | ConvertFrom-Json).result.plugins
+    if (@($plugins).Count -gt 0) {
+        # Deactivation proves collector/pane cleanup before removing registration.
+        $invoked = & $herdr.Source plugin action invoke deactivate --plugin iob.herdr-prism
+        if ($LASTEXITCODE -ne 0) { throw 'Prism deactivation could not start; registration retained.' }
+        $logId = ($invoked | Out-String | ConvertFrom-Json).result.log.log_id
+        if (-not $logId) { throw 'Missing deactivation completion log; registration retained.' }
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        $completed = $false
+        while ([DateTime]::UtcNow -lt $deadline) {
+            $logs = & $herdr.Source plugin log list --plugin iob.herdr-prism --limit 256
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot verify deactivation; registration retained.' }
+            $entry = @(($logs | Out-String | ConvertFrom-Json).result.logs | Where-Object { $_.log_id -eq $logId -and $_.plugin_id -eq 'iob.herdr-prism' })
+            if ($entry.Count -eq 1 -and $entry[0].status -eq 'failed') { throw 'Prism deactivation failed; registration retained. Inspect herdr plugin log list --plugin iob.herdr-prism.' }
+            if ($entry.Count -eq 1 -and $entry[0].status -eq 'succeeded' -and $entry[0].exit_code -eq 0) { $completed = $true; break }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $completed) { throw 'Prism deactivation timed out; registration retained.' }
+    }
+    $changed = Remove-PrismShortcut -ConfigPath $configPath
+    if ($changed) {
+        & $herdr.Source server reload-config
+        if ($LASTEXITCODE -ne 0) { throw 'Shortcut removed from disk; reload failed. Registration retained.' }
+    }
+    if (@($plugins).Count -gt 0) {
+        & $herdr.Source plugin uninstall iob.herdr-prism
+        if ($LASTEXITCODE -ne 0) { throw 'Herdr plugin uninstall failed.' }
+        $listing = & $herdr.Source plugin list --plugin iob.herdr-prism --json
+        if ($LASTEXITCODE -ne 0 -or @(($listing | Out-String | ConvertFrom-Json).result.plugins).Count -ne 0) { throw 'Cannot verify Prism registration removal.' }
+    }
+    Write-Host 'Prism uninstalled; installer-owned shortcut removed. User bindings, Node and retained plugin preferences are preserved.'
 }
 
 function Invoke-PrismWindowsInstall {
@@ -240,17 +306,17 @@ function Invoke-PrismWindowsInstall {
     if ($env:OS -ne 'Windows_NT' -or $architecture -ne 'AMD64') { throw 'This installer supports Windows x64 only.' }
     if ($InstallRef -notmatch '^[A-Za-z0-9_./-]{1,128}$' -or $InstallRef.StartsWith('-')) { throw 'Invalid Git ref.' }
     # Check Herdr before downloading Node. Do not replace or restart a live server.
-    $herdr = Get-Command herdr.exe -CommandType Application -ErrorAction SilentlyContinue
+    $herdr = Get-Command herdr.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $herdr) {
         $savedPath = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine')
         $env:PATH = $env:PATH + ';' + $savedPath
-        $herdr = Get-Command herdr.exe -CommandType Application -ErrorAction SilentlyContinue
+        $herdr = Get-Command herdr.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     }
     if (-not $herdr) { throw 'Install Herdr 0.9.3 or newer first: https://github.com/herdrdev/herdr/releases' }
     $herdrVersion = (& $herdr.Source --version | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $herdrVersion -notmatch '^herdr (\d+)\.(\d+)\.(\d+)\b') { throw 'Cannot determine the installed Herdr version.' }
     if ([version]"$($Matches[1]).$($Matches[2]).$($Matches[3])" -lt [version]'0.9.3') { throw 'Herdr 0.9.3 or newer is required. Upgrade Herdr before running this installer.' }
-    $node = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue
+    $node = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     $version = if ($node) { $output = (& $node.Source --version | Out-String).Trim(); if ($LASTEXITCODE -eq 0) { $output } else { '' } } else { '' }
     if (-not (Test-PrismNodeVersion $version)) {
         $directory = Join-Path $env:LOCALAPPDATA "Programs/node-v$script:PrismNodeVersion-win-x64"
@@ -282,6 +348,9 @@ function Invoke-PrismWindowsInstall {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    try { Invoke-PrismWindowsInstall -InstallRef $Ref -AssumeYes:$Yes -OnlyPrepare:$PrepareOnly }
+    try {
+        if ($Uninstall) { Invoke-PrismWindowsUninstall }
+        else { Invoke-PrismWindowsInstall -InstallRef $Ref -AssumeYes:$Yes -OnlyPrepare:$PrepareOnly }
+    }
     catch { Write-Error $_ -ErrorAction Continue; exit 1 }
 }

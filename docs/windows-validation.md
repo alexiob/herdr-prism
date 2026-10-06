@@ -30,6 +30,15 @@ without restarting the server. The actual installation's `open` action succeeded
 and displayed Prism; repeated opening also succeeded. The older restart advice
 is superseded by these Windows installed-copy repairs.
 
+The Windows PowerShell uninstaller now removes the exact installer-owned shortcut
+after successful deactivation and before native unregister. It preserves unrelated
+config changes and unmarked user bindings, and rejects edited/duplicated owned
+blocks before deactivation or unregister. Nine focused tests passed on Node 22/24,
+covering removal idempotence, BOM/CRLF/ACL preservation, unrelated bindings and
+edited/duplicated block refusal. A disposable live Herdr 0.9.3 installation
+completed verified deactivation, shortcut removal, reload and unregister while
+retaining a subsequent unrelated config edit. Actual user Prism remains installed.
+
 Windows work resumed locally on Windows 11 x64 (NT build 26200), using
 checksum-verified portable Node 22.23.3 and 24.21.0, Rust MSVC 1.90.0 and
 the checksum-pinned official Herdr 0.9.3 binary (protocol 22).

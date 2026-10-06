@@ -3,6 +3,19 @@
   "date": "2026-10-06",
   "platform": "win32-x64",
   "os": "Windows 11, NT 10.0.26200",
+  "windowsBootstrapLifecycle": {
+    "node22InstallerTests": {"passed": 9, "failed": 0},
+    "node24InstallerTests": {"passed": 9, "failed": 0},
+    "freshNodeSetupAndStandardGitHubInstall": true,
+    "runningServerWithoutNodePathActionSucceeded": true,
+    "shortcut": "prefix+i",
+    "shortcutRemovalAfterVerifiedDeactivation": true,
+    "unregisterVerified": true,
+    "unrelatedConfigEditPreserved": true,
+    "editedAndDuplicatedOwnedBindingsRefused": true,
+    "configBytesAndAclPreserved": true,
+    "actualUserInstallationRemoved": false
+  },
   "implementationCommit": "5e9f4b1a568b444f1b99654aa26b8540103665f1",
   "mergedRemoteCommit": "7fc637e",
   "herdr": {

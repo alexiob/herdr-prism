@@ -37,8 +37,9 @@ use that prefix followed by I. Press **Q** in the focused Prism panel to close i
 The installer preserves existing config bytes and ACLs, saves the original as
 `config.toml.prism-shortcut.bak`, and skips the shortcut with a warning if it is
 already assigned. Reruns do not duplicate the binding. `-PrepareOnly` does not
-configure it. The shortcut remains available after Prism deactivation; remove its
-`[[keys.command]]` block if uninstalling Prism permanently.
+configure it. The shortcut remains available after Prism deactivation and is
+removed by the Windows uninstaller below. User-created bindings are preserved;
+if the installer-owned block was edited, removal stops rather than guessing.
 
 Use `-Yes` to accept the reviewed plugin manifest without a prompt, `-Ref <commit>`
 to choose a Git revision (default `main`), or `-PrepareOnly` to set up prerequisites
@@ -112,6 +113,20 @@ herdr plugin action invoke activate-overview --plugin iob.herdr-prism
 ```
 
 Herdr's standard unregister command accepts either the plugin ID or repository:
+
+On Windows, use the PowerShell uninstaller to also remove the installer-owned
+**Ctrl+B, then I** shortcut:
+
+```powershell
+irm https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/uninstall-windows.ps1 | iex
+```
+
+It waits for successful Prism deactivation, removes only the unchanged installer
+binding, reloads Herdr, then unregisters the plugin and verifies removal. It
+preserves other bindings and config edits, Node, backups and retained plugin
+preferences. Reruns are safe. The installer also accepts `-Uninstall` when saved
+locally. The bare Herdr command below has no plugin cleanup hook and leaves an
+installer-added shortcut behind.
 
 ```sh
 herdr plugin uninstall alexiob/herdr-prism
