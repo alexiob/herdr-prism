@@ -32,3 +32,7 @@ test('terminal smoke fails stuck keyboard behavior and terminates its disposable
  if(!pid&&process.env.HAT_PTY_TESTS!=='1'&&/not permitted|permission|entry point|not found|No such file/i.test(failure.stderr)){ctx.skip(`PTY unavailable: ${failure.stderr}`);return;}
  assert.ok(pid,'the failure must identify the disposable child');assert.match(failure.stderr,/Down arrow changing selection/);assert.throws(()=>process.kill(Number(pid),0),'the failing smoke must reap its own child');
 });
+test('real Unix PTY process confirmation cancels initially and demo confirmation never signals',{skip:process.env.HAT_PTY_TESTS!=='1'||process.platform==='win32',timeout:25000},async()=>{
+ const {stdout}=await exec('python3',['-B','scripts/smoke/unix_pty.py',process.execPath,resolve('dist/entrypoints/inspector.js'),'--termination'],{timeout:22000});const result=JSON.parse(stdout.trim().split('\n').at(-1)!);
+ assert.equal(result.ok,true);assert.equal(result.terminationConfirmation,true);assert.equal(result.exitCode,0);assert.equal(result.eof,true);
+});

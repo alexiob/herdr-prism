@@ -194,7 +194,7 @@ export async function main(argv = process.argv.slice(2)) {
                 ui.start();
                 const follow = async () => {
                     const snapshot = cache.snapshot;
-                    if (!snapshot || state.pin || state.notes?.editing || !context.settings.follow)
+                    if (!snapshot || state.pin || state.processConfirmation || state.notes?.editing || !context.settings.follow)
                         return;
                     const focused = snapshot.agents.find(a => a.pane_id === snapshot.focused_pane_id);
                     if (!focused || focused.tab_id !== tabId)
@@ -217,7 +217,7 @@ export async function main(argv = process.argv.slice(2)) {
                 cache.on('stale', () => { collector.setVisibleSession(state.selectedKey, false); data.stale = true; paint(); });
                 collector.on('data', (next) => {
                     data = next;
-                    if (!state.notes?.editing && (!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey)))
+                    if (!state.processConfirmation && !state.notes?.editing && (!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey)))
                         state.selectedKey = localSelection() ?? data.sessions[0]?.key;
                     paint();
                     queueFollow();
@@ -238,6 +238,11 @@ export async function main(argv = process.argv.slice(2)) {
                             followSelection.reset();
                             await follow();
                         }
+                        return;
+                    }
+                    if (action.type === 'terminate-process') {
+                        const result = await collector.terminateProcess(action.sessionKey, action.processTarget);
+                        state.notice = `${result.platform === 'win32' ? 'Termination' : 'SIGTERM'} requested for PID ${result.pid}`;
                         return;
                     }
                     if (action.type === 'scope') {
@@ -443,6 +448,8 @@ export async function main(argv = process.argv.slice(2)) {
                     if (action.type === 'select')
                         state.tab = 'Overview';
                 }
+                else if (action?.type === 'terminate-process')
+                    state.notice = `Demo: simulated termination of PID ${action.processTarget.pid}; no OS signal sent`;
                 else if (action?.type === 'tab')
                     await ensureNotes();
                 else if (action?.type === 'notes-edit') {

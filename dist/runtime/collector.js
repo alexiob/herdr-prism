@@ -4,7 +4,7 @@ import { ProviderIndex } from "../providers/index.js";
 import { TodoList, extractRefs } from "../content/index.js";
 import { createSampler } from "../process/sampler.js";
 import { ProcessTracker } from "../process/ownership.js";
-import { LaunchLedger } from "../process/ledger.js";
+import { LaunchLedger, processKey } from "../process/ledger.js";
 import { reduceUsage, reduceUsageScope } from "../metrics/usage-reducer.js";
 import { SampleHistory } from "../metrics/history.js";
 import { GitCache } from "../git/cache.js";
@@ -43,6 +43,7 @@ export class Collector extends EventEmitter {
     rpc;
     endpoint;
     sampler;
+    signalProcess;
     git;
     publisher;
     snapshot;
@@ -73,7 +74,7 @@ export class Collector extends EventEmitter {
     rootProofs = new Map();
     todoHydrated = new Set();
     derived = new Map();
-    constructor(options) { super(); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
+    constructor(options) { super(); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
     async init() {
         await this.store.init();
         this.data.server = await loadServerIdentity(this.store, { session: serverSession(this.endpoint) });
@@ -536,6 +537,84 @@ export class Collector extends EventEmitter {
             }
         })().finally(() => { this.sampling = undefined; this.scheduleProcessSample(); });
         return this.sampling;
+    }
+    /** A confirmed view request operates on this server, never the viewer's OS. */
+    async terminateProcess(sessionKey, target, assertVisible) {
+        if (!target || typeof target.key !== 'string' || target.key.length > 4096 || typeof target.owner !== 'string')
+            throw new Error('Invalid process target');
+        const generation = this.visibilityGeneration;
+        const current = () => !this.stopped && this.paneOpen && this.visibleSession === sessionKey && generation === this.visibilityGeneration;
+        const inScope = () => target.owner === sessionKey || this.subtree && this.descendants(sessionKey).includes(target.owner);
+        if (!current() || !inScope())
+            throw new Error('Process view is closed or selection changed');
+        const selected = this.data.sessions.find(s => s.key === sessionKey)?.resource?.processes.find(p => p.key === target.key && p.owner === target.owner);
+        if (!selected || selected.availability === 'unavailable')
+            throw new Error('Process is no longer readable or owned in this view');
+        // Wait out any older scan, then obtain fresh ownership/root occupant proofs.
+        await this.sampling;
+        if (!current())
+            throw new Error('Process view changed');
+        await this.sampleProcesses();
+        if (!current() || !inScope() || this.sampleError || this.sampledGeneration !== generation)
+            throw new Error('Fresh process validation unavailable');
+        await assertVisible();
+        if (!current())
+            throw new Error('Process view changed');
+        const scanStarted = Date.now();
+        const batch = await this.sampler.sample();
+        // A slow scan must not let a closed/background panel authorize the signal.
+        await assertVisible();
+        for (const proof of this.rootProofs.values())
+            if (proof.root.sessionKey === target.owner) {
+                const response = await this.rpc.call('agent.get', { target: proof.attachment.pane_id });
+                if (!sameOccupant(proof.attachment, response.agent ?? response))
+                    throw new Error('Agent owner changed or ended');
+            }
+        if (!current() || !inScope())
+            throw new Error('Process view changed');
+        if (Date.now() - scanStarted > 2000 || batch.sampledAt < scanStarted - 1000 || Date.now() - batch.sampledAt > 2000 || batch.sampledAt > Date.now() + 1000)
+            throw new Error('Process validation took too long; retry');
+        // OS birth and Herdr occupant/view proofs cannot be locked together.
+        // Node's portable signal API remains PID based, not an atomic birth lock.
+        const live = batch.processes.find(p => p.pid === selected.pid);
+        if (!live || live.availability === 'unavailable' || processKey(batch.bootId, live.pid, live.startTime) !== target.key)
+            throw new Error('Process ended, became unreadable, or its PID was reused');
+        const root = this.roots.find(r => r.sessionKey === target.owner && batch.processes.some(p => p.pid === r.pid && p.startTime === r.startTime && p.availability !== 'unavailable'));
+        if (!root) {
+            const byPid = new Map(batch.processes.map(p => [p.pid, p])), seen = new Set();
+            let ancestor = live, launchOwner;
+            while (ancestor && !seen.has(ancestor.pid)) {
+                seen.add(ancestor.pid);
+                if (ancestor.availability === 'unavailable')
+                    break;
+                launchOwner = this.ledger.owner(batch, ancestor.pid, ancestor.startTime);
+                if (launchOwner)
+                    break;
+                const parent = byPid.get(ancestor.ppid ?? -1);
+                if (parent && BigInt(parent.startTime) > BigInt(ancestor.startTime))
+                    break;
+                ancestor = parent;
+            }
+            if (launchOwner !== target.owner)
+                throw new Error('Agent owner changed or ended');
+        }
+        this.tracker.update(batch, this.roots);
+        const owned = this.tracker.view(target.owner).processes.find(p => p.key === target.key && p.owner === target.owner);
+        if (!owned || owned.availability === 'unavailable')
+            throw new Error('Process ownership changed');
+        if (live.pid <= 1 || live.pid === process.pid || live.pid === process.ppid)
+            throw new Error('Prism cannot terminate its collector or server process');
+        try {
+            this.signalProcess(live.pid, 'SIGTERM');
+        }
+        catch (error) {
+            const code = error.code;
+            throw new Error(code === 'ESRCH' ? 'Process already ended' : code === 'EPERM' || code === 'EACCES' ? 'Permission denied terminating process' : 'Termination failed: ' + error.message);
+        }
+        this.lastSample = batch;
+        this.updateResources();
+        this.emit('data', this.data);
+        return { requested: true, pid: live.pid, signal: 'SIGTERM', platform: process.platform };
     }
     async focus(key) {
         const session = this.data.sessions.find(s => s.key === key);

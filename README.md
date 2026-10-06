@@ -1,6 +1,6 @@
 # Herdr Prism
 
-A six-view terminal dashboard for Codex, Claude and Pi sessions in Herdr.
+An eight-view terminal dashboard for Codex, Claude and Pi sessions in Herdr.
 It follows agent lineage, process ownership, messages, references, explicit goals,
 local To-do checkboxes, Git checkout state and private Markdown notes. An optional native overview adds
 compact summaries to Herdr's existing Agents panel.
@@ -65,6 +65,36 @@ Use `activate-inspector` instead for inspector-only coexistence. Standard update
 enable/disable and uninstall commands are described in
 [installation](docs/install.md#standard-herdr-commands).
 
+Next, add the shortcut to Herdr's `config.toml`: `~/.config/herdr/config.toml`
+on macOS/Linux, or `%APPDATA%\herdr\config.toml` on Windows. If you set
+`HERDR_CONFIG_PATH`, edit that file instead; `herdr --help` shows the resolved
+path. Plain GitHub installation does not add this binding automatically.
+
+Add this block once, preserving other bindings. If `prefix+i` is already
+assigned, choose another free key instead of adding a duplicate:
+
+```toml
+[[keys.command]]
+key = "prefix+i"
+type = "plugin_action"
+command = "iob.herdr-prism.open"
+description = "Open Prism"
+```
+
+Then apply the configuration in the running session:
+
+```sh
+herdr server reload-config
+```
+
+Press **Ctrl+B, then lowercase `i`** to open Prism's right-side panel (or your
+custom prefix, then `i`). No pane restart is required. You can also open Prism
+directly without the shortcut:
+
+```sh
+herdr plugin action invoke open --plugin iob.herdr-prism
+```
+
 The plugin is listed in the [Herdr marketplace](https://herdr.dev/plugins/).
 The public repository's `herdr-plugin` topic and root manifest provide automatic
 discovery. Listing is separate from installation and platform verification.
@@ -120,6 +150,7 @@ transcripts invalidate page cursors and label retained pages as stale.
 | Arrows or `j` / `k` | Move selection |
 | `Home` / `End`, `PageUp` / `PageDown` | Navigate the current reader |
 | `Enter` | Open the selected detail or corresponding tab; inspect an agent inside Prism |
+| `K` in Processes or process details | Ask to terminate the selected process; Cancel is selected initially |
 | `f` in Agents | Explicitly focus the selected live Herdr pane |
 | `Space` | Fold/expand; open a reference's source history |
 | `Escape` | Return from details or close help/filter |
@@ -151,6 +182,18 @@ shared by its panels and retained across restarts/upgrades. A newer external edi
 is preserved; Prism saves the stale draft separately and reports its recovery
 path through `?` after leaving edit mode. Complete Prism removal deletes notes
 and recovery drafts along with owned state. Demo Notes use disposable files.
+
+`K` opens a confirmation for the captured process name, PID, owner and collecting
+server. Press `Enter` on Cancel or `Escape` to return; select Terminate and press
+`Enter`, or press `y`, to confirm. Follow and tab/scope changes pause while this
+dialog is open. A tiny pane must be enlarged before confirmation. macOS/Linux
+send `SIGTERM`; Windows terminates the process. Only the selected PID is targeted,
+with no child/group termination or automatic escalation. Terminating the harness
+root can end its agent session. Demo mode simulates the action without OS signals.
+The server rechecks visibility, birth/boot identity and ownership, refuses stale
+or inaccessible targets, and reports a request rather than claiming exit. The
+portable OS signal call uses a PID: a simultaneous PID reuse or Herdr occupant
+replacement after validation cannot be eliminated atomically by the current APIs.
 
 An existing `prefix+i` assignment is preserved. The installer reports the
 conflict; Prism remains available through its Herdr action menu. The Unix

@@ -50,6 +50,15 @@ export class CollectorHost {
   if(op==='refresh'){await this.views.reconcile();await this.collector.refresh();return{sessions:this.collector.data.sessions.length,stale:this.collector.data.stale,diagnostics:this.collector.data.diagnostics};}
   if(op==='set-goal'){await this.collector.setGoal(p.session,p.objective,p.status);return{saved:true};}
   if(op==='toggle-todo'){await this.collector.toggleTodo(p.session,p.id);return{saved:true};}
+  if(op==='terminate-process'){
+   const assertVisible=async()=>{
+    const record=(await this.views.records()).find(r=>r.terminalId===p.terminalId&&r.open),state=this.visibility.get(p.terminalId);
+    if(!record||!state?.visible||state.key!==p.session)throw new Error('Process confirmation view is closed or selection changed');
+    const response=await this.rpc.call('session.snapshot');
+    if(!inspectorVisible(response.snapshot??response,record.terminalId,record.paneId))throw new Error('Process confirmation panel is no longer visible');
+   };
+   await assertVisible();return this.collector.terminateProcess(p.session,p.processTarget,assertVisible);
+  }
   if(op==='focus'){await this.collector.focus(p.session);return{focused:true};}
   if(op==='message')return this.collector.message(p.session,p.id);
   if(op==='page-messages')return this.collector.pageMessages(p.session,p.beforeId);

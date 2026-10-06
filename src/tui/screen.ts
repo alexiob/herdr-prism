@@ -56,7 +56,7 @@ function contentRows(session:SessionView,state:UiState,columns:number,now:number
     for(const process of processes){const parent=byPid.get(process.ppid??-1);let valid=parent&&parent.key!==process.key;try{if(parent&&BigInt(parent.startTime)>BigInt(process.startTime))valid=false;}catch{valid=false;}if(valid){const list=children.get(parent!.key)??[];list.push(process);children.set(parent!.key,list);}else roots.push(process);}
     const seen=new Set<string>();const visit=(root:typeof processes[number])=>{const pending=[{process:root,depth:0}];while(pending.length){const {process,depth}=pending.pop()!;if(seen.has(process.key))continue;seen.add(process.key);const descendants=children.get(process.key)??[];const fold=`process:${session.key}:${process.key}`;const denied=process.availability==='unavailable';const memory=resident(denied?undefined:process.rssBytes);const cpu=number(denied?undefined:process.cpuPercent);
     const cpuLabel=denied||process.cpuPercent===undefined?'—':number(process.cpuPercent)+'%';const shortMemory=memory.replace(/GiB$/,'G').replace(/MiB$/,'M').replace(/KiB$/,'K');const fixed=String(process.pid).length+cpuLabel.length+shortMemory.length+5;const available=Math.max(1,columns-6);const indent=Math.min(depth*2,Math.max(0,available-fixed-4));const nameWidth=Math.max(1,available-fixed-indent);
-    if(match(process.name,state)){const document=processDocument(session,process,now);rows.push({id:process.key,section:'Owned processes',text:`${' '.repeat(indent)}${descendants.length?(state.collapsed.has(fold)?'▸':'▾'):'·'} ${process.pid} ${summary(process.name,nameWidth)} ${cpuLabel} ${shortMemory}`,help:'Enter opens complete identity, measurements, ownership and availability. Space folds owned process children. CPU 100% means one logical core. K/M/G use binary resident-memory units.',document,action:{type:'message',text:documentText(document),document},disclosureColumn:descendants.length?indent+1:undefined});}
+    if(match(process.name,state)){const document=processDocument(session,process,now);rows.push({id:process.key,section:'Owned processes',text:`${' '.repeat(indent)}${descendants.length?(state.collapsed.has(fold)?'▸':'▾'):'·'} ${process.pid} ${summary(process.name,nameWidth)} ${cpuLabel} ${shortMemory}`,help:'Enter opens complete identity, measurements, ownership and availability. K asks to terminate this exact process, with Cancel selected initially. Space folds owned process children. CPU 100% means one logical core. K/M/G use binary resident-memory units.',document,action:{type:'message',text:documentText(document),document},disclosureColumn:descendants.length?indent+1:undefined});}
     if(!state.collapsed.has(fold))for(const child of [...descendants].reverse())pending.push({process:child,depth:depth+1});else{const hidden=[...descendants];for(let i=0;i<hidden.length;i++){const child=hidden[i]!;if(seen.has(child.key))continue;seen.add(child.key);hidden.push(...children.get(child.key)??[]);}}}};
     for(const process of roots)visit(process);for(const process of processes)if(!seen.has(process.key))visit(process);
     if(session.resource?.reason)rows.push({id:'reason',text:session.resource.reason});
@@ -121,13 +121,34 @@ export function renderScreen(data:DashboardData,state:UiState,columns:number,hei
 
 export function handleRowClick(state:UiState,x:number,y:number,data:DashboardData,screen:RenderedScreen):UiAction|undefined {
   if(!Number.isInteger(x)||!Number.isInteger(y)||x<1)return;
-  const tab=screen.tabRegions?.find(region=>region.y===y&&x>=region.x&&x<region.x+region.width);if(tab)return changeTab(state,tab.tab);
+  const tab=screen.tabRegions?.find(region=>region.y===y&&x>=region.x&&x<region.x+region.width);if(tab)return state.processConfirmation?undefined:changeTab(state,tab.tab);
   const region=screen.rowRegions?.find(region=>region.y===y&&x>=region.x-1&&x<region.x+region.width);if(!region)return;
   const row=screen.rows[region.index];if(!row||row.selectable===false)return;state.cursor=region.index;state.cursorId=row.id;state.numberPrefix='';
   return handleKey(state,x===region.disclosureX?'space':'enter',data,screen);
 }
 
 export function handleKey(state:UiState,key:string,data:DashboardData,screen:RenderedScreen):UiAction|undefined {
+  if(state.processConfirmation){
+    if(state.help){if(key==='escape'||key==='?'||key==='help')closeHelp(state);else if(['up','k','down','j','home','end','pageup','pagedown'].includes(key)){state.cursor+=key==='up'||key==='k'?-1:key==='home'?-state.cursor:key==='end'?screen.rows.length:key==='pageup'?-screen.bodyHeight:key==='pagedown'?screen.bodyHeight:1;state.cursorId=undefined;}return;}
+    if(key==='escape'||key==='n'||key==='q'||key==='ctrl+c'){state.processConfirmation=undefined;closeDetail(state);return;}
+    if(key==='?'||key==='help'){state.helpReader={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};state.helpText=screen.rows[state.cursor]?.help??'Confirm only the captured process. Escape cancels. No signal is sent until you confirm.';state.help=true;state.cursor=0;state.cursorId=undefined;state.scroll=0;return;}
+    if(key==='enter'&&screen.rows[state.cursor]?.id==='process-cancel'){state.processConfirmation=undefined;closeDetail(state);return;}
+    if(key==='y'||key==='enter'&&screen.rows[state.cursor]?.id==='process-confirm'){
+      const visible=screen.rowRegions?.find(r=>screen.rows[r.index]?.id==='process-confirm');
+      if(!visible||visible.width<24||screen.bodyHeight<4){state.notice='Enlarge the pane to review and confirm termination';return;}
+      const captured=state.processConfirmation;state.processConfirmation=undefined;closeDetail(state);return{type:'terminate-process',sessionKey:captured.sessionKey,processTarget:captured.target};
+    }
+    const moves:Record<string,number>={up:-1,k:-1,down:1,j:1,pageup:-screen.bodyHeight,pagedown:screen.bodyHeight};
+    if(key in moves){state.cursor+=moves[key]!;state.cursorId=undefined;}else if(key==='home'||key==='end'){state.cursor=key==='home'?0:screen.rows.length-1;state.cursorId=undefined;}return;
+  }
+  if(key==='K'&&!state.help&&!state.editingFilter&&!state.notes?.editing){
+    const target=state.detail!==undefined?state.detailDocument?.processTarget:state.tab==='Processes'?screen.rows[state.cursor]?.document?.processTarget:undefined;
+    if(!target||!state.selectedKey)return;
+    const sessionKey=state.selectedKey;state.processConfirmation={sessionKey,target:{...target}};
+    const help='Confirm termination of the captured PID on its collecting server. macOS/Linux send SIGTERM; Windows terminates it. Children are not signaled and there is no escalation. Killing a harness can end its agent session. The collector rechecks birth identity and ownership; stale or inaccessible targets are refused.';
+    showDetail(state,'Confirm process termination',{title:'Terminate process?',help,sections:[{id:'confirm',title:data.demo?'Confirmation · simulation':'Confirmation',rows:[{id:'process-cancel',text:'Cancel',help:'Enter cancels and returns to the saved reader. No signal is sent.',action:{type:'message'}},{id:'process-confirm',text:`Terminate PID ${target.pid} · ${target.name}`,role:'negative',help,action:{type:'terminate-process',sessionKey,processTarget:{...target}}}]},{id:'target',title:'Captured target',fields:[{label:'Process',value:target.name,role:'identity'},{label:'PID',value:String(target.pid),role:'identity'},{label:'Owner',value:target.owner,role:'identity'},{label:'Server',value:data.server?data.server.host+'/'+data.server.session:data.demo?'Demo · no OS signals':'Collecting server',role:'identity'},{label:'Identity',value:target.key,role:'identity'}]},{id:'effect',title:'Effect',text:data.demo?'Simulation only. No process will be signaled.':(target.isHarness?'This is the harness root. Terminating it can end the agent session.\n':'')+'Only this PID is targeted. macOS/Linux: SIGTERM. Windows: process termination. Children are not signaled. There is no automatic escalation.'}]});
+    state.cursorId='process-cancel';return;
+  }
   if(state.tab==='Notes'&&!state.notes?.editing&&!state.help&&state.detail===undefined){const move:Record<string,number>={up:-1,down:1,pageup:-screen.bodyHeight,pagedown:screen.bodyHeight};if(key in move){state.notesScroll=Math.max(0,(state.notesScroll??0)+move[key]!);return;}if(key==='home'||key==='end'){state.notesScroll=key==='home'?0:Number.MAX_SAFE_INTEGER;return;}}
   if(state.editingFilter){if(key==='enter'||key==='escape'){state.editingFilter=false;state.cursor=0;state.cursorId=undefined;}else if(key==='backspace')state.filter=[...state.filter].slice(0,-1).join('');else if(key.length===1)state.filter+=key;return;}
   if(key==='escape'){if(state.help)closeHelp(state);else closeDetail(state);state.numberPrefix='';state.notice=undefined;return;}

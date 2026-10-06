@@ -13,6 +13,7 @@ import termios
 import time
 
 node, entry = sys.argv[1:3]
+termination = '--termination' in sys.argv[3:]
 master = slave = None
 child = None
 output = bytearray()
@@ -92,6 +93,31 @@ try:
     size(80, 24)
     wait_for(lambda: b'[Agents]' in output[at:], '26x12 to 80x24 resize repaint')
     quiet()
+    if termination:
+        at = len(output)
+        os.write(master, b'\t')
+        wait_for(lambda: b'[Processes]' in output[at:], 'Processes view')
+        quiet()
+        at = len(output)
+        os.write(master, b'\x1b[BK')
+        wait_for(lambda: b'Confirmation' in output[at:] and b'Cancel' in output[at:], 'K confirmation')
+        quiet()
+        at = len(output)
+        os.write(master, b'\r')
+        wait_for(lambda: b'Owned processes' in output[at:], 'default Cancel returning to list')
+        quiet()
+        at = len(output)
+        os.write(master, b'\r')
+        wait_for(lambda: b'Identity' in output[at:], 'complete process details')
+        quiet()
+        at = len(output)
+        os.write(master, b'K')
+        wait_for(lambda: b'Confirmation' in output[at:], 'K confirmation from details')
+        quiet()
+        at = len(output)
+        os.write(master, b'y')
+        wait_for(lambda: b'Demo: simulated termination' in output[at:] and b'no OS signal sent' in output[at:], 'explicit demo confirmation without OS signal')
+        quiet()
     os.write(master, b'q')
     wait_for(lambda: b'\x1b[?1049l' in output, 'alternate-screen cleanup')
     code = child.wait(timeout=3)
@@ -100,7 +126,7 @@ try:
         read_once()
     if code != 0 or not eof:
         raise RuntimeError('PTY child did not exit cleanly and close every terminal descriptor')
-    print(json.dumps({'ok': True, 'transport': 'PTY', 'keyboard': True, 'resize': True, 'exitCode': code, 'eof': eof, 'sizes': [[80, 24], [26, 12], [80, 24]], 'capturedBytes': len(output)}))
+    print(json.dumps({'ok': True, 'transport': 'PTY', 'keyboard': True, 'resize': True, 'terminationConfirmation': termination, 'exitCode': code, 'eof': eof, 'sizes': [[80, 24], [26, 12], [80, 24]], 'capturedBytes': len(output)}))
 except Exception as error:
     print('PTY smoke unavailable or failed: ' + str(error) + (' childPid=' + str(child.pid) if child is not None else ''), file=sys.stderr)
     sys.exit(1)

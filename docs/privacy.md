@@ -20,6 +20,19 @@ bounded, controls/ANSI are sanitized for display, and no transcript content is
 evaluated or interpolated into shell commands. References open only after an
 explicit user action. Optional command/argument detail is not automatically shown.
 
+## Explicit process termination
+
+`K` in Processes or process details opens a confirmation with Cancel selected.
+Only confirmation sends a request to the authenticated collector on the server
+that owns the view. It rechecks actual panel visibility, sampled birth/boot and
+exclusive ownership, and rejects changed, inaccessible or stale targets. It sends
+SIGTERM on macOS/Linux or terminates on Windows, only to the selected PID; no
+children, process groups or escalation are requested. Killing the harness may
+end its session. Demo actions never signal processes. The portable PID signal
+API and Herdr occupant checks are separate, so simultaneous PID reuse or occupant
+replacement after validation remains a race; this is not an atomic OS identity
+lock. No termination happens during normal collection or without confirmation.
+
 ## Stored state
 
 Raw transcript bodies remain at provider sources; the plugin does not maintain

@@ -130,7 +130,7 @@ export async function main(argv = process.argv.slice(2)) {
                 connectNotes(context.serverStateDir);await ensureNotes();ui.start();
                 const follow = async () => {
                     const snapshot=cache.snapshot;
-                    if(!snapshot||state.pin||state.notes?.editing||!context.settings.follow)return;
+                    if(!snapshot||state.pin||state.processConfirmation||state.notes?.editing||!context.settings.follow)return;
                     const focused=snapshot.agents.find(a=>a.pane_id===snapshot.focused_pane_id);
                     if(!focused||focused.tab_id!==tabId)return;
                     const selectedKey=followSelection.observe(snapshot,data,state.pin);
@@ -139,7 +139,7 @@ export async function main(argv = process.argv.slice(2)) {
                 const queueFollow=()=>{inputQueue=inputQueue.then(async()=>{if(!closing){await ensureNotes();await follow();paint();}}).catch(error=>{state.notice=(error as Error).message;if(!closing)paint();});};
                 cache.on('snapshot', () => { syncVisibility(); collector!.invalidate(); queueFollow(); });
                 cache.on('stale', () => { collector!.setVisibleSession(state.selectedKey,false); data.stale = true; paint(); });
-                collector.on('data', (next: DashboardData) => { data = next; if (!state.notes?.editing&&(!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey)))
+                collector.on('data', (next: DashboardData) => { data = next; if (!state.processConfirmation&&!state.notes?.editing&&(!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey)))
                     state.selectedKey = localSelection() ?? data.sessions[0]?.key; paint(); queueFollow(); });
                 collector.on('diagnostic', (message: string) => { state.notice = message; paint(); });
                 collector.once('disconnected',()=>{inputQueue=inputQueue.then(()=>stop());});
@@ -155,6 +155,7 @@ export async function main(argv = process.argv.slice(2)) {
                         }
                         return;
                     }
+                    if(action.type==='terminate-process'){const result=await collector!.terminateProcess(action.sessionKey!,action.processTarget!);state.notice=`${result.platform==='win32'?'Termination':'SIGTERM'} requested for PID ${result.pid}`;return;}
                     if (action.type === 'scope') {
                         collector!.setScope(state.subtree);
                         return;
@@ -289,6 +290,7 @@ export async function main(argv = process.argv.slice(2)) {
             await stop();
         else if (action?.type === 'focus'||action?.type==='select')
             {state.selectedKey = action.sessionKey;if(action.type==='select')state.tab='Overview';}
+        else if(action?.type==='terminate-process')state.notice=`Demo: simulated termination of PID ${action.processTarget!.pid}; no OS signal sent`;
         else if(action?.type==='tab')await ensureNotes();
         else if(action?.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows});}
         else if (action?.type === 'message')

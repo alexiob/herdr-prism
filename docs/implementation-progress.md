@@ -664,3 +664,35 @@ installation on Linux/Windows. Windows runtime implementation was preserved;
 only the shared terminal-label expectation and portable storage-latency test
 were adjusted. Native-pixel, missing host API, paid-provider and soak gates
 remain as documented for the broader original implementation objective.
+
+## Confirmed process termination and GitHub shortcut instructions — 2026-10-06
+
+`K` on a Processes row or its full details opens a captured-target confirmation,
+with Cancel selected. Escape/Enter on Cancel restore the prior reader; explicit
+confirmation signals only that PID on its collecting server. Follow, tab and
+scope changes are held during confirmation. Tiny panes refuse confirmation until
+expanded. Demo mode only simulates requests. POSIX uses SIGTERM; Windows uses
+Node's process termination semantics, without group/child killing or escalation.
+
+The shared authenticated broker checks the registered panel's actual visibility
+and selection before and after the final OS scan. The collector rechecks readable
+boot/birth identity, root occupant, exclusive owner and validated launch ancestry,
+rejects slow/stale scans, and protects PID 1, itself and its parent. API errors
+report failure; success reports a request, not observed exit. Node's PID-based
+signal API and Herdr's separate occupant/view checks do not provide an atomic
+identity lock; a simultaneous replacement after final validation remains possible.
+
+The first feature regressions failed before implementation. Review reproduced
+ownership changes during the visibility guard, disappearing panels during a slow
+scan, and valid launch-child rejection; all have RED→GREEN regressions. Review
+reports no remaining important findings. Full local suites: macOS Node 26.10.0,
+362 tests / 341 passed / 21 platform or opt-in skips; Linux arm64 Podman Node 24,
+362 tests / 338 passed / 24 skips. Both include actual isolated-worker termination
+and real Unix PTY confirmation/cancel/demo-no-signal checks. Extra protected-PID
+regressions pass in the targeted 23-test suite and are included in publication CI.
+
+README GitHub setup now runs in order: install/activate, config location and exact
+prefix+i TOML binding, server reload-config, then shortcut/direct-open usage. The
+user's missing managed binding was installed without replacing another binding;
+live reload returned applied with no diagnostics. Windows platform-specific work
+remains owned by the other machine; this change adds shared code and fixtures.

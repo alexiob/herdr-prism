@@ -52,6 +52,7 @@ export class RemoteCollector extends EventEmitter {
         this.emit('data', this.data);
     } return response.page ? { ...response.page, contentRevision: response.contentRevision } : undefined; }
     toggleTodo(...args) { return this.invoke('toggle-todo', { session: args[0], id: args[1] }); }
+    terminateProcess(session, target) { return this.invoke('terminate-process', { terminalId: this.terminalId, session, processTarget: { key: target.key, owner: target.owner } }); }
     focus(...args) { return this.invoke('focus', { session: args[0] }); }
     message(...args) { return this.invoke('message', { session: args[0], id: args[1] }); }
     pageMessages(...args) { return this.invoke('page-messages', { session: args[0], beforeId: args[1] }); }
