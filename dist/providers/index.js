@@ -375,7 +375,11 @@ export class ProviderIndex {
                 newer.initialRequest = [older.initialRequest, newer.initialRequest].filter((message) => message !== undefined).sort((a, b) => (a.timestamp ?? Infinity) - (b.timestamp ?? Infinity))[0];
                 newer.messages = merge(older.messages, newer.messages);
                 newer.tools = merge(older.tools, newer.tools);
-                newer.usage = merge(older.usage, newer.usage);
+                const usage = [...older.usage, ...newer.usage];
+                // An older legacy-only archive must not reintroduce the mirror stream removed
+                // by the current file's Codex adapter. Filter before the retained-window cap.
+                const exactCodex = entry.provider === 'codex' && usage.some(r => r.id.startsWith('response:') && r.sessionId === newer.id && r.kind === 'cumulative');
+                newer.usage = merge([], exactCodex ? usage.filter(r => !r.id.startsWith('count:')) : usage);
                 newer.goals = merge(older.goals, newer.goals);
                 newer.diagnostics = [...new Set([...(old.diagnostics ?? []), ...(evidence.diagnostics ?? [])])];
                 sessions.set(key, newer);

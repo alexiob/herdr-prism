@@ -45,6 +45,14 @@ The audit found and the adapter now covers three newer shapes:
   foreign thread owners are rejected. The reducer can report provider turn
   totals without inventing a baseline or adding them to lifetime totals twice.
 
+When a usable exact-owned `token_usage_record.thread_token_usage` appears, it
+supersedes legacy `token_count.info.total_token_usage` observations in that
+rollout. These two cumulative streams can differ; interleaving them as one counter
+creates false resets and inflated totals. Legacy-only histories remain supported.
+`last_token_usage.total_tokens` and `model_context_window` retain the latest
+recorded context snapshot separately from lifetime/turn counters; this is the
+last provider observation, not continuous measurement of an idle TUI.
+
 The pinned [protocol types](https://github.com/openai/codex/blob/822e58cc3d666166c7446c5b1ea2e52f5d09594c/codex-rs/protocol/src/protocol.rs),
 [agent-message content rules](https://github.com/openai/codex/blob/822e58cc3d666166c7446c5b1ea2e52f5d09594c/codex-rs/protocol/src/models.rs),
 [turn/thread accumulation tests](https://github.com/openai/codex/blob/822e58cc3d666166c7446c5b1ea2e52f5d09594c/codex-rs/core/tests/suite/token_usage_rollout.rs),

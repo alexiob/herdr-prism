@@ -774,3 +774,23 @@ regression fails before the fix. The helper remembers native focus before waitin
 for its exact attachment, but advances the selection identity only after data
 resolves. macOS full suite passes 389 tests (366 passed, 23 skipped), plus the
 subsequent final focused binding/cancellation/follow suite passes 13/13.
+
+
+## 2026-10-06 — mixed Codex accounting streams
+
+Live verification of the corrected LocAI panel recovered its model and own goal,
+but revealed an inflated lifetime token sum. Its rollout alternates legacy
+`token_count` totals with larger exact-owned `token_usage_record` thread totals.
+Treating both as one stream created a counter reset on each legacy event. A failing
+regression reduced 100/90/120/100 observations to 320 instead of the last exact
+120. The adapter now prefers usable exact thread counters and preserves legacy
+last-response context metadata separately. Foreign/missing owners and empty
+explicit counters cannot suppress legacy usage. Retained turn counters remain
+nested observations, not added lifetime contributions. Provider/metrics suite:
+83/83 on macOS; provider/metrics/follow suite: 91/91 in Linux arm64 Node22 Podman.
+
+Review reproduced two additional cases before fixes: omitted context fields
+must preserve a last known same-model snapshot, and a legacy-only archive must
+not reintroduce mirror counters when logical same-ID rollouts merge. Precedence
+now applies before the assembly retention cap as well as within each parser.
+Final targeted provider/metrics/follow suite: 93/93 on macOS.

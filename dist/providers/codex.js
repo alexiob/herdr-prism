@@ -1,5 +1,8 @@
 import { EvidenceBuilder, clean, codexTokens, filePath, hash, identity, json, number, object, time, visible } from "./common.js";
 export class CodexAdapter extends EvidenceBuilder {
+    exactThreadUsage = false;
+    lastExactUsageId;
+    lastContext;
     ordinal = 0;
     firstOwnOrdinal = 0;
     startedTurnId;
@@ -72,7 +75,7 @@ export class CodexAdapter extends EvidenceBuilder {
         if (r.type === 'token_usage_record') {
             const u = object(r.payload);
             const owner = identity(u.thread_id);
-            if (owner && owner !== e.id) {
+            if (owner !== e.id) {
                 this.diagnostic('token record rejected: thread owner does not match exact session');
                 return;
             }
@@ -81,8 +84,21 @@ export class CodexAdapter extends EvidenceBuilder {
             const turnCounters = turnId && Object.keys(counters).length ? codexTokens(counters) : undefined;
             if (Object.keys(counters).length && !turnId)
                 this.diagnostic('turn counters unavailable: explicit turn identity missing');
-            // One thread observation carries its distinct cumulative turn snapshot; it is not an additional lifetime delta.
-            this.usageRecord({ id: `response:${identity(u.response_id) || offset}`, sessionId: e.id, turnId, requestId: identity(u.response_id), model: e.model, timestamp, kind: 'cumulative', ...codexTokens(u.thread_token_usage), turnCounters, source, epoch: `thread:${e.id}` });
+            const threadCounters = codexTokens(u.thread_token_usage);
+            if (threadCounters.input === undefined && threadCounters.output === undefined && threadCounters.total === undefined)
+                return;
+            // Legacy event totals and exact thread snapshots are different counters. Mixing
+            // them invents a reset on every interleaved pair and repeatedly sums the lifetime.
+            if (!this.exactThreadUsage) {
+                this.exactThreadUsage = true;
+                for (const key of this.usage.keys())
+                    if (key.startsWith('count:'))
+                        this.usage.delete(key);
+            }
+            const id = `response:${identity(u.response_id) || offset}`;
+            this.lastExactUsageId = id;
+            const context = this.lastContext?.model === e.model ? this.lastContext : undefined;
+            this.usageRecord({ id, sessionId: e.id, turnId, requestId: identity(u.response_id), model: e.model, timestamp, kind: 'cumulative', ...threadCounters, contextUsed: context?.contextUsed, contextLimit: context?.contextLimit, turnCounters, source, epoch: `thread:${e.id}` });
             return;
         }
         if (r.type !== 'event_msg')
@@ -146,9 +162,17 @@ export class CodexAdapter extends EvidenceBuilder {
         }
         if (p.type === 'token_count' && p.info) {
             const info = object(p.info);
+            const context = Object.fromEntries(Object.entries({ contextUsed: number(object(info.last_token_usage).total_tokens), contextLimit: number(info.model_context_window) }).filter(([, value]) => value !== undefined));
+            this.lastContext = { ...(this.lastContext?.model === e.model ? this.lastContext : undefined), ...context, model: e.model };
+            if (this.exactThreadUsage) {
+                const current = this.lastExactUsageId ? this.usage.get(this.lastExactUsageId) : undefined;
+                if (current && current.model === e.model)
+                    this.usage.set(current.id, { ...current, contextUsed: this.lastContext.contextUsed, contextLimit: this.lastContext.contextLimit });
+                return;
+            }
             const counters = codexTokens(info.total_token_usage);
             const id = hash(JSON.stringify([this.turnId, e.model, counters]));
-            this.usageRecord({ id: `count:${id}`, sessionId: e.id, turnId: this.turnId, model: e.model, timestamp, kind: 'cumulative', ...counters, contextLimit: number(info.model_context_window), source, epoch: `thread:${e.id}` });
+            this.usageRecord({ id: `count:${id}`, sessionId: e.id, turnId: this.turnId, model: e.model, timestamp, kind: 'cumulative', ...counters, contextUsed: this.lastContext.contextUsed, contextLimit: this.lastContext.contextLimit, source, epoch: `thread:${e.id}` });
             return;
         }
         if (p.type === 'patch_apply_end' && p.success === true) {

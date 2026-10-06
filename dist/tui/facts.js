@@ -46,7 +46,7 @@ Keys
 From Overview, Enter opens To-do. In the list, arrows or j/k select a request; Enter opens the full text and provenance. x checks or reopens it; completed items sort below pending items. s opens its recorded source message. y copies a single inline backtick command when there is exactly one, otherwise the full request; copying does not run it. ? opens this help. Escape returns to the saved reader; Tab changes views; q closes the panel.
 
 Configuration
-ACTION parsing is enabled by default. Prism's settings.json has a top-level todosEnabled boolean. Set it to false to disable parsing, or true to enable it; preserve the other settings. Then restart Prism through activate-overview (or activate-inspector for inspector-only mode). reload-settings currently applies ui.tabOrder only.`,
+ACTION parsing is enabled by default. Prism's settings.json has a top-level todosEnabled boolean. Set it to false to disable parsing, or true to enable it; preserve the other settings. Then restart Prism through activate-overview (or activate-inspector for inspector-only mode). reload-settings applies ui.tabOrder and ui.nativeGrouping.`,
     git: 'Git facts belong to this exact checkout and repository family. Added/deleted lines differ from untracked file counts. Missing counters are unavailable. Enter opens Git.',
     notes: 'Private per-agent Markdown on the collecting server. Enter opens Notes, then Enter edits. Autosave after 500 ms; Ctrl+S flushes. Follow is held while editing. Complete Prism state removal deletes notes.',
 };

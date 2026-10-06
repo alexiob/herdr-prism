@@ -2,6 +2,7 @@ import {EvidenceBuilder,clean,codexTokens,filePath,hash,identity,json,number,obj
 import type {TailRecord} from './tail.ts';
 
 export class CodexAdapter extends EvidenceBuilder {
+ private exactThreadUsage=false;private lastExactUsageId?:string;private lastContext?:{contextUsed?:number;contextLimit?:number;model?:string};
  private ordinal=0;private firstOwnOrdinal=0;private startedTurnId?:string;private turnOpen=false;
  consume({record:r,offset}:TailRecord) {
  const ordinal=this.ordinal++;
@@ -33,9 +34,15 @@ export class CodexAdapter extends EvidenceBuilder {
  }return;
  }
  if(r.type==='token_usage_record'){
- const u=object(r.payload);const owner=identity(u.thread_id);if(owner&&owner!==e.id){this.diagnostic('token record rejected: thread owner does not match exact session');return;}const turnId=identity(u.turn_id);const counters=object(u.turn_token_usage);const turnCounters=turnId&&Object.keys(counters).length?codexTokens(counters):undefined;if(Object.keys(counters).length&&!turnId)this.diagnostic('turn counters unavailable: explicit turn identity missing');
- // One thread observation carries its distinct cumulative turn snapshot; it is not an additional lifetime delta.
- this.usageRecord({id:`response:${identity(u.response_id)||offset}`,sessionId:e.id,turnId,requestId:identity(u.response_id),model:e.model,timestamp,kind:'cumulative',...codexTokens(u.thread_token_usage),turnCounters,source,epoch:`thread:${e.id}`});return;
+ const u=object(r.payload);const owner=identity(u.thread_id);if(owner!==e.id){this.diagnostic('token record rejected: thread owner does not match exact session');return;}const turnId=identity(u.turn_id);const counters=object(u.turn_token_usage);const turnCounters=turnId&&Object.keys(counters).length?codexTokens(counters):undefined;if(Object.keys(counters).length&&!turnId)this.diagnostic('turn counters unavailable: explicit turn identity missing');
+ const threadCounters=codexTokens(u.thread_token_usage);
+ if(threadCounters.input===undefined&&threadCounters.output===undefined&&threadCounters.total===undefined)return;
+ // Legacy event totals and exact thread snapshots are different counters. Mixing
+ // them invents a reset on every interleaved pair and repeatedly sums the lifetime.
+ if(!this.exactThreadUsage){this.exactThreadUsage=true;for(const key of this.usage.keys())if(key.startsWith('count:'))this.usage.delete(key);}
+ const id=`response:${identity(u.response_id)||offset}`;this.lastExactUsageId=id;
+ const context=this.lastContext?.model===e.model?this.lastContext:undefined;
+ this.usageRecord({id,sessionId:e.id,turnId,requestId:identity(u.response_id),model:e.model,timestamp,kind:'cumulative',...threadCounters,contextUsed:context?.contextUsed,contextLimit:context?.contextLimit,turnCounters,source,epoch:`thread:${e.id}`});return;
  }
  if(r.type!=='event_msg')return;
  if(p.type==='thread_goal_updated'){
@@ -52,8 +59,16 @@ export class CodexAdapter extends EvidenceBuilder {
  const completedId=identity(p.turn_id);const matched=this.turnOpen&&this.startedTurnId===completedId;const duration=number(p.duration_ms)??(matched&&timestamp!==undefined&&this.turnStart!==undefined&&timestamp>=this.turnStart?timestamp-this.turnStart:undefined);
  this.usageRecord({id:`turn:${completedId||offset}`,turnId:completedId,sessionId:e.id,model:e.model,timestamp,kind:'delta',turnMs:duration,source});if(matched||!this.turnOpen){if(this.turnId===completedId)this.turnId=undefined;e.state=p.error?'error':p.type==='turn_aborted'?'interrupted':'done';if(matched){e.activeTurn=undefined;this.turnStart=undefined;this.startedTurnId=undefined;this.turnOpen=false;}}return;
  }
- if(p.type==='token_count'&&p.info){const info=object(p.info);const counters=codexTokens(info.total_token_usage);const id=hash(JSON.stringify([this.turnId,e.model,counters]));
- this.usageRecord({id:`count:${id}`,sessionId:e.id,turnId:this.turnId,model:e.model,timestamp,kind:'cumulative',...counters,contextLimit:number(info.model_context_window),source,epoch:`thread:${e.id}`});return;
+ if(p.type==='token_count'&&p.info){const info=object(p.info);
+ const context=Object.fromEntries(Object.entries({contextUsed:number(object(info.last_token_usage).total_tokens),contextLimit:number(info.model_context_window)}).filter(([,value])=>value!==undefined));
+ this.lastContext={...(this.lastContext?.model===e.model?this.lastContext:undefined),...context,model:e.model};
+ if(this.exactThreadUsage){
+  const current=this.lastExactUsageId?this.usage.get(this.lastExactUsageId):undefined;
+  if(current&&current.model===e.model)this.usage.set(current.id,{...current,contextUsed:this.lastContext.contextUsed,contextLimit:this.lastContext.contextLimit});
+  return;
+ }
+ const counters=codexTokens(info.total_token_usage);const id=hash(JSON.stringify([this.turnId,e.model,counters]));
+ this.usageRecord({id:`count:${id}`,sessionId:e.id,turnId:this.turnId,model:e.model,timestamp,kind:'cumulative',...counters,contextUsed:this.lastContext.contextUsed,contextLimit:this.lastContext.contextLimit,source,epoch:`thread:${e.id}`});return;
  }
  if(p.type==='patch_apply_end'&&p.success===true){const id=identity(p.call_id)||`patch:${offset}`;const changes=object(p.changes);this.tool({id,name:'apply_patch',status:'done',timestamp,editedPaths:Object.keys(changes).filter(v=>identity(v)).slice(0,200),summary:'Patch applied'});}
  if(p.type==='error')e.state='error';
