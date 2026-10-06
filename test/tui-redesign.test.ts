@@ -83,3 +83,6 @@ test('tiny actual styled frames stay within terminal cells and wide Overview sup
  for(const columns of [1,2,5,12,36])for(const tab of tabs){const state=createUiState();state.tab=tab;state.selectedKey=data.sessions[0]!.key;const frame=renderScreen(data,state,columns,12);for(const spans of frame.spans??[])assert.ok(cellWidth(spans.map(s=>s.text).join(''))<=columns,`${columns}/${tab}`);}
  const state=createUiState();state.selectedKey=data.sessions[0]!.key;state.cursorId='cpu';let frame=renderScreen(data,state,80,34);handleKey(state,'right',data,frame);frame=renderScreen(data,state,80,34);assert.equal(frame.rows[state.cursor]?.id,'goal');handleKey(state,'left',data,frame);frame=renderScreen(data,state,80,34);assert.equal(frame.rows[state.cursor]?.id,'cpu');
 });
+test('compact quantities style attached binary units quietly and keep signed Git changes semantic',async()=>{
+ const {valueSpans}=await import('../src/tui/widgets.ts');const memory=valueSpans('620MiB','quantity');assert.ok(memory.some(s=>s.text==='620'&&s.role==='quantity'));assert.ok(memory.some(s=>s.text==='MiB'&&s.role==='secondary'));const git=valueSpans('+128 -37','quantity');assert.ok(git.some(s=>s.text==='+128'&&s.role==='positive'));assert.ok(git.some(s=>s.text==='-37'&&s.role==='negative'));
+});

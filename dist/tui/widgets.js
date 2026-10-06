@@ -32,7 +32,7 @@ export function readableWrap(input, width) {
 export function valueSpans(value, role = 'text', selected = false) {
     if (/^(?:unavailable|—)/i.test(value.trim()))
         return [span(value, 'warning', selected)];
-    return value.split(/(\b(?:tokens|MiB|GiB|KiB|lines|files|commits|seconds|minutes)\b|\+\d+|-\d+)/g).filter(Boolean).map(part => span(part, /^(?:tokens|MiB|GiB|KiB|lines|files|commits|seconds|minutes)$/.test(part) ? 'secondary' : /^\+\d+$/.test(part) ? 'positive' : /^-\d+$/.test(part) ? 'negative' : role, selected));
+    return value.split(/(MiB\b|GiB\b|KiB\b|\b(?:tokens|lines|files|commits|seconds|minutes)\b|\+\d+|-\d+)/g).filter(Boolean).map(part => span(part, /^(?:tokens|MiB|GiB|KiB|lines|files|commits|seconds|minutes)$/.test(part) ? 'secondary' : /^\+\d+$/.test(part) ? 'positive' : /^-\d+$/.test(part) ? 'negative' : role, selected));
 }
 export function meter(percent, width = 10, ascii = false) { if (percent === undefined || !Number.isFinite(percent) || percent < 0)
     return '—'; const n = Math.round(Math.min(100, percent) * width / 100); return (ascii ? '#' : '▰').repeat(n) + (ascii ? '-' : '▱').repeat(width - n); }

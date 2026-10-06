@@ -20,7 +20,7 @@ export function readableWrap(input:string,width:number):string[]{
 }
 export function valueSpans(value:string,role:ColorRole='text',selected=false):TextSpan[]{
   if(/^(?:unavailable|—)/i.test(value.trim()))return [span(value,'warning',selected)];
-  return value.split(/(\b(?:tokens|MiB|GiB|KiB|lines|files|commits|seconds|minutes)\b|\+\d+|-\d+)/g).filter(Boolean).map(part=>span(part,/^(?:tokens|MiB|GiB|KiB|lines|files|commits|seconds|minutes)$/.test(part)?'secondary':/^\+\d+$/.test(part)?'positive':/^-\d+$/.test(part)?'negative':role,selected));
+  return value.split(/(MiB\b|GiB\b|KiB\b|\b(?:tokens|lines|files|commits|seconds|minutes)\b|\+\d+|-\d+)/g).filter(Boolean).map(part=>span(part,/^(?:tokens|MiB|GiB|KiB|lines|files|commits|seconds|minutes)$/.test(part)?'secondary':/^\+\d+$/.test(part)?'positive':/^-\d+$/.test(part)?'negative':role,selected));
 }
 export function meter(percent?:number,width=10,ascii=false):string{if(percent===undefined||!Number.isFinite(percent)||percent<0)return '—';const n=Math.round(Math.min(100,percent)*width/100);return (ascii?'#':'▰').repeat(n)+(ascii?'-':'▱').repeat(width-n);}
 export function documentText(doc:import('./types.ts').DetailDocument):string{return [doc.title,...doc.sections.flatMap(section=>[section.title,...(section.fields??[]).map(field=>`${field.label}: ${field.value}`),section.text??''])].join('\n');}
