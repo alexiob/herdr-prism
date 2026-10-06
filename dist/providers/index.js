@@ -9,6 +9,7 @@ import { JsonlTail } from "./tail.js";
 import { metadata } from "./metadata.js";
 import { TodoList } from "../content/todo.js";
 import { ReferenceHistory } from "./reference-history.js";
+import { pageReferenceHistory, readReferenceMessage } from "./reference-pages.js";
 function freeze(value) { if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const child of Object.values(value))
         freeze(child);
@@ -542,10 +543,40 @@ export class ProviderIndex {
         const key = `${provider}:${evidence.id}`;
         if (this.referenceHistory?.key !== key) {
             this.referenceHistory?.reader.close();
-            this.referenceHistory = { key, reader: new ReferenceHistory(provider, this.maxRecord) };
+            this.referenceHistory = { key, reader: new ReferenceHistory(provider, this.maxRecord, evidence.id) };
         }
         const files = [...this.entries.values()].filter(entry => entry.provider === provider && entry.adapter.evidence.id === evidence.id).sort((a, b) => (a.adapter.evidence.startedAt ?? 0) - (b.adapter.evidence.startedAt ?? 0) || a.path.localeCompare(b.path)).map(entry => entry.path);
         return this.referenceHistory.reader.read(files, () => !this.closed && isCurrent());
+    }
+    referenceFiles(provider, ref) {
+        const evidence = this.resolveSnapshotCached(provider, ref);
+        if (!evidence?.path || evidence.availability === 'unavailable')
+            return;
+        return { id: evidence.id, files: [...this.entries.values()].filter(entry => entry.provider === provider && entry.adapter.evidence.id === evidence.id).sort((a, b) => (a.adapter.evidence.startedAt ?? 0) - (b.adapter.evidence.startedAt ?? 0) || a.path.localeCompare(b.path)).map(entry => entry.path) };
+    }
+    async pageReferences(provider, ref, options = {}, isCurrent = () => true) {
+        if (this.closed || !isCurrent())
+            return;
+        const scope = this.referenceFiles(provider, ref);
+        if (!scope)
+            return;
+        return await pageReferenceHistory(provider, scope.id, scope.files, this.maxRecord, options, () => !this.closed && isCurrent());
+    }
+    async pageReferenceSources(provider, ref, targetId, options = {}, isCurrent = () => true) {
+        if (this.closed || !isCurrent() || !/^[a-f0-9]{24}$/.test(targetId))
+            return;
+        const scope = this.referenceFiles(provider, ref);
+        if (!scope)
+            return;
+        return await pageReferenceHistory(provider, scope.id, scope.files, this.maxRecord, options, () => !this.closed && isCurrent(), targetId);
+    }
+    async readReferenceMessage(cursor, isCurrent = () => true) {
+        if (this.closed || !isCurrent())
+            return;
+        const entry = this.entries.get(cursor.path);
+        if (!entry || entry.provider !== cursor.provider || (entry.metadata ?? entry.adapter).evidence.id !== cursor.sessionId)
+            return;
+        return readReferenceMessage(cursor, this.maxRecord, () => !this.closed && isCurrent());
     }
     close() { this.closed = true; this.referenceHistory?.reader.close(); this.referenceHistory = undefined; this.entries.clear(); this.sessions.clear(); this.inventory.clear(); this.metadataIndex.clear(); this.metadataCache.clear(); this.pathAliases.clear(); this.snapshots = Object.freeze([]); this.assemblyKey = undefined; }
 }

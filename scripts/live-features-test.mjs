@@ -15,7 +15,7 @@ async function until(label,probe,timeoutMs=12000){const deadline=Date.now()+time
  * All control targets this harness's named server, XDG roots and returned IDs.
  * No provider command, network request, paid model or user configuration is used.
  */
-export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH??'herdr',proof=path.join(project,'artifacts/live-features-proof')}={}){
+export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH??'herdr',proof=path.join(project,'artifacts/live-features-proof'),references=false}={}){
  if(!release)throw new Error('--release must name a reviewed checksummed release');
  release=path.resolve(release);proof=path.resolve(proof);
  const load=file=>import(pathToFileURL(path.join(release,file)).href);
@@ -77,6 +77,19 @@ export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH
   const rightOf=async target=>{const current=await snapshot(),panel=current.panes.find(p=>p.terminal_id===controller.terminalId);if(panel?.tab_id!==target.tab_id)return;const layout=current.layouts.find(l=>l.tab_id===target.tab_id),agentRect=layout?.panes.find(p=>p.pane_id===target.pane_id)?.rect,panelRect=layout?.panes.find(p=>p.pane_id===panel.pane_id)?.rect;return agentRect&&panelRect&&panelRect.x>=agentRect.x+agentRect.width&&panel;};
   await stage('rightFollowAndPin',async()=>{await until('initial right placement',()=>rightOf(alpha));await rpc.call('agent.focus',{target:beta.pane_id});await until('right follow to beta',()=>rightOf(beta));let panel=await ownPane();await until('followed beta reader',async()=>(await text(panel.pane_id)).includes('fixture-beta'));await cli(['pane','send-text',panel.pane_id,'p']);await until('pin keyboard applied',async()=>(await text(panel.pane_id)).includes('[pin]'));await rpc.call('agent.focus',{target:alpha.pane_id});await delay(1800);panel=await ownPane();assert.equal(panel.tab_id,beta.tab_id);assert.ok((await text(panel.pane_id)).includes('fixture-beta'));return{rightPlacement:true,followAcrossTabs:true,pinRetainsBetaPaneAndReader:true,terminalStable:panel.terminal_id===controller.terminalId};});
   await stage('hiddenPauseAndResume',async()=>{const before=await pane(beta.pane_id);await appendFile(betaFile,JSON.stringify({type:'message',id:'hidden-message',timestamp:new Date().toISOString(),message:{role:'assistant',content:[{type:'text',text:'SYNTHETIC HIDDEN MESSAGE'}],stopReason:'stop'}})+'\n');await delay(3200);const hidden=await pane(beta.pane_id);assert.equal(hidden.tokens[token('last')],before.tokens[token('last')]);assert.equal(hidden.tokens[token('fresh')],'stale');await cli(['tab','focus',beta.tab_id]);await until('visible fixture body resumes',async()=>(await pane(beta.pane_id)).tokens?.[token('last')]?.includes('HIDDEN MESSAGE'));return{newBodyNotHydratedWhileHidden:true,resourcesLabeledStale:true,bodyHydratedAfterVisible:true};});
+  if(references)await stage('referenceHistoryNavigation',async()=>{
+   const base=Date.now()-100000,record=(id,body,at)=>({type:'message',id,timestamp:new Date(at).toISOString(),message:{role:'assistant',content:[{type:'text',text:body}],stopReason:'stop'}});
+   await mkdir(path.join(directory,'src'),{recursive:true});await writeFile(path.join(directory,'src','shared.ts'),'SYNTHETIC REFERENCE FIXTURE\n');
+   const rows=[...Array.from({length:150},(_,i)=>record('beta-mention-'+i,'SYNTHETIC MENTION '+i+' of `src/shared.ts`',base+i)),{type:'message',id:'beta-write-call',timestamp:new Date(base+151).toISOString(),message:{role:'assistant',content:[{type:'toolCall',id:'write-shared',name:'write',arguments:{path:'src/shared.ts'}}],stopReason:'toolUse'}},{type:'message',id:'beta-write-result',timestamp:new Date(base+152).toISOString(),message:{role:'toolResult',toolCallId:'write-shared',content:[{type:'text',text:'Success'}]}},...Array.from({length:2105},(_,i)=>record('beta-ref-'+i,'See `src/ref-'+i+'.ts`',base+200+i))];
+   await appendFile(betaFile,rows.map(row=>JSON.stringify(row)+'\n').join(''));await until('bounded historical reference publication',async()=>/r2000\+/.test((await pane(beta.pane_id)).tokens?.[token('counts')]??''));
+   const panel=await ownPane(),send=value=>cli(['pane','send-text',panel.pane_id,value]),screen=()=>text(panel.pane_id);await send('\t\t\t\t');await until('Refs tab selected',async()=>/\[Refs\]|< Refs >/.test(await screen()));
+   for(const count of [50,100,106]){await send('b');await until('older target page '+count,async()=>new RegExp(count+' loaded').test(await screen()));}
+   await send('Gk');await until('recovered target shows explicit successful edit evidence',async()=>/✎[^\n]*shared\.ts/.test(await screen()));await send(' ');await until('source history opened for the oldest recovered target',async()=>{const value=await screen();return value.includes('shared.ts')&&value.includes('50 mention sources');});
+   for(const count of [100,150]){await send('b');await until('older source page '+count,async()=>(await screen()).includes(count+' mention sources'));}
+   await send('Gk\r');await until('exact first mention source opened',async()=>(await screen()).includes('SYNTHETIC MENTION 0 of'));await send('\x1b');await until('return to source reader anchor',async()=>{const value=await screen();return value.includes('beta-mention-0')&&value.includes('End of mention history');});await send('\x1b');await until('return to older reference target anchor',async()=>{const value=await screen();return value.includes('shared.ts')&&value.includes('End of target history');});
+   await send('\t\t');await until('Overview restored after reference fixture',async()=>/\[Overview\]|< Overview >/.test(await screen()));
+   return{targetsInFixture:2106,hotTargets:2000,olderTargetsRecovered:106,mentionsRecovered:150,exactFirstSourceOpened:true,sourceAndTargetAnchorsRestored:true,actualInspectorKeyboardAndHerdrPTY:true,explicitSuccessfulEditFixture:true};
+  });
   await stage('nativeMetadataExpiry',async()=>{if(process.platform==='win32'){
     // Stop the owned periodic publisher gracefully, then publish once through the
     // actual production publisher. This measures host expiry without suspension,
@@ -113,6 +126,6 @@ export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH
  }
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- const options={};for(let i=2;i<process.argv.length;i++){const arg=process.argv[i];if(!['--release','--herdr','--proof'].includes(arg)||!process.argv[i+1])throw new Error('Use --release ROOT [--herdr BIN] [--proof DIR]');options[arg.slice(2)]=process.argv[++i];}
+ const options={};for(let i=2;i<process.argv.length;i++){const arg=process.argv[i];if(arg==='--references'){options.references=true;continue;}if(!['--release','--herdr','--proof'].includes(arg)||!process.argv[i+1])throw new Error('Use --release ROOT [--herdr BIN] [--proof DIR] [--references]');options[arg.slice(2)]=process.argv[++i];}
  try{console.log(JSON.stringify(await liveFeaturesTest(options),null,2));}catch(error){console.error(error.stack??String(error));process.exitCode=1;}
 }

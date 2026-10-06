@@ -44,10 +44,10 @@
 
 **Interfaces:** Add bounded on-demand reference pages and per-target mention-source pages, identified by immutable source/message cursors; the selected visible session remains the only permitted body reader.
 
-- [ ] Write failing tests with more than 2,000 distinct targets and more than 100 mentions of one target; older pages must recover first-source IDs and explicit edit evidence without unbounded hot memory.
-- [ ] Add lazy source/target pages and TUI navigation that restores the prior reader position and jumps to exact historical messages.
-- [ ] Prove mirror deduplication, file replacement, cancellation and bounded memory across paged histories.
-- [ ] Run full tests and exact staged live acceptance; update the audit only for behavior actually proved.
+- [x] Write failing tests with more than 2,000 distinct targets and more than 100 mentions of one target; older pages must recover first-source IDs and explicit edit evidence without unbounded hot memory.
+- [x] Add lazy source/target pages and TUI navigation that restores the prior reader position and jumps to exact historical messages.
+- [x] Prove mirror deduplication, file replacement, cancellation and bounded memory across paged histories.
+- [x] Run full tests and exact staged live acceptance; update the audit only for behavior actually proved.
 
 ## Execution record
 
@@ -57,4 +57,18 @@ Task 1 evidence is recorded in `docs/implementation-progress.md`: 97 targeted
 tests, combined strict macOS/Linux suites and staged live macOS/actual SSH
 acceptance. The selected-visible source failure retry and standalone successful
 patch regressions failed before their corrections. The current hot reference
-limits are explicitly marked partial; Task 2 remains unchecked and required.
+limits were explicitly marked partial while Task 2 remained required.
+
+Task 2 implements 50-item default pages (200 maximum), at most 201 candidate
+entries per scan, and bounded UI caches of 500 targets/sources with 4 MiB per
+reader. Two metadata scans verify latest occurrences and refill older candidate
+windows without a lifetime set of IDs. Page cursors verify file versions and
+target scope; exact source cursors include file identity, offset and visible-body
+fingerprint. `b` loads older items, `B` reloads, and nested Escape returns to saved
+source/target anchors. Claude unfinished visible assembly is separately bounded
+to 16 heads / 1 MiB and diagnoses overflow. Tests cover 2,105 targets, 150 mirror
+mentions, 405 targets in one message, same-ID completed revisions, replacement,
+in-flight cancellation and unfinished Claude blocks. Actual macOS/Linux Herdr
+`--references` acceptance exercises the corresponding keyboard/source return flow.
+The broader product goal and its remaining performance/host/mixed-provider gates
+are unchanged.

@@ -13,6 +13,9 @@ import {TodoList} from '../content/todo.ts';
 import type {TodoState} from '../content/todo.ts';
 import {ReferenceHistory} from './reference-history.ts';
 import type {ReferenceState} from './reference-history.ts';
+import {pageReferenceHistory,readReferenceMessage} from './reference-pages.ts';
+import type {ReferencePage,ReferenceSourcePage,ReferencePageOptions} from './reference-pages.ts';
+import type {ReferenceCursor} from '../content/refs.ts';
 export interface ProviderIndexOptions {codexHome?:string;claudeHome?:string;piHome?:string;maxRecordBytes?:number;maxMessages?:number;maxSessions?:number;directoryScanMs?:number;}
 export interface ActiveSessionRef {provider:string;kind:'id'|'path';value:string;}
 type Entry={provider:string;path:string;tail:JsonlTail;adapter:EvidenceBuilder;missing?:string;metadata?:EvidenceBuilder;detailed?:boolean;snapshot?:SessionEvidence;snapshotAdapter?:EvidenceBuilder;snapshotKey?:string;snapshotVersion?:number;knownChildren?:ChildLink[];knownParent?:string;};
@@ -125,9 +128,21 @@ export class ProviderIndex {
  }
  async readReferences(provider:string,ref:{kind:'id'|'path';value:string},isCurrent:()=>boolean=()=>true):Promise<ReferenceState|undefined>{
   if(this.closed||!isCurrent())return;const evidence=this.resolveSnapshotCached(provider,ref);if(!evidence?.path||evidence.availability==='unavailable')return;
-  const key=`${provider}:${evidence.id}`;if(this.referenceHistory?.key!==key){this.referenceHistory?.reader.close();this.referenceHistory={key,reader:new ReferenceHistory(provider,this.maxRecord)};}
+  const key=`${provider}:${evidence.id}`;if(this.referenceHistory?.key!==key){this.referenceHistory?.reader.close();this.referenceHistory={key,reader:new ReferenceHistory(provider,this.maxRecord,evidence.id)};}
   const files=[...this.entries.values()].filter(entry=>entry.provider===provider&&entry.adapter.evidence.id===evidence.id).sort((a,b)=>(a.adapter.evidence.startedAt??0)-(b.adapter.evidence.startedAt??0)||a.path.localeCompare(b.path)).map(entry=>entry.path);
   return this.referenceHistory.reader.read(files,()=>!this.closed&&isCurrent());
+ }
+ private referenceFiles(provider:string,ref:{kind:'id'|'path';value:string}):{id:string;files:string[]}|undefined {
+  const evidence=this.resolveSnapshotCached(provider,ref);if(!evidence?.path||evidence.availability==='unavailable')return;return{id:evidence.id,files:[...this.entries.values()].filter(entry=>entry.provider===provider&&entry.adapter.evidence.id===evidence.id).sort((a,b)=>(a.adapter.evidence.startedAt??0)-(b.adapter.evidence.startedAt??0)||a.path.localeCompare(b.path)).map(entry=>entry.path)};
+ }
+ async pageReferences(provider:string,ref:{kind:'id'|'path';value:string},options:ReferencePageOptions={},isCurrent:()=>boolean=()=>true):Promise<ReferencePage|undefined>{
+  if(this.closed||!isCurrent())return;const scope=this.referenceFiles(provider,ref);if(!scope)return;return await pageReferenceHistory(provider,scope.id,scope.files,this.maxRecord,options,()=>!this.closed&&isCurrent()) as ReferencePage|undefined;
+ }
+ async pageReferenceSources(provider:string,ref:{kind:'id'|'path';value:string},targetId:string,options:ReferencePageOptions={},isCurrent:()=>boolean=()=>true):Promise<ReferenceSourcePage|undefined>{
+  if(this.closed||!isCurrent()||!/^[a-f0-9]{24}$/.test(targetId))return;const scope=this.referenceFiles(provider,ref);if(!scope)return;return await pageReferenceHistory(provider,scope.id,scope.files,this.maxRecord,options,()=>!this.closed&&isCurrent(),targetId) as ReferenceSourcePage|undefined;
+ }
+ async readReferenceMessage(cursor:ReferenceCursor,isCurrent:()=>boolean=()=>true):Promise<Message|undefined>{
+  if(this.closed||!isCurrent())return;const entry=this.entries.get(cursor.path);if(!entry||entry.provider!==cursor.provider||(entry.metadata??entry.adapter).evidence.id!==cursor.sessionId)return;return readReferenceMessage(cursor,this.maxRecord,()=>!this.closed&&isCurrent());
  }
  close():void {this.closed=true;this.referenceHistory?.reader.close();this.referenceHistory=undefined;this.entries.clear();this.sessions.clear();this.inventory.clear();this.metadataIndex.clear();this.metadataCache.clear();this.pathAliases.clear();this.snapshots=Object.freeze([]);this.assemblyKey=undefined;}
 }

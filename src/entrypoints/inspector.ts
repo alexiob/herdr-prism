@@ -11,7 +11,8 @@ import { SnapshotCache } from '../herdr/subscription.ts';
 import { StateStore } from '../state/store.ts';
 import { MailboxServer } from '../state/mailbox.ts';
 import { TerminalUi } from '../tui/terminal.ts';
-import { createUiState, renderScreen, handleKey, handleRowClick, showDetail, addMessagePage } from '../tui/screen.ts';
+import { createUiState, renderScreen, handleKey, handleRowClick, showDetail, addMessagePage, addReferencePage, showReferenceSources } from '../tui/screen.ts';
+import {visibleReferences} from '../tui/reference-readers.ts';
 import { diagnosticExport } from '../tui/export.ts';
 import { copyText, openTarget } from '../tui/platform.ts';
 import type { DashboardData, RenderedScreen, UiAction } from '../tui/types.ts';
@@ -242,6 +243,7 @@ export async function main(argv = process.argv.slice(2)) {
                 ui.on('resize', () => { paint(); if (paneId)
                     void rpc.call('pane.layout', { pane_id: paneId }).then(result => { const layout = result.layout ?? result; const rect = layout.panes?.find((p: any) => p.pane_id === paneId)?.rect; if (rect?.width && layout.area?.width)
                         widthFraction = Math.min(.6, Math.max(.2, rect.width / layout.area.width)); }).catch(() => { }); });
+                let referenceRequest=false;
                 const perform = async (action: UiAction) => {
                     if (action.type === 'quit')
                         return stop();
@@ -288,6 +290,20 @@ export async function main(argv = process.argv.slice(2)) {
                         state.notice = page.length ? `Loaded ${page.length} older messages` : 'No older messages available';
                         return;
                     }
+                    if(action.type==='page-refs'||action.type==='ref-sources'){
+                        const key=action.sessionKey!,session=data.sessions.find(session=>session.key===key);if(!session||referenceRequest)return;referenceRequest=true;
+                        try{const revision=session.evidence.contentRevision;
+                            if(action.type==='page-refs'){
+                                const excluded=[...(session.refs??[]),...(!action.restart?state.pagedRefs.get(key)?.refs??[]:[])].map(ref=>ref.id);
+                                const page=await collector!.pageReferences(key,{cursor:action.referencePageCursor,excludeIds:excluded,limit:50});
+                                if(page&&!closing&&state.selectedKey===key&&state.tab==='Refs'&&!state.refSources){if(action.restart)state.pagedRefs.delete(key);addReferencePage(state,key,page,revision);state.notice=page.refs.length?undefined:'No older reference targets';}
+                            }else{
+                                const reader=state.refSources,reference=reader&&reader.reference.id===action.id?reader.reference:visibleReferences(session,state).find(ref=>ref.id===action.id);if(!reference)return;
+                                const page=await collector!.pageReferenceSources(key,reference.id,{cursor:action.referencePageCursor,limit:50});
+                                if(page&&!closing&&state.selectedKey===key&&state.tab==='Refs')showReferenceSources(state,key,reference,page,revision,Boolean(action.referencePageCursor)&&!action.restart);
+                            }
+                        }finally{referenceRequest=false;}return;
+                    }
                     if (action.type === 'focus') {
                         const selected = data.sessions.find(s => s.key === action.sessionKey);
                         if (!selected)
@@ -304,7 +320,8 @@ export async function main(argv = process.argv.slice(2)) {
                         return;
                     }
                     if (action.type === 'source') {
-                        const message = await collector!.message(action.sessionKey!, action.id!);
+                        const message = action.referenceCursor?await collector!.referenceMessage(action.referenceCursor):await collector!.message(action.sessionKey!, action.id!);
+                        if(closing||state.selectedKey!==action.sessionKey)return;
                         showDetail(state, message ? `${message.role}\n${message.text}` : 'Source message unavailable');
                         return;
                     }
@@ -387,6 +404,13 @@ export async function main(argv = process.argv.slice(2)) {
             state.selectedKey = action.sessionKey;
         else if (action?.type === 'message')
             showDetail(state, action.text ?? '');
+        else if(action?.type==='ref-sources'){
+            const session=data.sessions.find(session=>session.key===action.sessionKey),reference=session?.refs?.find(ref=>ref.id===action.id);if(reference)showReferenceSources(state,session!.key,reference,{sources:reference.sources??[{messageId:reference.messageId,source:reference.source}],hasMore:false,partial:true,observedAt:Date.now()},session!.evidence.contentRevision);
+        }
+        else if(action?.type==='page-refs')state.notice='Demo has no additional reference history';
+        else if(action?.type==='source'){
+            const session=data.sessions.find(session=>session.key===action.sessionKey),message=session?.evidence.messages.find(message=>message.id===action.id);showDetail(state,message?`Demo source\n${message.text}`:'Demo source unavailable');
+        }
         else if (action?.type === 'scope')
             state.notice = 'Demo fixture scopes';
         else if (action?.type === 'toggle-todo') {

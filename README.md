@@ -73,15 +73,18 @@ for the lifecycle and configuration details.
 | Agents | Verified arbitrary-depth lineage and checkout grouping |
 | Processes | Readable process identities, exclusive ownership and resource coverage |
 | Messages | Visible user/assistant text, inline expansion and full detail |
-| Refs | Mentioned or explicitly edited references, source jump, deliberate open/copy |
+| Refs | Assistant links/files, explicit edit markers, exact source history and deliberate open/copy |
 | To-do | Opt-in complete ACTION lists with local checked state and source provenance |
 
 Refs are recovered from the selected session's transcript history independently
 of the 200-message hot window. The coverage row shows when history is partial
 or unavailable and when local existence was last checked. Native `rN+` means a
 bounded or partial count; `r—` means the source is unavailable. The current
-index keeps at most 2,000 targets and 100 source mentions per target; pagination
-beyond those limits is still pending.
+index keeps at most 2,000 targets and 100 source mentions per target. In Refs,
+`b` loads older targets; `Space` opens a target's mention history, where `b`
+loads older sources. `Enter` opens the exact recorded source. `Escape` returns
+to the prior reader position; `B` reloads history from its newest page. Changed
+transcripts invalidate page cursors and label retained pages as stale.
 
 `Tab` changes views; arrows or `j`/`k` move; `Enter` activates the selected item;
 `Space` folds or expands; `/` filters; `?` shows help; `q` closes the inspector.

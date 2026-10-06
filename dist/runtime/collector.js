@@ -565,6 +565,12 @@ export class Collector extends EventEmitter {
         const ref = session.evidence.path ? { kind: 'path', value: session.evidence.path } : { kind: 'id', value: session.evidence.id };
         return this.index.page(session.evidence.provider, ref, { beforeId, limit: 200 });
     }
+    async pageReferences(key, options = {}) { const generation = this.visibilityGeneration, current = () => !this.stopped && this.paneOpen && key === this.visibleSession && generation === this.visibilityGeneration; const session = this.data.sessions.find(s => s.key === key); if (!session || !current())
+        return; const ref = session.evidence.path ? { kind: 'path', value: session.evidence.path } : { kind: 'id', value: session.evidence.id }; return this.index.pageReferences(session.evidence.provider, ref, options, current); }
+    async pageReferenceSources(key, targetId, options = {}) { const generation = this.visibilityGeneration, current = () => !this.stopped && this.paneOpen && key === this.visibleSession && generation === this.visibilityGeneration; const session = this.data.sessions.find(s => s.key === key); if (!session || !current())
+        return; const ref = session.evidence.path ? { kind: 'path', value: session.evidence.path } : { kind: 'id', value: session.evidence.id }; return this.index.pageReferenceSources(session.evidence.provider, ref, targetId, options, current); }
+    async referenceMessage(cursor) { const key = sessionKey(cursor.provider, cursor.sessionId), generation = this.visibilityGeneration, current = () => !this.stopped && this.paneOpen && key === this.visibleSession && generation === this.visibilityGeneration; if (!current())
+        return; return this.index.readReferenceMessage(cursor, current); }
     async recordLaunch(record) {
         if (!this.data.sessions.some(s => s.key === record.sessionKey))
             throw new Error('Unknown session; launch cannot take process ownership');

@@ -2,6 +2,9 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { outsideFences } from "./text.js";
+export const referenceMessageHash = (message) => createHash('sha256').update(JSON.stringify([message.id, message.role, message.kind, message.text, message.cwd, message.complete])).digest('hex');
+export const compareReferenceCursors = (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0) || a.file - b.file || a.offset - b.offset;
+const sourceKey = (source) => source.messageId + '\0' + (source.cursor?.hash ?? '');
 const windows = (p) => /^(?:[A-Za-z]:[\\/]|\\\\)/.test(p);
 function target(raw, cwd) {
     let value = raw.trim().replace(/^<|>$/g, '');
@@ -42,8 +45,10 @@ export class ReferenceList {
     seen = new Map();
     cwd;
     limited = false;
+    inputLimited = false;
     revision = 0;
-    constructor(cwd) { this.cwd = cwd; }
+    options;
+    constructor(cwd, options = {}) { this.cwd = cwd; this.options = options; }
     edit(file) { if (this.edited.has(file))
         return; this.edited.add(file); this.revision++; if (this.edited.size > 2000) {
         this.edited.delete(this.edited.values().next().value);
@@ -55,36 +60,46 @@ export class ReferenceList {
                 source.edited = true;
         } }
     add(normalized, source, edited = false) {
-        const key = normalized.target + '\0' + (normalized.line ?? ''), earlier = this.refs.get(key);
+        const key = normalized.target + '\0' + (normalized.line ?? ''), id = createHash('sha256').update(key).digest('hex').slice(0, 24);
+        const ref = { id, ...normalized };
+        this.options.onMention?.(ref, source);
+        if (this.options.retain === 0 || this.options.accept && !this.options.accept(ref))
+            return;
+        const earlier = this.refs.get(key);
         const sources = earlier?.sources ?? [];
-        const duplicate = sources.some(s => s.messageId === source.messageId);
+        const at = sources.findIndex(s => sourceKey(s) === sourceKey(source)), duplicate = at >= 0;
         const isEdited = edited || earlier?.edited === true || this.edited.has(normalized.target);
         if (!duplicate || isEdited !== earlier?.edited)
             this.revision++;
         if (!duplicate)
             sources.push({ ...source, edited: isEdited });
+        else if (source.cursor && sources[at]?.cursor && compareReferenceCursors(source.cursor, sources[at].cursor) > 0) {
+            sources[at] = { ...source, edited: isEdited };
+            this.revision++;
+        }
         if (sources.length > 100) {
             sources.splice(1, sources.length - 100);
             this.limited = true;
         }
-        const previousTime = earlier?.sources.find(s => s.messageId === earlier.messageId)?.timestamp;
-        const newer = !earlier || !duplicate && !(source.timestamp !== undefined && previousTime !== undefined && source.timestamp < previousTime);
+        const previousTime = earlier?.cursor?.timestamp ?? earlier?.sources.find(s => s.messageId === earlier.messageId)?.timestamp;
+        const newer = !earlier || (source.cursor && earlier.cursor ? compareReferenceCursors(source.cursor, earlier.cursor) > 0 : !duplicate && !(source.timestamp !== undefined && previousTime !== undefined && source.timestamp < previousTime));
         if (newer) {
             this.refs.delete(key);
-            this.refs.set(key, { id: createHash('sha256').update(key).digest('hex').slice(0, 24), ...normalized, messageId: source.messageId, source: source.source, edited: isEdited, sources });
+            this.refs.set(key, { id, ...normalized, messageId: source.messageId, source: source.source, cursor: source.cursor, edited: isEdited, sources });
         }
         else if (earlier) {
             earlier.edited = isEdited;
             earlier.sources = sources;
         }
-        if (this.refs.size > 2000) {
+        if (this.refs.size > (this.options.retain ?? 2000)) {
             this.refs.delete(this.refs.keys().next().value);
             this.limited = true;
         }
     }
-    updateEdits(files, cwd) { for (const file of files) {
+    updateEdits(files, cwd) { if (this.options.retain === 0)
+        return; for (const file of files) {
         const normalized = target(file, cwd || this.cwd);
-        if (normalized)
+        if (normalized && (!this.options.acceptEdit || this.options.acceptEdit(normalized.target)))
             this.edit(normalized.target);
     } }
     update(messages) {
@@ -120,17 +135,26 @@ export class ReferenceList {
             const prose = withoutLinks.replace(/`[^`]*`|https?:\/\/[^\s<>"`]+/gu, '');
             for (const m of prose.matchAll(/(?:^|[\s([])((?:\.\.?\/|\/)?[\p{L}\p{N}_@.-]+(?:\/[\p{L}\p{N}_@.-]+)+(?::\d+(?::\d+)?|#L\d+)?)/gu))
                 candidates.push(m[1].replace(/[.,;!?]+$/, ''));
-            if (candidates.length > 500 || message.text.length > body.length)
+            if (candidates.length > 500 || message.text.length > body.length) {
                 this.limited = true;
+                this.inputLimited = true;
+            }
+            let cursor, cursorComputed = false;
             for (const raw of candidates.slice(0, 500)) {
                 const normalized = target(raw, message.cwd || this.cwd);
-                if (normalized)
-                    this.add(normalized, { messageId: message.id, source: message.source, timestamp: message.timestamp });
+                if (normalized) {
+                    if (!cursorComputed) {
+                        cursor = this.options.cursor?.(message);
+                        cursorComputed = true;
+                    }
+                    this.add(normalized, { messageId: message.id, source: message.source, timestamp: message.timestamp, cursor });
+                }
             }
         }
     }
     merge(other) {
         this.limited ||= other.limited;
+        this.inputLimited ||= other.inputLimited;
         for (const file of other.edited)
             this.edit(file);
         const records = [...other.refs.values()].flatMap(ref => ref.sources.map(source => ({ ref, source })));
@@ -142,6 +166,7 @@ export class ReferenceList {
         if (!isCurrent())
             return;
         const result = structuredClone([...this.refs.values()].reverse());
+        result.sort((a, b) => a.cursor && b.cursor ? compareReferenceCursors(b.cursor, a.cursor) : 0);
         let next = 0;
         const worker = async () => { while (next < result.length && isCurrent()) {
             const ref = result[next++];

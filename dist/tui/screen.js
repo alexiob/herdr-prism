@@ -1,13 +1,26 @@
 import { tabs } from "./types.js";
 import { sanitize, truncate, wrap, number, bytes, age, spark } from "./text.js";
-export function createUiState() { return { tab: 'Overview', cursor: 0, scroll: 0, collapsed: new Set(), expanded: new Set(), filter: '', editingFilter: false, pin: false, subtree: false, ascii: false, monochrome: false, help: false, numberPrefix: '', numberTargets: new Map(), view: 'lineage', pagedMessages: new Map(), messageReaders: new Map(), readers: new Map(), followMessages: true }; }
-export function showDetail(state, text) { if (state.detail === undefined)
-    state.detailReader = { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll }; if (state.tab === 'Messages' && state.selectedKey) {
+import { visibleReferences } from "./reference-readers.js";
+export { addReferencePage, showReferenceSources } from "./reference-readers.js";
+export function createUiState() { return { tab: 'Overview', cursor: 0, scroll: 0, collapsed: new Set(), expanded: new Set(), filter: '', editingFilter: false, pin: false, subtree: false, ascii: false, monochrome: false, help: false, numberPrefix: '', numberTargets: new Map(), view: 'lineage', pagedMessages: new Map(), messageReaders: new Map(), readers: new Map(), followMessages: true, pagedRefs: new Map() }; }
+export function showDetail(state, text) { if (state.detail === undefined) {
+    const position = { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll };
+    if (state.refSources)
+        state.sourceDetailReader = position;
+    else
+        state.detailReader = position;
+} if (state.tab === 'Messages' && state.selectedKey) {
     const reader = state.messageReaders.get(state.selectedKey) ?? { lastIds: [], following: false, newCount: 0 };
     reader.following = false;
     state.messageReaders.set(state.selectedKey, reader);
 } state.detail = text.slice(0, 1024 * 1024); state.cursor = 0; state.scroll = 0; state.cursorId = undefined; }
-export function closeDetail(state) { state.detail = undefined; if (state.detailReader) {
+export function closeDetail(state) { if (state.detail !== undefined && state.refSources) {
+    state.detail = undefined;
+    if (state.sourceDetailReader)
+        Object.assign(state, state.sourceDetailReader);
+    state.sourceDetailReader = undefined;
+    return;
+} state.detail = undefined; state.refSources = undefined; state.sourceDetailReader = undefined; if (state.detailReader) {
     Object.assign(state, state.detailReader);
     state.detailReader = undefined;
 } }
@@ -289,16 +302,21 @@ function contentRows(session, state, columns, now, data) {
         const coverage = session.refCoverage;
         const label = coverage === 'session' ? 'Session reference history' : coverage === 'partial' ? 'Partial reference history' : coverage === 'unavailable' ? 'Reference source unavailable' : 'Retained message references';
         rows.push({ id: 'refs-coverage', text: `${label} · ${session.refs?.length ?? 0} retained · ${age(session.refUpdatedAt, now)} ago` });
+        const references = visibleReferences(session, state), paged = state.pagedRefs.get(session.key);
+        if (paged)
+            rows.push({ id: 'refs-snapshot', text: `Older reference snapshot${paged.stale ? ' · stale; b reloads' : ''} · ${paged.refs.length} loaded · ${age(paged.observedAt, now)} ago` });
         let group = '';
-        for (const ref of session.refs ?? []) {
+        for (const ref of references) {
             if (!match(ref.target, state))
                 continue;
-            if (ref.messageId !== group) {
-                rows.push({ id: `source:${ref.messageId}`, text: `Message ${ref.messageId}`, action: { type: 'source', sessionKey: session.key, id: ref.messageId } });
-                group = ref.messageId;
+            const sourceGroup = ref.messageId + (ref.cursor ? ':' + ref.cursor.hash : '');
+            if (sourceGroup !== group) {
+                rows.push({ id: `source:${sourceGroup}`, text: `Message ${ref.messageId}`, action: { type: 'source', sessionKey: session.key, id: ref.messageId, referenceCursor: ref.cursor } });
+                group = sourceGroup;
             }
-            rows.push({ id: ref.id, text: `${ref.edited ? '✎ ' : ''}${ref.exists === false ? '? ' : ''}${ref.target}${ref.kind === 'directory' ? '/' : ''}${ref.line ? `:${ref.line}` : ''}`, action: { type: 'open-ref', sessionKey: session.key, id: ref.id, target: ref.target, line: ref.line }, sourceId: ref.messageId, copy: ref.target });
+            rows.push({ id: ref.id, text: `${ref.edited ? '✎ ' : ''}${ref.exists === false ? '? ' : ''}${ref.target}${ref.kind === 'directory' ? '/' : ''}${ref.line ? `:${ref.line}` : ''}`, action: { type: 'open-ref', sessionKey: session.key, id: ref.id, target: ref.target, line: ref.line, referenceCursor: ref.cursor }, sourceId: ref.messageId, copy: ref.target });
         }
+        rows.push({ id: 'refs-page', text: paged && !paged.hasMore && !paged.stale ? 'End of target history · B reloads' : 'Load older reference targets · b', action: paged && !paged.hasMore && !paged.stale ? undefined : { type: 'page-refs', sessionKey: session.key, referencePageCursor: paged?.stale ? undefined : paged?.cursor, restart: paged?.stale } });
     }
     else if (state.tab === 'To-do') {
         rows.push({ id: 'todo-status', text: `${session.todoStatus ?? 'not reported'} · ${['reported', 'empty'].includes(session.todoStatus ?? '') ? session.todos?.filter(t => !t.checked).length ?? 0 : '—'} pending · list ${age(session.todoReportedAt, now)} ago`, ...(session.todoSourceMessageId ? { action: { type: 'source', sessionKey: session.key, id: session.todoSourceMessageId }, sourceId: session.todoSourceMessageId } : {}) });
@@ -317,6 +335,12 @@ export function renderScreen(data, state, columns, height, now = Date.now()) {
     const session = data.sessions.find(s => s.key === state.selectedKey) ?? data.sessions[0];
     if (session && !state.selectedKey)
         state.selectedKey = session.key;
+    if (state.refSources && state.refSources.sessionKey !== session?.key) {
+        state.detail = undefined;
+        closeDetail(state);
+    }
+    if (state.refSources && state.refSources.revision !== session?.evidence.contentRevision)
+        state.refSources.stale = true;
     const numericTargets = new Map();
     let rows = [];
     const server = data.server ? `${data.server.host}/${data.server.session} · ` : '';
@@ -356,9 +380,17 @@ export function renderScreen(data, state, columns, height, now = Date.now()) {
         retainMessages(state, session.key, session.evidence.messages);
     }
     if (state.help)
-        rows = wrap('Tab/Shift-Tab views; j/k or arrows move; Home/End; PageUp/PageDown; b older messages; Enter focus/open; Space fold/expand; d full details; / filter; Escape back; p pin; u subtree; w worktrees; s source; y copy (one inline command, otherwise full To-do request); x check/reopen To-do; e content-free diagnostic export; , settings; q close. Numbers + Enter select the displayed agent target. Data is source-labeled; — means unavailable, 0 means measured zero.', columns).map((text, i) => ({ id: `help:${i}`, text }));
+        rows = wrap('Tab/Shift-Tab views; j/k or arrows move; Home/End; PageUp/PageDown; b older messages/refs; B reload ref history; Enter focus/open; Space fold/expand/ref sources; d full details; / filter; Escape back; p pin; u subtree; w worktrees; s source; y copy (one inline command, otherwise full To-do request); x check/reopen To-do; e content-free diagnostic export; , settings; q close. Numbers + Enter select the displayed agent target. Data is source-labeled; — means unavailable, 0 means measured zero.', columns).map((text, i) => ({ id: `help:${i}`, text }));
     else if (state.detail !== undefined)
         rows = wrap(state.detail, columns).map((text, i) => ({ id: `detail:${i}`, text }));
+    else if (state.refSources) {
+        const reader = state.refSources;
+        rows = wrap(reader.reference.target + (reader.reference.line ? ':' + reader.reference.line : ''), columns, 128).map((text, i) => ({ id: `ref-path:${i}`, text }));
+        rows.push({ id: 'ref-sources-status', text: `${reader.sources.length} mention sources${reader.partial ? ' · partial input' : ''}${reader.stale ? ' · stale snapshot; b reloads' : ''} · ${age(reader.observedAt, now)} ago` });
+        for (const source of reader.sources)
+            rows.push({ id: `ref-source:${source.messageId}:${source.cursor?.hash ?? source.source ?? ''}`, text: `Message ${source.messageId} · ${age(source.timestamp, now)} ago${source.edited ? ' · edited' : ''}`, action: { type: 'source', sessionKey: reader.sessionKey, id: source.messageId, referenceCursor: source.cursor }, sourceId: source.messageId, copy: source.source ?? source.messageId });
+        rows.push({ id: 'ref-sources-page', text: reader.hasMore || reader.stale ? 'Load older mentions · b' : 'End of mention history · B reloads', action: reader.hasMore || reader.stale ? { type: 'ref-sources', sessionKey: reader.sessionKey, id: reader.reference.id, referencePageCursor: reader.stale ? undefined : reader.cursor, restart: reader.stale } : undefined });
+    }
     else if (state.tab === 'Agents')
         rows = agentRows(data, state, numericTargets);
     else if (session)
@@ -444,7 +476,12 @@ export function handleKey(state, key, data, screen) {
     if (key === 'q' || key === 'ctrl+c')
         return { type: 'quit' };
     if (key === 'tab' || key === 'shift+tab') {
-        closeDetail(state);
+        if (state.refSources && state.detail !== undefined) {
+            closeDetail(state);
+            closeDetail(state);
+        }
+        else
+            closeDetail(state);
         if (state.readerKey)
             state.readers.set(state.readerKey, { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll });
         const i = tabs.indexOf(state.tab);
@@ -486,6 +523,12 @@ export function handleKey(state, key, data, screen) {
         const sessionKey = state.numberTargets.get(Number(state.numberPrefix));
         state.numberPrefix = '';
         return sessionKey ? { type: 'focus', sessionKey } : undefined;
+    }
+    if ((key === 'b' || key === 'B') && state.tab === 'Refs' && state.detail === undefined) {
+        const reader = state.refSources ?? state.pagedRefs.get(state.selectedKey ?? ''), restart = key === 'B' || reader?.stale === true;
+        if (reader && !reader.hasMore && !restart)
+            return;
+        return { type: state.refSources ? 'ref-sources' : 'page-refs', sessionKey: state.selectedKey, id: state.refSources?.reference.id, referencePageCursor: restart ? undefined : reader?.cursor, restart };
     }
     if ((key === 'b' || key === 'pageup' && state.cursor === 0) && state.tab === 'Messages' && state.detail === undefined) {
         const session = data.sessions.find(s => s.key === state.selectedKey);
@@ -549,8 +592,16 @@ export function handleKey(state, key, data, screen) {
             const id = `process:${state.selectedKey}:${row.id}`;
             state.collapsed.has(id) ? state.collapsed.delete(id) : state.collapsed.add(id);
         }
-        else if (state.tab === 'Refs')
-            showDetail(state, row.copy ?? row.text);
+        else if (state.tab === 'Refs') {
+            if (state.refSources)
+                return row.action;
+            const session = data.sessions.find(s => s.key === state.selectedKey);
+            const ref = session ? visibleReferences(session, state).find(ref => ref.id === row.id) : undefined;
+            if (ref)
+                return { type: 'ref-sources', sessionKey: state.selectedKey, id: ref.id };
+            else
+                showDetail(state, row.copy ?? row.text);
+        }
         return;
     }
     if (key === 'x' && state.tab === 'To-do')
@@ -558,7 +609,7 @@ export function handleKey(state, key, data, screen) {
     if (key === 'y')
         return { type: 'copy', text: row.copy ?? row.text };
     if (key === 's' && row.sourceId)
-        return { type: 'source', sessionKey: state.selectedKey, id: row.sourceId };
+        return { type: 'source', sessionKey: state.selectedKey, id: row.sourceId, referenceCursor: row.action?.referenceCursor };
     if (key === 'd' && state.tab === 'Agents') {
         const session = data.sessions.find(s => s.key === row.action?.sessionKey);
         if (session)

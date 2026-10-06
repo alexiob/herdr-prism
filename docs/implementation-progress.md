@@ -377,6 +377,51 @@ they do not certify paid-provider interaction, native sidebar pixels, WAN behavi
 or the missing upstream viewer-visibility contract. Windows-specific fixes and
 validation remain with the other agent.
 
+## Reference target/source pagination — 2026-10-06
+
+The reference hot bounds now have on-demand recovery. Refs `b` loads older
+targets; `Space` opens mention history, `b` loads earlier sources, `Enter` reads
+the exact recorded revision, and nested `Escape` restores both reader anchors.
+`B` restarts history. Changed transcripts invalidate page cursors and mark cached
+pages stale. Source cursors bind provider/session, canonical file identity, byte
+offset and visible-body fingerprint; reused paths and later same-ID bodies cannot
+silently replace the chosen source. Page cursors also bind the target scope.
+
+Each page defaults to 50 items, caps at 200, and uses at most 201 candidates per
+scan. A verification scan checks latest mentions before returning a target;
+older windows refill displaced candidates without a lifetime ID set. A target key
+breaks shared-message offset ties. UI caches retain at most 500 targets/sources
+and 4 MiB per reader, with at most four target caches. Pages retain only first/
+latest source metadata; complete source lists remain independently pageable.
+Only selected-visible-session requests can read bodies; closure/selection changes
+cancel scans. Claude unfinished visible text is retained separately at 16 heads /
+1 MiB, with explicit partial coverage on overflow. Hidden reasoning is excluded.
+
+Tests recover 2,105 distinct targets, 150 mirrored mentions and 405 targets from
+one message, preserve explicit edits, distinguish completed same-ID revisions,
+reject changed-file/target cursors, cancel in-flight work, restore nested readers
+and bound retained pages. The Claude prefix regression failed before correction.
+Strict macOS passed 283 tests: 273 passed, ten platform skips, zero failures.
+Strict Linux arm64 Node 24 passed 283 tests: 272 passed, eleven platform skips,
+zero failures, using the checksummed helper and `--init`. Logs are
+`/private/tmp/prism-reference-pages-complete-strict-macos.log` and
+`/private/tmp/prism-reference-pages-complete-strict-linux-arm64.log`.
+After the requested pull through `2e68d55`, typecheck and 110 targeted provider,
+content, collector, TUI, native, lease and lifecycle tests passed. The incoming
+Windows-only admission guard and its evidence were preserved.
+
+Actual staged macOS and Linux Herdr `--references` acceptance recovered 106
+older targets from a 2,106-target fixture, displayed explicit edit evidence,
+loaded all 150 mentions, opened the first source, and restored both readers.
+All ten existing interaction/ownership gates passed alongside that eleventh gate.
+The final package evidence is recorded under
+`artifacts/prism-reference-pages-publish-live-macos/features.json` and
+`artifacts/prism-reference-pages-publish-live-linux-arm64/features.json`.
+Actual macOS-to-Linux SSH acceptance is recorded under
+`artifacts/remote-reference-pages-publish/remote.json`.
+These use synthetic provider fixtures and do not replace the remaining mixed-
+provider, native-pixel, multi-client or performance acceptance.
+
 ## Performance evidence
 
 `scripts/profile-host.mjs` now profiles 50 declared fixture sessions, 500 real
@@ -403,18 +448,18 @@ replace the aggregate budgets. Active CPU remains above the strict 3% target.
   0.9.3. Remote collection must stay on each agent's server.
   The user explicitly chose to keep that API as an upstream dependency.
 
-- Resume Windows only on a Windows machine as requested, using the handoff.
-  Resolve its remaining tests and validate/include the Windows helper with exact
-  checksums and matching notices. Keep the eight passing Unix jobs intact.
-  Then exercise ordinary GitHub installation on every packaged platform.
+- Windows-specific delivery is validated by the owning Windows agent through
+  `5e9f4b1`, including both majors and ordinary GitHub installation. Its
+  [all-ten-job CI run](https://github.com/alexiob/herdr-prism/actions/runs/37474269213)
+  was independently read back as successful. Later general feature commits need
+  their own platform evidence; this machine does not repeat Windows-specific fixes.
 - The renamed advanced acceptance gate passed on all eight Unix CI jobs for
   `376d3a6`; subsequent source changes need their own evidence. Add actual Windows
   TTL coverage after user resumption, native client/theme pixels and multiple clients.
 - Exercise the full mixed-provider/deep-child/second-worktree/registered-detached
   scenario, launch ownership, selected-session visibility and reconnect/upgrade
   recovery in live Herdr. Complete provider audit limitations remain explicit.
-- Finish older reference target/source pagination, exact historical source
-  navigation and native numeric badge mapping under a provable host contract.
+- Finish native numeric badge mapping under a provable host contract.
 - Meet active CPU and full live-host performance budgets; run long recovery/soak
   acceptance. Unit fixtures and controlled transport profiles are not substitutes.
 - Finish a requirement-by-requirement evidence audit and stage/install/remove

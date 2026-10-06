@@ -26,7 +26,7 @@ The following are source-backed findings, not failures reproduced on a native cl
 
 Acceptance proof needed: either explicitly narrow the approved native requirement to host-owned numbering, or implement and test the documented safe, readback-verified case. No speculative index should be published simply to fill the token.
 
-### P2 — Pagination beyond the bounded reference index remains
+## Resolved reference retention and pagination finding — 2026-10-06
 
 The original audit found that rebuilding references from 200 retained messages
 discarded earlier targets, edits and sources without a coverage label. That case
@@ -40,11 +40,27 @@ partial coverage and `r—` unavailable sources.
 The regressions recover an early reference and edit after 250 unrelated messages,
 retain the first and latest mention, deduplicate mirrors, follow append/rotation,
 stop on cancellation, and retry transient source failure only on a five-second
-visible-session cadence. These close the original 200-message loss case. They
-do not complete the entire reference requirement: the hot index caps targets at
+visible-session cadence. The hot index caps targets at
 2,000, edit paths at 2,000, mention sources at 100 per target, and open transcript
-readers at eight files. Older target/source pagination and exact historical
-source-reader navigation beyond those bounds remain required. See the
+readers at eight files. Bounded on-demand pages now recover older targets and
+mention sources from all known canonical files for the selected session.
+Candidate scans verify latest mentions before returning a page; message-offset
+ties include a target/source key so one message's many targets remain pageable.
+Page cursors verify transcript versions and target scope. Exact source cursors
+verify session, file identity, byte offset and visible message fingerprint;
+reused paths and later same-ID message revisions cannot silently substitute.
+
+Provider tests recover all 2,105 targets beyond the hot cap, all 150 mirrored
+mentions, and 405 targets sharing one source offset. Collector regressions
+reject hidden/wrong-session reads and cancel in-flight requests. TUI tests bound
+retained pages and restore source-list and target-list anchors. The live
+`--references` gate recovered 106 older targets from a 2,106-target synthetic Pi
+fixture, loaded 150 mentions, opened the first source and restored both reader
+positions in actual isolated macOS and Linux Herdr. The historical Claude reader
+also retains unfinished visible blocks across unrelated messages; its bounded
+assembly overflow remains explicitly partial. These close the source-backed
+reference retention/pagination finding, without certifying provider formats
+beyond the documented adapters or the overall performance budget. See the
 [reference history plan](superpowers/plans/2026-10-06-reference-history.md).
 
 ## Resolved native root ordering finding — 2026-10-06
@@ -91,10 +107,10 @@ part of the broader live acceptance scenario.
 | Six-view dashboard | `src/tui/screen.ts`, `test/tui.test.ts`: Overview, Agents, Processes, Messages, Refs, To-do; narrow widths, keyboard folds, disclosure-coordinate mouse regressions, stable numeric target capture, per-reader history/anchor, tool and goal details | Actual native mouse transport and theme/client screenshots remain separate |
 | Token accounting and provenance | `src/metrics/usage-reducer.ts` and `test/metrics.test.ts`: cumulative/delta epochs, request identity, cache semantics, model changes, context/rate evidence, partial priced cost, subtree deduplication, current/last turn baselines | Do not treat unsupported provider counters or unavailable generation timing as a missing fabricated metric. Exact real-provider breadth is documented in `docs/provider-compatibility.md` |
 | Provider messages, goals and lineage | `test/providers.test.ts`: exact identities, deep Codex children, paired spawn evidence, Claude child records/streaming, Pi fork distinction, rotation and partial records, metadata-only scoping; current Codex plaintext/goal/turn-accounting shapes | Existing real transcripts were read-only audited; actual Pi companion goal/parent evidence remains fixture-only. A combined real Codex/Claude/Pi scenario has not passed |
-| Messages, Refs, To-do | `test/content.test.ts`, provider/collector and TUI tests: chronological messages, selected-session reference replay beyond 200 messages, edit/source retention, partial coverage, source reader, ACTION complete-list/clear and local checks | Older reference targets and mention-source paging remain above. Local checkboxes do not mutate transcripts; no provider instruction installation is needed or performed |
+| Messages, Refs, To-do | Content/provider/collector/TUI tests and live `--references` gate: historical target/source paging, exact revision jumps, nested reader anchors, edit evidence and visible-session cancellation; ACTION replay and local checks | Adapter/record/assembly limits remain labeled partial. Local checkboxes do not mutate transcripts; no provider instruction installation is needed or performed |
 | Session resource ownership | `src/process/ownership.ts`, `test/process.test.ts`: PID birth identity, disjoint nearest-root ownership, reparenting, PID reuse, launch registration identity, unavailable vs zero, warmup, shared-root ambiguity; actual Unix sampler controlled-worker tests | Full real-Herdr registered detached-job + nested harness attribution scenario remains unproven. Unit and sampler tests are substantive evidence, not a substitute for that combined scenario |
 | Scoped collection | Collector samples displayed scope, keeps other agent roots as exclusion proofs, and gates detailed body/Git work to visible selection; provider and collector tests exercise gating | Advanced live gate observes hidden freshness/body pause, but does not itself instrument every filesystem/Git/process call; avoid describing that observation as complete I/O measurement |
-| Native overview and navigation | `test/native.test.ts`, advanced live gate: bounded tokens, exact occupant checks, foreign budget/owner protection, TTL/readback and preserved native focus | Host root order and native badges above. Arbitrary synthetic native rows are unsupported by Herdr and correctly supplied by the right dashboard instead |
+| Native overview and navigation | `test/native.test.ts`, advanced live gate: bounded tokens, exact occupant checks, foreign budget/owner protection, TTL/readback and preserved native focus | Native badges remain above. Arbitrary synthetic native rows are unsupported by Herdr and correctly supplied by the right dashboard instead |
 | Follow, pin and lifecycle | Actual advanced gate passes right follow/pin, hidden resume, exit/restart and conflict-safe unconfigure on all eight Unix jobs | A simultaneous multi-client renderer exercise and actual reference-plugin coexistence are not implied by synthetic foreign-owner tests |
 | Git/worktree display | Git fixtures and TUI tests cover branch state, statistics/conflicts, family/checkout grouping and cross-checkout badges; metadata-only nodes intentionally wait for selection | Combined deep-child/different-worktree live scenario remains unproven; this is not a request to restore eager background Git work |
 
@@ -111,7 +127,7 @@ node --experimental-strip-types --test test/native.test.ts test/tui.test.ts test
 node --experimental-strip-types --test test/providers.test.ts test/metrics.test.ts test/process.test.ts test/launch-bridge.test.ts
 ```
 
-The remaining native badge and reference-pagination cases need dedicated acceptance;
+The remaining native badge mapping needs dedicated acceptance;
 existing green tests alone do not prove them. For completed live gates, use the
 archived Unix feature JSON from the linked run and the subsequent evidence in
 `docs/implementation-progress.md`. Windows work remains owned by the other machine.

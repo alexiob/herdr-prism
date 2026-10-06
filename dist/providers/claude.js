@@ -2,6 +2,8 @@ import { basename, dirname } from 'node:path';
 import { EvidenceBuilder, array, clean, filePath, identity, number, object, visible } from "./common.js";
 export class ClaudeAdapter extends EvidenceBuilder {
     directoryParent;
+    pending = new Map();
+    pendingBytes = 0;
     constructor(path, max) {
         super('claude', path, max);
         if (basename(path).startsWith('agent-') && basename(dirname(path)) === 'subagents') {
@@ -43,7 +45,7 @@ export class ClaudeAdapter extends EvidenceBuilder {
                 }
             }
             const body = visible(m.content);
-            const previous = this.messages.get(id);
+            const previous = this.messages.get(id) ?? this.pending.get(id);
             let merged = body;
             if (previous?.text) {
                 if (!body || previous.text.startsWith(body))
@@ -54,8 +56,25 @@ export class ClaudeAdapter extends EvidenceBuilder {
             const linked = new Map((previous?.tools ?? []).map(tool => [tool.id, tool]));
             for (const tool of tools)
                 linked.set(tool.id, tool);
-            if (merged || linked.size)
+            if (merged || linked.size) {
                 this.message({ id, role: 'assistant', text: merged.slice(0, 65536), timestamp, cwd: e.cwd, source, complete: m.stop_reason !== null, tools: [...linked.values()] });
+                const old = this.pending.get(id);
+                if (old) {
+                    this.pendingBytes -= Buffer.byteLength(old.text);
+                    this.pending.delete(id);
+                }
+                const current = this.messages.get(id);
+                if (current?.complete === false) {
+                    this.pending.set(id, current);
+                    this.pendingBytes += Buffer.byteLength(current.text);
+                }
+                while (this.pending.size > 16 || this.pendingBytes > 1024 * 1024) {
+                    const first = this.pending.keys().next().value;
+                    this.pendingBytes -= Buffer.byteLength(this.pending.get(first).text);
+                    this.pending.delete(first);
+                    this.diagnostic('unfinished assistant assembly limit reached; source body coverage partial');
+                }
+            }
             const u = object(m.usage);
             if (Object.keys(u).length)
                 this.usageRecord({ id: `request:${identity(r.requestId) || id}`, sessionId: e.id, requestId: identity(r.requestId) || id, model: e.model, timestamp, kind: 'delta', input: number(u.input_tokens), output: number(u.output_tokens), cacheRead: number(u.cache_read_input_tokens), cacheWrite: number(u.cache_creation_input_tokens), cacheSemantics: 'separate', source });

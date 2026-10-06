@@ -3,6 +3,7 @@ import { CodexAdapter } from "./codex.js";
 import { ClaudeAdapter } from "./claude.js";
 import { PiAdapter } from "./pi.js";
 import { JsonlTail } from "./tail.js";
+import { referenceCursor } from "./reference-pages.js";
 function freeze(value) { if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const child of Object.values(value))
         freeze(child);
@@ -14,9 +15,10 @@ export class ReferenceHistory {
     provider;
     maxRecord;
     closed = false;
+    sessionId;
     cached;
-    constructor(provider, maxRecord) { this.provider = provider; this.maxRecord = maxRecord; }
-    reader(path) { const list = new ReferenceList(), adapter = this.provider === 'codex' ? new CodexAdapter(this.provider, path, 2) : this.provider === 'claude' ? new ClaudeAdapter(path, 2) : new PiAdapter(this.provider, path, 2); adapter.onEditedPaths = (paths, cwd) => list.updateEdits(paths, cwd); return { tail: new JsonlTail(this.maxRecord), adapter, list }; }
+    constructor(provider, maxRecord, sessionId) { this.provider = provider; this.maxRecord = maxRecord; this.sessionId = sessionId; }
+    reader(path, file) { const tail = new JsonlTail(this.maxRecord), adapter = this.provider === 'codex' ? new CodexAdapter(this.provider, path, 2) : this.provider === 'claude' ? new ClaudeAdapter(path, 2) : new PiAdapter(this.provider, path, 2), list = new ReferenceList(undefined, { cursor: message => referenceCursor(this.provider, adapter.evidence.id, path, tail.fileId, file, message) }); adapter.onEditedPaths = (paths, cwd) => list.updateEdits(paths, cwd); return { tail, adapter, list, file }; }
     async read(files, isCurrent) {
         const current = () => !this.closed && isCurrent();
         if (!current())
@@ -32,18 +34,16 @@ export class ReferenceHistory {
             for (const file of selected) {
                 if (!current())
                     return;
+                const order = files.indexOf(file);
                 let reader = this.readers.get(file);
-                if (!reader) {
-                    reader = this.reader(file);
+                if (!reader || reader.file !== order) {
+                    reader = this.reader(file, order);
                     this.readers.set(file, reader);
                 }
                 try {
-                    await reader.tail.read(file, record => { const adapter = reader.adapter; if (adapter instanceof CodexAdapter)
-                        adapter.consume(record);
-                    else if (adapter instanceof ClaudeAdapter)
-                        adapter.consume(record);
-                    else
-                        adapter.consume(record); reader.list.update([...adapter.messages.values()]); }, () => { const fresh = this.reader(file); reader.adapter = fresh.adapter; reader.list = fresh.list; }, () => { reader.list.limited = true; }, current);
+                    await reader.tail.read(file, record => { reader.adapter.consume(record); reader.list.update([...reader.adapter.messages.values()]); }, () => { const fresh = this.reader(file, order); reader.adapter = fresh.adapter; reader.list = new ReferenceList(undefined, { cursor: message => referenceCursor(this.provider, reader.adapter.evidence.id, file, reader.tail.fileId, order, message) }); reader.adapter.onEditedPaths = (paths, cwd) => reader.list.updateEdits(paths, cwd); }, () => { reader.list.limited = true; }, current);
+                    if (this.sessionId && reader.adapter.evidence.id !== this.sessionId)
+                        throw new Error('Reference session identity changed');
                     if (reader.adapter.evidence.diagnostics?.some(d => !d.startsWith('retained record window limit reached')))
                         reader.list.limited = true;
                     combined.limited ||= reader.list.limited;

@@ -1,26 +1,27 @@
 import {ReferenceList} from '../content/refs.ts';
 import type {ContentRef} from '../content/refs.ts';
-import type {EvidenceBuilder} from './common.ts';
 import {CodexAdapter} from './codex.ts';
 import {ClaudeAdapter} from './claude.ts';
 import {PiAdapter} from './pi.ts';
 import {JsonlTail} from './tail.ts';
+import {referenceCursor} from './reference-pages.ts';
 
 export interface ReferenceState {refs:ContentRef[];limited:boolean;observedAt:number;}
 function freeze<T>(value:T):T{if(value&&typeof value==='object'&&!Object.isFrozen(value)){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;}
 /** One selected session's incremental readers; no historical message bodies persist. */
 export class ReferenceHistory {
- private readers=new Map<string,{tail:JsonlTail;adapter:EvidenceBuilder;list:ReferenceList}>();
- private provider:string;private maxRecord:number;private closed=false;
+ private readers=new Map<string,{tail:JsonlTail;adapter:CodexAdapter|ClaudeAdapter|PiAdapter;list:ReferenceList;file:number}>();
+ private provider:string;private maxRecord:number;private closed=false;private sessionId?:string;
  private cached?:{signature:string;state:ReferenceState};
- constructor(provider:string,maxRecord:number){this.provider=provider;this.maxRecord=maxRecord;}
- private reader(path:string){const list=new ReferenceList(),adapter=this.provider==='codex'?new CodexAdapter(this.provider,path,2):this.provider==='claude'?new ClaudeAdapter(path,2):new PiAdapter(this.provider,path,2);adapter.onEditedPaths=(paths,cwd)=>list.updateEdits(paths,cwd);return{tail:new JsonlTail(this.maxRecord),adapter,list};}
+ constructor(provider:string,maxRecord:number,sessionId?:string){this.provider=provider;this.maxRecord=maxRecord;this.sessionId=sessionId;}
+ private reader(path:string,file:number){const tail=new JsonlTail(this.maxRecord),adapter=this.provider==='codex'?new CodexAdapter(this.provider,path,2):this.provider==='claude'?new ClaudeAdapter(path,2):new PiAdapter(this.provider,path,2),list=new ReferenceList(undefined,{cursor:message=>referenceCursor(this.provider,adapter.evidence.id,path,tail.fileId,file,message)});adapter.onEditedPaths=(paths,cwd)=>list.updateEdits(paths,cwd);return{tail,adapter,list,file};}
  async read(files:string[],isCurrent:()=>boolean):Promise<ReferenceState|undefined>{
   const current=()=>!this.closed&&isCurrent();if(!current())return;
   const selected=files.slice(-8),allowed=new Set(selected);for(const file of this.readers.keys())if(!allowed.has(file))this.readers.delete(file);
   const combined=new ReferenceList();combined.limited=selected.length<files.length;let available=false;
-  try{for(const file of selected){if(!current())return;let reader=this.readers.get(file);if(!reader){reader=this.reader(file);this.readers.set(file,reader);}
-   try{await reader.tail.read(file,record=>{const adapter=reader!.adapter;if(adapter instanceof CodexAdapter)adapter.consume(record);else if(adapter instanceof ClaudeAdapter)adapter.consume(record);else (adapter as PiAdapter).consume(record);reader!.list.update([...adapter.messages.values()]);},()=>{const fresh=this.reader(file);reader!.adapter=fresh.adapter;reader!.list=fresh.list;},()=>{reader!.list.limited=true;},current);
+  try{for(const file of selected){if(!current())return;const order=files.indexOf(file);let reader=this.readers.get(file);if(!reader||reader.file!==order){reader=this.reader(file,order);this.readers.set(file,reader);}
+   try{await reader.tail.read(file,record=>{reader!.adapter.consume(record);reader!.list.update([...reader!.adapter.messages.values()]);},()=>{const fresh=this.reader(file,order);reader!.adapter=fresh.adapter;reader!.list=new ReferenceList(undefined,{cursor:message=>referenceCursor(this.provider,reader!.adapter.evidence.id,file,reader!.tail.fileId,order,message)});reader!.adapter.onEditedPaths=(paths,cwd)=>reader!.list.updateEdits(paths,cwd);},()=>{reader!.list.limited=true;},current);
+    if(this.sessionId&&reader.adapter.evidence.id!==this.sessionId)throw new Error('Reference session identity changed');
     if(reader.adapter.evidence.diagnostics?.some(d=>!d.startsWith('retained record window limit reached')))reader.list.limited=true;
     combined.limited ||= reader.list.limited;available=true;
    }catch(error){if((error as Error).name==='AbortError')throw error;this.readers.delete(file);combined.limited=true;}

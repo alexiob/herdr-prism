@@ -16,6 +16,8 @@ import { StateStore, identityName } from '../state/store.ts';
 import { NativePublisher } from '../native/publisher.ts';
 import type { DashboardData, SessionView } from '../tui/types.ts';
 import { loadServerIdentity, serverSession } from './server.ts';
+import type {ReferencePageOptions} from '../providers/reference-pages.ts';
+import type {ReferenceCursor} from '../content/refs.ts';
 export interface CollectorOptions {
     rpc: Rpc;
     settings: Settings;
@@ -416,6 +418,9 @@ export class Collector extends EventEmitter {
         return current; const ref = session.evidence.path ? { kind: 'path' as const, value: session.evidence.path } : { kind: 'id' as const, value: session.evidence.id }; return this.index.readMessage(session.evidence.provider, ref, id); }
     async pageMessages(key: string, beforeId?: string) { const session = this.data.sessions.find(s => s.key === key); if (!session)
         return []; const ref = session.evidence.path ? { kind: 'path' as const, value: session.evidence.path } : { kind: 'id' as const, value: session.evidence.id }; return this.index.page(session.evidence.provider, ref, { beforeId, limit: 200 }); }
+    async pageReferences(key:string,options:ReferencePageOptions={}){const generation=this.visibilityGeneration,current=()=>!this.stopped&&this.paneOpen&&key===this.visibleSession&&generation===this.visibilityGeneration;const session=this.data.sessions.find(s=>s.key===key);if(!session||!current())return;const ref=session.evidence.path?{kind:'path' as const,value:session.evidence.path}:{kind:'id' as const,value:session.evidence.id};return this.index.pageReferences(session.evidence.provider,ref,options,current);}
+    async pageReferenceSources(key:string,targetId:string,options:ReferencePageOptions={}){const generation=this.visibilityGeneration,current=()=>!this.stopped&&this.paneOpen&&key===this.visibleSession&&generation===this.visibilityGeneration;const session=this.data.sessions.find(s=>s.key===key);if(!session||!current())return;const ref=session.evidence.path?{kind:'path' as const,value:session.evidence.path}:{kind:'id' as const,value:session.evidence.id};return this.index.pageReferenceSources(session.evidence.provider,ref,targetId,options,current);}
+    async referenceMessage(cursor:ReferenceCursor){const key=sessionKey(cursor.provider,cursor.sessionId),generation=this.visibilityGeneration,current=()=>!this.stopped&&this.paneOpen&&key===this.visibleSession&&generation===this.visibilityGeneration;if(!current())return;return this.index.readReferenceMessage(cursor,current);}
     async recordLaunch(record: {
         id: string;
         sessionKey: string;
