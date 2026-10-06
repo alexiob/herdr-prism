@@ -12,5 +12,5 @@ export interface ReaderPosition {cursor:number;cursorId?:string;scroll:number;}
 export interface MessageReader {lastIds:string[];following:boolean;newCount:number;initialized?:boolean;anchorId?:string;}
 export interface UiState {tab:Tab;selectedKey?:string;cursor:number;cursorId?:string;scroll:number;collapsed:Set<string>;expanded:Set<string>;filter:string;editingFilter:boolean;pin:boolean;subtree:boolean;ascii:boolean;monochrome:boolean;help:boolean;detail?:string;numberPrefix:string;numberTargets:Map<number,string>;view:'lineage'|'worktrees';notice?:string;pagedMessages:Map<string,Message[]>;messageReaders:Map<string,MessageReader>;readers:Map<string,ReaderPosition>;detailReader?:ReaderPosition;readerKey?:string;followMessages:boolean;}
 export interface UiAction {type:'focus'|'select'|'open-ref'|'message'|'source'|'toggle-todo'|'copy'|'pin'|'scope'|'quit'|'settings'|'export'|'page-messages';sessionKey?:string;id?:string;target?:string;line?:number;text?:string;beforeId?:string;}
-export interface ScreenRow {id:string;text:string;action?:UiAction;sourceId?:string;copy?:string;}
+export interface ScreenRow {id:string;text:string;action?:UiAction;sourceId?:string;copy?:string;disclosureColumn?:number;}
 export interface RenderedScreen {lines:string[];rows:ScreenRow[];selectedLine?:number;bodyStart:number;bodyHeight:number;numericTargets:Map<number,string>;}

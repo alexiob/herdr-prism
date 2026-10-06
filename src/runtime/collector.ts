@@ -171,6 +171,7 @@ export class Collector extends EventEmitter {
                 const known = new Map(all.map(s => [sessionKey(s.provider, s.id), s]));
                 const attachments = new Map<string, HerdrAgent[]>();
                 const active = new Set<string>();
+                const nativeOrder = new Map<string,number>();
                 for (const agent of snapshot.agents) {
                     const provider = agent.agent ?? 'unknown';
                     const ref = agent.agent_session;
@@ -205,6 +206,9 @@ export class Collector extends EventEmitter {
                     if (this.paneOpen && !this.visibleSession && detailRef?.provider === provider && detailRef.kind === ref?.kind && detailRef.value === ref?.value) this.visibleSession = key;
                     known.set(key, evidence);
                     active.add(key);
+                    // Herdr0.9.3 snapshots enumerate agents in workspace/tab/pane order.
+                    // Keep the first attachment when the same session has several panes.
+                    if(!nativeOrder.has(key))nativeOrder.set(key,nativeOrder.size);
                     attachments.set(key, [...attachments.get(key) ?? [], agent]);
                 }
                 for (const [key, evidence] of this.historical) {
@@ -228,7 +232,7 @@ export class Collector extends EventEmitter {
                     }
                 }
                 const previouslyPaneBacked = new Set(this.data.sessions.filter(s => s.attachment || s.historical).map(s => s.key));
-                const forest = buildForest([...known].filter(([key]) => include.has(key)).map(([, evidence]) => ({...evidence})));
+                const forest = buildForest([...known].filter(([key]) => include.has(key)).map(([, evidence]) => ({...evidence})),nativeOrder);
                 const views: SessionView[] = [];
                 for (const node of forest.order) {
                     node.attachments = attachments.get(node.key) ?? [];

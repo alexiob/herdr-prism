@@ -7,6 +7,33 @@ import os from 'node:os';
 import { ProviderIndex } from '../src/providers/index.ts';
 const runtime = await import('../src/runtime/collector.ts').catch(() => ({})) as any;
 const settings = { nativeMode: 'inspector-only', providerHomes: {}, todosEnabled: true, sampleIntervalMs: 2000, follow: true, ascii: false, monochrome: true };
+test('native root ranks follow snapshot order despite reversed provider inventory and preserve selected identity on reorder',async t=>{
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'prism-root-order-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const evidence=(id:string)=>({id,provider:'pi',messages:[],tools:[],usage:[],goals:[],availability:'known'});
+ const inventory=[evidence('b'),evidence('a')];
+ const agent=(id:string)=>({pane_id:'p-'+id,terminal_id:'t-'+id,workspace_id:'w-'+id,tab_id:'tab-'+id,agent:'pi',agent_status:'working',agent_session:{kind:'id',value:id},focused:id==='a',revision:1});
+ const a=agent('a'),b=agent('b');let agents=[a,b];const writes:any[]=[];
+ const rpc={call:async(method:string,params:any):Promise<any>=>{
+  if(method==='session.snapshot')return{snapshot:{protocol:22,version:'0.9.3',agents,panes:[],workspaces:[],tabs:[],layouts:[],focused_pane_id:a.pane_id}};
+  if(method==='pane.get')return{pane:agents.find(p=>p.pane_id===params.pane_id)};
+  if(method==='pane.report_metadata')writes.push(params);
+  return{};
+ }};
+ const index={setActiveRefs(){},setDetailedRefs(){},refreshSnapshots:async()=>inventory,resolveSnapshotCached:(_provider:string,ref:any)=>inventory.find(s=>s.id===ref.value),diagnostics:[],close(){}};
+ const collector=new runtime.Collector({rpc,index,paneOpen:true,stateDir:dir,settings:{...settings,nativeMode:'overview',todosEnabled:false},git:{close(){}},sampler:{sample:async()=>({platform:'linux',bootId:'fixture',sampledAt:Date.now(),monotonicNs:'1',processes:[]}),close(){}}});
+ t.after(()=>collector.close({clearNative:false}));
+ await collector.init();await collector.refresh();
+ const ranks=()=>new Map(writes.map(write=>[write.pane_id,write.tokens.hat_rank]));
+ assert.deepEqual(collector.data.sessions.map((s:any)=>s.key),['pi:a','pi:b']);
+ assert.ok(ranks().get(a.pane_id)<ranks().get(b.pane_id));
+ assert.equal(collector.displayedSessionKey,'pi:a');await collector.setGoal('pi:a','Stable selected objective');
+ agents=[b,a];await collector.refresh();
+ assert.deepEqual(collector.data.sessions.map((s:any)=>s.key),['pi:b','pi:a']);
+ assert.ok(ranks().get(b.pane_id)<ranks().get(a.pane_id));
+ assert.equal(collector.displayedSessionKey,'pi:a');
+ assert.equal(collector.data.sessions.find((s:any)=>s.key==='pi:a').evidence.goals.at(-1).objective,'Stable selected objective');
+ assert.equal(collector.data.sessions.find((s:any)=>s.key==='pi:a').attachment.terminal_id,a.terminal_id);
+});
 test('reopening a native path session hydrates its exact source and keeps the selected attachment', async t => {
     const dir = await freshPrivateDirectory(path.join(os.tmpdir(), 'prism-path-reopen-'));
     t.after(() => rm(dir, {recursive:true, force:true}));

@@ -72,7 +72,7 @@ function agentRows(data:DashboardData,state:UiState,numeric:Map<number,string>):
     const glyph=session.children.length?(state.collapsed.has(session.key)?(state.ascii?'+':'▸'):(state.ascii?'-':'▾')):(state.ascii?'·':'·');
     const depth=state.view==='lineage'?Math.min(session.depth,5):1;
     const live=session.attachment?'': ' · no pane';
-    rows.push({id:session.key,text:`${' '.repeat(depth*2)}${glyph} [${value}] ${session.depth>5&&state.view==='lineage'?`d${session.depth} `:''}${title}${state.view==='lineage'?` [${checkoutBadge(session)}]`:''}${live}`,action:{type:'focus',sessionKey:session.key}});
+    rows.push({id:session.key,text:`${' '.repeat(depth*2)}${glyph} [${value}] ${session.depth>5&&state.view==='lineage'?`d${session.depth} `:''}${title}${state.view==='lineage'?` [${checkoutBadge(session)}]`:''}${live}`,action:{type:'focus',sessionKey:session.key},disclosureColumn:session.children.length?depth*2+1:undefined});
     if(state.expanded.has(session.key)){
       rows.push({id:session.key+':goal',text:`  Goal: ${session.evidence.goals.at(-1)?.objective??'not reported'}`});
       rows.push({id:session.key+':branch',text:`  ${session.git?.branch??session.evidence.cwd??'Checkout unavailable'} · ${session.evidence.messages.length} messages`});
@@ -88,7 +88,8 @@ function contentRows(session:SessionView,state:UiState,columns:number,now:number
     const processes=session.resource?.processes??[];const byPid=new Map(processes.map(p=>[p.pid,p]));const children=new Map<string,typeof processes>();const roots:typeof processes=[];
     for(const process of processes){const parent=byPid.get(process.ppid??-1);let valid=parent&&parent.key!==process.key;try{if(parent&&BigInt(parent.startTime)>BigInt(process.startTime))valid=false;}catch{valid=false;}if(valid){const list=children.get(parent!.key)??[];list.push(process);children.set(parent!.key,list);}else roots.push(process);}
     const seen=new Set<string>();const visit=(root:typeof processes[number])=>{const pending=[{process:root,depth:0}];while(pending.length){const {process,depth}=pending.pop()!;if(seen.has(process.key))continue;seen.add(process.key);const descendants=children.get(process.key)??[];const fold=`process:${session.key}:${process.key}`;const denied=process.availability==='unavailable';const memory=resident(denied?undefined:process.rssBytes);const cpu=number(denied?undefined:process.cpuPercent);
-    if(match(process.name,state))rows.push({id:process.key,text:`${' '.repeat(Math.min(depth*2,Math.max(0,columns-16)))}${descendants.length?(state.collapsed.has(fold)?'▸':'▾'):'·'} ${process.pid} ${process.name} ${cpu}% ${memory}${denied?' (unavailable)':''}`,action:{type:'message',text:`Process ${process.name}\nPID ${process.pid} PPID ${process.ppid??'—'}\nBirth ${process.startTime}\nOwner ${process.owner}\nCPU ${cpu}%\nMemory ${memory}\nAvailability ${process.availability??'known'}\nThreads ${number(denied?undefined:process.threads)}\nIdentity ${process.key}\nThis dashboard is observational.`}});
+    const indent=Math.min(depth*2,Math.max(0,columns-16));
+    if(match(process.name,state))rows.push({id:process.key,text:`${' '.repeat(indent)}${descendants.length?(state.collapsed.has(fold)?'▸':'▾'):'·'} ${process.pid} ${process.name} ${cpu}% ${memory}${denied?' (unavailable)':''}`,action:{type:'message',text:`Process ${process.name}\nPID ${process.pid} PPID ${process.ppid??'—'}\nBirth ${process.startTime}\nOwner ${process.owner}\nCPU ${cpu}%\nMemory ${memory}\nAvailability ${process.availability??'known'}\nThreads ${number(denied?undefined:process.threads)}\nIdentity ${process.key}\nThis dashboard is observational.`},disclosureColumn:descendants.length?indent+1:undefined});
     if(!state.collapsed.has(fold))for(const child of [...descendants].reverse())pending.push({process:child,depth:depth+1});else{const hidden=[...descendants];for(let i=0;i<hidden.length;i++){const child=hidden[i]!;if(seen.has(child.key))continue;seen.add(child.key);hidden.push(...children.get(child.key)??[]);}}}};
     for(const process of roots)visit(process);for(const process of processes)if(!seen.has(process.key))visit(process);
     if(session.resource?.reason)rows.push({id:'reason',text:session.resource.reason});
@@ -137,6 +138,16 @@ export function renderScreen(data:DashboardData,state:UiState,columns:number,hei
   lines.push(state.notice??`${data.stale?'STALE · ':''}${messageReader?.newCount?`${messageReader.newCount} new · End follows · `:messageReader?.following?'Following end · ':''}OS/provider evidence · ${age(data.updatedAt,now)} ago`);
   lines.push(state.editingFilter?`Filter: ${state.filter}`:state.numberPrefix?`Agent index: ${state.numberPrefix} · Enter`:'Tab views · Enter open · ? help · q close');
   return {lines:lines.slice(0,height).map(line=>truncate(line,columns,state.ascii)),rows,selectedLine:bodyStart+state.cursor-state.scroll,bodyStart,bodyHeight,numericTargets};
+}
+export function handleRowClick(state:UiState,x:number,y:number,data:DashboardData,screen:RenderedScreen):UiAction|undefined {
+  if(!Number.isInteger(x)||!Number.isInteger(y)||x<1)return;
+  const bodyRow=y-1-screen.bodyStart;
+  if(bodyRow<0||bodyRow>=screen.bodyHeight)return;
+  const index=bodyRow+state.scroll;
+  if(index<0||index>=screen.rows.length)return;
+  const row=screen.rows[index]!;state.cursor=index;state.cursorId=row.id;state.numberPrefix='';
+  const tree=state.tab==='Agents'||state.tab==='Processes';
+  return handleKey(state,(tree?x===row.disclosureColumn:x<=3)?'space':'enter',data,screen);
 }
 export function handleKey(state:UiState,key:string,data:DashboardData,screen:RenderedScreen):UiAction|undefined {
   if(state.editingFilter){if(key==='enter'||key==='escape'){state.editingFilter=false;state.cursor=0;state.cursorId=undefined;}else if(key==='backspace')state.filter=[...state.filter].slice(0,-1).join('');else if(key.length===1)state.filter+=key;return;}

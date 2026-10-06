@@ -24,5 +24,13 @@ test('same raw session ID across providers does not merge', () => {
 test('deep lineage does not overflow the call stack or lose descendants',()=>{
   assert.equal(typeof model.buildForest,'function','lineage implementation is missing');
   const chain=Array.from({length:10000},(_,i)=>make(String(i),i?String(i-1):undefined));
-  const result=model.buildForest(chain);assert.equal(result.order.length,10000);assert.equal(result.order.at(-1).depth,9999);
+  for(const order of [undefined,new Map([['codex:9999',0]])]){const result=model.buildForest(chain,order);assert.equal(result.order.length,10000);assert.equal(result.order.at(-1).depth,9999);}
+});
+test('native root ordering follows root attachments while retaining descendant discovery and historical roots',()=>{
+ const input=[make('b'),make('b-later','b'),make('b-earlier','b'),make('a'),make('transcript-root'),make('attached-child','transcript-root'),make('historical-one'),make('historical-two')];
+ const order=new Map([['codex:b-earlier',0],['codex:a',1],['codex:b',2],['codex:attached-child',3],['codex:b-later',4]]);
+ const forest=model.buildForest(input,order);
+ assert.deepEqual(forest.order.map((s:any)=>s.key),['codex:a','codex:b','codex:b-later','codex:b-earlier','codex:transcript-root','codex:attached-child','codex:historical-one','codex:historical-two']);
+ assert.equal(forest.nodes.get('codex:b-earlier').parentKey,'codex:b');
+ assert.equal(forest.nodes.get('codex:attached-child').depth,1);
 });

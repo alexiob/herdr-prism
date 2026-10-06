@@ -257,6 +257,81 @@ The macOS failure's archived snapshot/log is retained under
 left to the Windows agent and were not retried here. These results do not replace
 the remaining full acceptance and upstream visibility gates.
 
+## Nested mouse disclosure correction — 2026-10-06
+
+The inspector's fixed left-column fold shortcut incorrectly activated a
+depth-two agent instead of folding it. Screen rows now expose their actual
+disclosure column, and a shared row-click controller selects the displayed row
+before folding or activating it. It rejects header/footer coordinates and clears
+pending keyboard numbers so a click cannot focus a different numbered agent.
+Non-tree views retain their existing left-gutter shortcuts.
+
+Regression tests cover root, nested and capped agent indentation in Unicode and
+ASCII modes, clipped process indentation, scrolled 26-column views, fold/unfold,
+leaf and label activation, invalid body coordinates and pending numeric input.
+The old fixed-column behavior returned a focus action for the depth-two glyph;
+the corrected handler hides/reveals the descendants without returning focus.
+
+Typecheck/build and strict macOS tests passed: 262 tests, 254 passed, eight
+platform skips, zero failures. The exact staged package at
+`artifacts/release-prism-mouse-fix-macos/` passed all ten existing isolated live
+Herdr interaction/ownership gates in
+`artifacts/prism-mouse-fix-live-macos/features.json`. These live gates do not
+exercise deep native mouse transport; the direct TUI regressions cover this
+correction.
+
+Strict Linux arm64 Node 24 container tests also passed: 262 tests, 253 passed,
+nine platform skips, zero failures. The initial bind-mounted run accidentally
+exposed the macOS `target/debug` helper to Linux and failed two helper shutdown
+checks. The corrected run used the checksummed Linux arm64 helper from the
+passing `9c100f6` CI artifact and Podman's `--init` child reaper. No test was
+disabled; Linux production sampling still uses TypeScript procfs. Both disposable
+test containers were removed. Logs:
+`/private/tmp/prism-mouse-fix-strict-linux-arm64-corrected.log` and
+`/private/tmp/prism-mouse-fix-strict-macos.log`. Generated `dist/` was rebuilt
+without replacing the Windows agent's production changes.
+
+Before pushing, this change was rebased onto `fd93b98`, which includes the
+Windows agent's `492fd08` package/history-clock update. That update's Windows
+files were retained. Post-rebase typecheck/build and the affected TUI/input/native
+protocol tests passed on macOS: 30 tests, 29 passed, one Windows-only skip,
+zero failures. The broader 262-test and staged live results above precede that
+Windows update and do not certify its Windows behavior. One incoming Windows
+documentation heading's legacy-encoded dash was normalized to UTF-8 with its
+text preserved.
+
+## Native root ordering correction — 2026-10-06
+
+The collector previously let provider inventory insertion order determine root
+presentation. It now records the native snapshot order independently, and the
+forest moves entire root subtrees according to each root's first attachment.
+The pinned Herdr 0.9.3 snapshot implementation supplies workspace/tab/pane order.
+Descendant discovery order and explicit relationships are preserved. A root
+without its own pane uses its earliest attached descendant; historical trees
+without attachments remain stable after the live trees.
+
+The regression reproduced B/A roots from B/A provider inventory despite an A/B
+host snapshot. It now asserts A/B native publication ranks, changes only the
+snapshot order to B/A, and verifies changed ranks with the same selected key,
+terminal and explicit local goal. Publication uses the production publisher
+against controlled RPC, rather than claiming native client pixels. Graph tests
+also cover child order, roots represented only by an attached child, historical
+roots and a 10,000-node chain under native ordering.
+
+Typecheck/build passed. Strict macOS tests passed with 265 total, 256 passed,
+nine platform skips and zero failures. Strict Linux arm64 Node 24 Podman tests
+passed with 265 total, 255 passed, ten platform skips and zero failures, using
+the checksummed Linux helper and `--init`. Logs:
+`/private/tmp/prism-native-order-strict-macos.log` and
+`/private/tmp/prism-native-order-strict-linux-arm64.log`.
+The rebuilt macOS package at `artifacts/release-prism-native-order-macos/` passed
+all ten existing live interaction and ownership gates. Its proof is
+`artifacts/prism-native-order-live-macos/features.json`. Those gates use actual
+isolated Herdr but do not exercise native host rearrangement or client pixels;
+the direct collector/publisher regression establishes this ordering correction.
+The disposable Linux test container was removed. Windows-specific implementation
+and validation remain with the other agent.
+
 ## Performance evidence
 
 `scripts/profile-host.mjs` now profiles 50 declared fixture sessions, 500 real
@@ -304,7 +379,7 @@ an outstanding blocker. The original implementation goal remains active for
 remaining acceptance; Windows work is explicitly deferred until user-requested
 resumption on a Windows machine.
 
-## Windows local resumption and merged delivery � 2026-10-06
+## Windows local resumption and merged delivery — 2026-10-06
 
 Windows fixes `077736a` were merged with remote-support `f07281f` as `9c100f6`
 and pushed. The other machine's shared implementation and evidence were preserved.
