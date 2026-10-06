@@ -1,0 +1,103 @@
+id = "iob.herdr-prism"
+name = "Herdr Prism"
+version = "0.1.0"
+min_herdr_version = "0.9.3"
+description = "Nested agent monitoring, harness telemetry, messages, refs and To-do"
+platforms = ["macos", "linux", "windows"]
+
+[[build]]
+command = ["node", "scripts/check-install.mjs"]
+
+[[startup]]
+command = ["node", "dist/entrypoints/startup.js"]
+
+[[actions]]
+id = "activate"
+title = "Prism: activate live"
+command = ["node", "dist/entrypoints/action.js", "activate"]
+
+[[actions]]
+id = "activate-overview"
+title = "Prism: activate with native ownership"
+command = ["node", "dist/entrypoints/action.js", "activate-overview"]
+
+[[actions]]
+id = "activate-inspector"
+title = "Prism: activate inspector only"
+command = ["node", "dist/entrypoints/action.js", "activate-inspector"]
+
+[[actions]]
+id = "deactivate"
+title = "Prism: stop and restore live"
+command = ["node", "dist/entrypoints/action.js", "deactivate"]
+
+[[actions]]
+id = "open"
+title = "Prism: open dashboard"
+contexts = ["workspace", "pane"]
+command = ["node", "dist/entrypoints/action.js", "open"]
+
+[[actions]]
+id = "configure"
+title = "Prism: configure native overview"
+command = ["node", "dist/entrypoints/action.js", "configure"]
+
+[[actions]]
+id = "unconfigure"
+title = "Prism: restore previous configuration"
+command = ["node", "dist/entrypoints/action.js", "unconfigure"]
+
+[[actions]]
+id = "refresh"
+title = "Prism: refresh"
+command = ["node", "dist/entrypoints/action.js", "refresh"]
+
+[[actions]]
+id = "native"
+title = "Prism: compact native refresh"
+command = ["node", "dist/entrypoints/action.js", "native"]
+
+[[actions]]
+id = "settings"
+title = "Prism: settings"
+command = ["node", "dist/entrypoints/action.js", "settings"]
+
+[[actions]]
+id = "doctor"
+title = "Prism: diagnostics"
+command = ["node", "dist/entrypoints/action.js", "doctor"]
+
+[[actions]]
+id = "set-goal"
+title = "Prism: set explicit goal"
+command = ["node", "dist/entrypoints/action.js", "set-goal"]
+
+[[events]]
+on = "pane.created"
+command = ["node", "dist/entrypoints/event.js"]
+
+[[events]]
+on = "pane.closed"
+command = ["node", "dist/entrypoints/event.js"]
+
+[[events]]
+on = "worktree.created"
+command = ["node", "dist/entrypoints/event.js"]
+
+[[events]]
+on = "worktree.removed"
+command = ["node", "dist/entrypoints/event.js"]
+
+[[panes]]
+id = "inspector"
+title = "Prism"
+placement = "split"
+command = ["node", "dist/entrypoints/inspector.js"]
+
+[[panes]]
+id = "detail"
+title = "Prism detail"
+placement = "popup"
+width = "80%"
+height = "80%"
+command = ["node", "dist/entrypoints/detail.js"]

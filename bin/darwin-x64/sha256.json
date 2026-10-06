@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "platform": "darwin",
+  "arch": "x64",
+  "filename": "hat-sampler",
+  "sha256": "70f59aa94c5a67da0f1a8e9fc3db30ac6a303af43118721ace6e5f2fc4489d00",
+  "target": "x86_64-apple-darwin",
+  "distribution": {
+    "signature": "ad-hoc-development",
+    "notarization": "not-verified",
+    "systemDependenciesVerified": true
+  }
+}

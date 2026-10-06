@@ -1,0 +1,14 @@
+.git
+node_modules
+dist
+artifacts
+native/sampler/target
+native/sampler/artifacts
+bin
+.hat-*
+
+.aws
+.codex
+.agents
+.env
+.env.*

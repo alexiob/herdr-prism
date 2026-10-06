@@ -1,0 +1,22 @@
+{
+  "name": "herdr-prism",
+  "version": "0.1.0",
+  "description": "Herdr session inspector with agent lineage, process telemetry, messages, refs, To-do and Git worktrees",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/alexiob/herdr-prism.git" },
+  "homepage": "https://github.com/alexiob/herdr-prism#readme",
+  "bugs": { "url": "https://github.com/alexiob/herdr-prism/issues" },
+  "keywords": ["herdr-plugin", "herdr", "agents", "telemetry", "terminal"],
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 test/*.test.ts",
+    "test:native": "cargo test --manifest-path native/sampler/Cargo.toml",
+    "dev": "node --experimental-strip-types src/entrypoints/inspector.ts",
+    "verify": "npm run check && npm test && npm run build && npm run test:native"
+  },
+  "devDependencies": { "@types/node": "22.19.19", "typescript": "5.9.3" }
+}

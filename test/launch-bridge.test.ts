@@ -1,0 +1,49 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {EventEmitter} from 'node:events';
+import {mkdtemp,writeFile,rm,readFile,readdir,access} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {StateStore} from '../src/state/store.ts';
+import {MailboxServer} from '../src/state/mailbox.ts';
+import {runtimeContext} from '../src/runtime/actions.ts';
+const bridge=await import('../src/entrypoints/run.ts').catch(()=>({})) as any;
+test('launch bridge registers only sampled exact child identity, preserves argv and records exit',async()=>{
+ assert.equal(typeof bridge.run,'function','explicit launch bridge missing');const dir=await mkdtemp(join(tmpdir(),'hat-launch-'));const file=join(dir,'argv.json');const events:any[]=[];let closed=false;
+ const controller={request:async(op:string,payload:any)=>{events.push({op,payload});return op==='ping'?{alive:true}:{};}};
+ const sampler={sample:async()=>{const childPid=bridgeRunPid;return{platform:process.platform,bootId:'validated-boot',sampledAt:Date.now(),monotonicNs:'1',processes:[{pid:childPid,startTime:'9007199254740993123',cpuNs:'0',rssBytes:'1',name:'node',availability:'known'}]};},close:async()=>{closed=true;}};
+ let bridgeRunPid=0;
+ // The real disposable program announces its PID through a file so sampler injection validates the actual spawned child.
+ const program=`const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(file)},JSON.stringify({pid:process.pid,args:process.argv.slice(1)}));setTimeout(()=>process.exit(7),300);`;
+ sampler.sample=async()=>{let value:any;for(let i=0;i<50;i++){try{value=JSON.parse(await readFile(file,'utf8'));break;}catch{await new Promise(r=>setTimeout(r,10));}}bridgeRunPid=value.pid;return{platform:process.platform,bootId:'validated-boot',sampledAt:Date.now(),monotonicNs:'1',processes:[{pid:bridgeRunPid,startTime:'9007199254740993123',cpuNs:'0',rssBytes:'1',name:'node',availability:'known'}]};};
+ try{const result=await bridge.run(['--agent','pi:controlled','--',process.execPath,'-e',program,'space value','$(not-a-shell)','é'],{controller,sampler,stdio:'ignore',diagnostic:(message:string)=>events.push({diagnostic:message})});assert.equal(result.exitCode,7);assert.equal(result.registered,true);const launch=events.find(e=>e.op==='launch');assert.equal(launch.payload.pid,bridgeRunPid);assert.equal(launch.payload.startTime,'9007199254740993123');assert.equal(launch.payload.bootId,'validated-boot');assert.equal(launch.payload.sessionKey,'pi:controlled');assert.equal(events.find(e=>e.op==='exit-launch').payload.id,launch.payload.id);assert.equal(closed,true);assert.deepEqual(JSON.parse(await readFile(file,'utf8')).args,['space value','$(not-a-shell)','é']);}finally{await rm(dir,{recursive:true,force:true});}
+});
+test('helper failure keeps the explicit command running and reports untracked ownership',async()=>{assert.equal(typeof bridge.run,'function');const diagnostics:string[]=[];let closed=false;const result=await bridge.run(['--agent','pi:controlled','--',process.execPath,'-e','process.exit(0)'],{controller:{request:async()=>assert.fail('Denied sample must not register')},sampler:{sample:async()=>{throw new Error('sample denied');},close:async()=>{closed=true;}},stdio:'ignore',diagnostic:(message:string)=>diagnostics.push(message)});assert.equal(result.exitCode,0);assert.equal(result.registered,false);assert.equal(closed,true);assert.match(diagnostics.join(' '),/untracked|unmeasured/);});
+test('signals reach only the owned direct child and signal listeners are removed',async()=>{
+ assert.equal(typeof bridge.run,'function');const dir=await mkdtemp(join(tmpdir(),'hat-signal-'));const ready=join(dir,'ready');const signals=new EventEmitter();
+ const program=`process.on("SIGTERM",()=>process.exit(42));require('node:fs').writeFileSync(${JSON.stringify(ready)},'ready');setInterval(()=>{},1000);`;
+ const resultPromise=bridge.run(['--agent','pi:controlled','--',process.execPath,'-e',program],{controller:undefined,sampler:{sample:async()=>assert.fail('No collector needs no sampler scan'),close:async()=>{}},stdio:'ignore',signals,diagnostic:()=>{}});
+ try{let observed=false;for(let i=0;i<100;i++){try{await readFile(ready);observed=true;break;}catch{await new Promise(r=>setTimeout(r,20));}}assert.equal(observed,true,'signal handler must be installed before testing propagation');signals.emit('SIGTERM');const result=await resultPromise;assert.equal(result.exitCode,process.platform==='win32'?143:42);assert.equal(signals.listenerCount('SIGTERM'),0);assert.equal(signals.listenerCount('SIGINT'),0);}finally{signals.emit('SIGTERM');await resultPromise;await rm(dir,{recursive:true,force:true});}
+});
+
+test('short-lived command remains explicitly unmeasured and never creates an invented launch record',async()=>{
+ const diagnostics:string[]=[];const events:string[]=[];const result=await bridge.run(['--agent','pi:controlled','--',process.execPath,'-e','process.exit(6)'],{controller:{request:async(op:string)=>events.push(op)},sampler:{sample:async()=>{await new Promise(r=>setTimeout(r,120));return{platform:process.platform,bootId:'actual-fixture',sampledAt:Date.now(),monotonicNs:'1',processes:[]};},close:async()=>{}},stdio:'ignore',diagnostic:(message:string)=>diagnostics.push(message)});assert.equal(result.exitCode,6);assert.equal(result.unmeasured,true);assert.equal(result.registered,false);assert.deepEqual(events,[]);assert.match(diagnostics.join(' '),/unmeasured/);
+});
+test('missing executable returns conventional failed-command status without claiming resources',async()=>{
+ const result=await bridge.run(['--agent','pi:controlled','--',join(tmpdir(),'hat-no-such-executable')],{controller:undefined,sampler:{sample:async()=>assert.fail('No child may be sampled'),close:async()=>{}},stdio:'ignore',diagnostic:()=>{}});assert.equal(result.exitCode,127);assert.equal(result.registered,false);
+});
+test('bridge rejects missing command, agent and NUL arguments before launch',async()=>{await assert.rejects(bridge.run(['--agent','pi:controlled']),/requires/);await assert.rejects(bridge.run(['--',process.execPath]),/agent/);await assert.rejects(bridge.run(['--agent','pi:controlled','--',process.execPath,'bad\0argument']),/NUL/);});
+test('sampler closes after registration while a long user command stays alive',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'hat-bridge-helper-'));const pidFile=join(dir,'pid');let samplerClosed=false;let finished=false;const controller={request:async(op:string)=>op==='ping'?{alive:true}:{}};
+ const sampler={sample:async()=>{let pid=0;for(let i=0;i<100;i++){try{pid=Number(await readFile(pidFile,'utf8'));break;}catch{await new Promise(r=>setTimeout(r,10));}}return{platform:process.platform,bootId:'fixture',sampledAt:Date.now(),monotonicNs:'1',processes:[{pid,startTime:'1',cpuNs:'0',rssBytes:'1',name:'worker'}]};},close:async()=>{samplerClosed=true;}};
+ const running=bridge.run(['--agent','pi:controlled','--',process.execPath,'-e',`require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setTimeout(()=>process.exit(0),1200);`],{controller,sampler,stdio:'ignore',diagnostic:()=>{}}).then((value:any)=>{finished=true;return value;});
+ try{for(let i=0;i<50&&!samplerClosed;i++)await new Promise(r=>setTimeout(r,10));assert.equal(samplerClosed,true,'identity sampler must stop before waiting on the user job');assert.equal(finished,false,'the observed user command must continue');assert.equal((await running).exitCode,0);}finally{await running;await rm(dir,{recursive:true,force:true});}
+});
+
+test('collector removal during a live command does not write exit IPC or resurrect removed state',{timeout:12000},async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'hat-bridge-removal-'));const context=runtimeContext({'config-dir':join(dir,'config'),'state-dir':join(dir,'state'),socket:'controlled-fixture'});const store=new StateStore(context.serverStateDir);await store.init();await store.write('controller',{token:'controlled-token',pid:process.pid});let launched=false;let closed=false;const pidFile=join(dir,'pid');
+ const server=new MailboxServer(context.serverStateDir,'controlled-token',async(op)=>{if(op==='launch'){launched=true;return{};}if(op==='ping')return{alive:true};if(op==='exit-launch')assert.fail('Removed collector must not receive an exit report');return{};});await server.start();
+ const sampler={sample:async()=>{let pid=0;for(let i=0;i<100;i++){try{pid=Number(await readFile(pidFile,'utf8'));break;}catch{await new Promise(r=>setTimeout(r,10));}}return{platform:process.platform,bootId:'fixture',sampledAt:Date.now(),monotonicNs:'1',processes:[{pid,startTime:'1',cpuNs:'0',rssBytes:'1',name:'worker'}]};},close:async()=>{closed=true;}};
+ const running=bridge.run(['--agent','pi:controlled','--config-dir',context.configDir,'--state-dir',context.stateDir,'--socket','controlled-fixture','--',process.execPath,'-e',`require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setTimeout(()=>process.exit(0),1400);`],{sampler,stdio:'ignore',diagnostic:()=>{}});
+ try{for(let i=0;i<100&&!launched;i++)await new Promise(r=>setTimeout(r,10));assert.equal(launched,true);await server.close();await store.remove('controller');let wroteExit=false;const watcher=setInterval(()=>void readdir(join(context.serverStateDir,'requests')).then(files=>{if(files.length)wroteExit=true;}).catch(()=>{}),10);const result=await running;clearInterval(watcher);assert.equal(result.exitCode,0);assert.equal(closed,true);assert.equal(wroteExit,false,'bridge must check the original collector marker before writing any exit request');await rm(context.stateDir,{recursive:true,force:true});await new Promise(r=>setTimeout(r,50));await assert.rejects(access(context.stateDir));}finally{await server.close();await running;await rm(dir,{recursive:true,force:true});}
+});

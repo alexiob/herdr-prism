@@ -1,0 +1,9 @@
+// A disposable foreground harness with exactly two controlled OS CPU workers.
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+const workers=[];
+let stopping=false;
+const code='const bytes=Buffer.alloc(16*1024*1024,1); console.log("ready"); for(;;){Math.sqrt(Math.random());}';
+async function stop(){if(stopping)return;stopping=true;await Promise.all(workers.map(async worker=>{if(worker.exitCode!==null)return;const exited=once(worker,'exit');worker.kill();await exited;}));process.exit(0);}
+async function main(){for(let i=0;i<2;i++)workers.push(spawn(process.execPath,['-e',code],{stdio:['ignore','pipe','ignore']}));await Promise.all(workers.map(worker=>once(worker.stdout,'data')));console.log(JSON.stringify({pid:process.pid,workers:workers.map(w=>w.pid)}));process.stdin.resume();process.stdin.once('end',()=>void stop());process.once('SIGTERM',()=>void stop());process.once('SIGINT',()=>void stop());}
+main().catch(error=>{console.error(error.message);void stop();});

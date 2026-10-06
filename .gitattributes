@@ -1,0 +1,2 @@
+bin/*/hat-sampler* -text
+bin/*/rust-licenses/** -text -whitespace
