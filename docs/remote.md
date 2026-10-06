@@ -99,12 +99,14 @@ require or install a patched Herdr build.
 
 ## Verification
 
-Remote collection, copy, reconnect and removal passed the core SSH acceptance.
-The subsequently added strict host-keyboard stage remains **incomplete**: bytes
-were written to a real controlling raw foreground PTY, but Tab did not produce
-the expected remote Agents view. Client focus/routing is not yet resolved; this
-is not classified as a Prism implementation defect. The current harness retains
-the failing assertion rather than silently skip it. See the evidence ledger.
+The full SSH acceptance passed on a macOS arm64 client with a Linux arm64 server
+and on a Linux x64 client with a Linux x64 server: remote collection, actual
+host-keyboard navigation, copy, disconnect/reconnect and complete removal.
+The previous keyboard failure came from the disposable
+client's first-run onboarding overlay, which intercepted pane input. The fixture
+now configures `onboarding = false` only in its temporary home and records that
+the overlay was absent. It still requires host PTY input to change the remote
+Prism view to Agents; the assertion was not weakened. See the evidence ledger.
 
 `scripts/remote-herdr-test.mjs` is the isolated SSH acceptance harness. It uses a
 disposable Linux container, a generated fixture key, an isolated SSH config and
@@ -125,8 +127,10 @@ Omit `--connection` with native Linux Podman or a correctly selected default
 connection. The harness downloads only a checksummed, pinned Herdr **test**
 binary when needed; normal plugin installation performs no such download.
 The manual [Linux-only workflow](../.github/workflows/remote.yml) defines this
-test without triggering Windows validation. It has not been run for this commit;
-the strict host-keyboard gate above is still outstanding.
+test without triggering Windows validation. Its first Linux x64 run reproduced
+the onboarding failure. The corrected fixture passed all stages in
+[run 37459983924](https://github.com/alexiob/herdr-prism/actions/runs/37459983924)
+at commit `9b554ee`, including cleanup of the owned client, container and SSH files.
 
 The inspected routing contract is pinned to Herdr 0.9.3:
 [plugin runtime](https://github.com/herdrdev/herdr/blob/v0.9.3/src/app/api/plugins/runtime.rs),
