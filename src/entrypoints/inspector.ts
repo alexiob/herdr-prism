@@ -4,12 +4,12 @@ import { parseArguments, openPanel, windowsPaneEnvironment } from '../runtime/ac
 import { serviceContext } from '../runtime/service.ts';
 import { acquireAdmission } from '../runtime/admission.ts';
 import { FollowSelection, inspectorVisible } from '../runtime/follow.ts';
-import { Collector } from '../runtime/collector.ts';
+import { RemoteCollector } from '../runtime/remote-collector.ts';
+import {panelViewStore} from '../runtime/panel-views.ts';
 import { demoData } from '../runtime/demo.ts';
 import { HerdrClient } from '../herdr/client.ts';
 import { SnapshotCache } from '../herdr/subscription.ts';
 import { StateStore } from '../state/store.ts';
-import { MailboxServer } from '../state/mailbox.ts';
 import { TerminalUi } from '../tui/terminal.ts';
 import { createUiState, renderScreen, handleKey, handleRowClick, showDetail, addMessagePage, addReferencePage, showReferenceSources } from '../tui/screen.ts';
 import {visibleReferences} from '../tui/reference-readers.ts';
@@ -25,7 +25,7 @@ export async function main(argv = process.argv.slice(2)) {
     let data: DashboardData;
     let frame: RenderedScreen;
     let cleanup: () => Promise<void> = async () => { ui.close(); };
-    let collector: Collector | undefined;
+    let collector: RemoteCollector | undefined;
     let closing = false;
     let finished = false;
     let stopping: Promise<void> | undefined;
@@ -59,190 +59,67 @@ export async function main(argv = process.argv.slice(2)) {
         let lease: Awaited<ReturnType<StateStore['acquire']>> | undefined;
         cleanup = async () => { ui.close(); rpc.close(); await lease?.release(); await admission.release(); };
         try {
-            const store = new StateStore(context.serverStateDir);
-            await store.init();
-            const preferences = await store.read<{
-                selectedKey?: string;
-                pin?: boolean;
-                tab?: string;
-                collapsed?: string[];
-                expanded?: string[];
-                readers?: [
-                    string,
-                    {
-                        cursor: number;
-                        cursorId?: string;
-                        scroll: number;
-                    }
-                ][];
-            }>('preferences');
+            const serverStore = new StateStore(context.serverStateDir);
+            await serverStore.init();
+            await serverStore.read<any>('preferences');
             const cache = new SnapshotCache(rpc);
-            collector = new Collector({ rpc, endpoint: context.endpoint, settings: context.settings, stateDir: context.serverStateDir });
-            lease = await store.acquire();
-            cleanup = async () => { ui.close(); cache.close(); rpc.close(); await lease!.release(); await admission.release(); };
+            cleanup = async () => { ui.close(); cache.close(); rpc.close(); await lease?.release(); await admission.release(); };
+            await cache.start();
             let paneId = process.env.HERDR_PANE_ID;
-            let terminalId: string | undefined;
-            let relocating = false;
-            let widthFraction = 0.32;
-            let ready = false;
+            const current = paneId ? await rpc.call('pane.current', {caller_pane_id:paneId}) : undefined;
+            paneId = current?.pane?.pane_id ?? current?.pane_id ?? paneId;
+            const terminalId = current?.pane?.terminal_id ?? current?.terminal_id;
+            const ownPane = cache.snapshot?.panes.find(p=>p.terminal_id===terminalId);
+            if (!paneId || !terminalId || typeof ownPane?.tab_id!=='string') throw new Error('Inspector requires its registered Herdr pane identity');
+            const tabId = ownPane.tab_id;
+            const store = panelViewStore(context.serverStateDir,tabId);
+            await store.init();lease=await store.acquire();
+            const preferences=await store.read<any>('preferences');
+            collector = new RemoteCollector(context,paneId,terminalId);
             const followSelection = new FollowSelection();
             syncVisibility = () => {
-                const visible = !closing && !cache.stale && inspectorVisible(cache.snapshot, terminalId, paneId);
-                collector!.setVisibleSession(state.selectedKey, visible);
-                collector!.setProcessesExpanded(visible && state.tab === 'Processes');
+                const visible=!closing&&!cache.stale&&inspectorVisible(cache.snapshot,terminalId,paneId);
+                collector!.setVisibleSession(state.selectedKey,visible);
+                collector!.setProcessesExpanded(visible&&state.tab==='Processes');
             };
-            if (preferences) {
-                if (Array.isArray(preferences.collapsed))
-                    state.collapsed = new Set(preferences.collapsed.filter(x => typeof x === 'string').slice(0, 512));
-                if (Array.isArray(preferences.expanded))
-                    state.expanded = new Set(preferences.expanded.filter(x => typeof x === 'string').slice(0, 512));
-                if (Array.isArray(preferences.readers))
-                    for (const tuple of preferences.readers.slice(0, 64)) {
-                        if (!Array.isArray(tuple) || tuple.length !== 2)
-                            continue;
-                        const [key, value] = tuple;
-                        if (typeof key === 'string' && value && Number.isSafeInteger(value.cursor) && Number.isSafeInteger(value.scroll))
-                            state.readers.set(key, value);
-                    }
-                state.selectedKey = preferences.selectedKey;
-                state.pin = preferences.pin === true;
-                if (preferences.tab && ['Overview', 'Agents', 'Processes', 'Messages', 'Refs', 'To-do'].includes(preferences.tab))
-                    state.tab = preferences.tab as any;
+            if(preferences){
+                if(Array.isArray(preferences.collapsed))state.collapsed=new Set(preferences.collapsed.filter((x:any)=>typeof x==='string').slice(0,512));
+                if(Array.isArray(preferences.expanded))state.expanded=new Set(preferences.expanded.filter((x:any)=>typeof x==='string').slice(0,512));
+                if(Array.isArray(preferences.readers))for(const tuple of preferences.readers.slice(0,64)){
+                    if(!Array.isArray(tuple)||tuple.length!==2)continue;const [key,value]=tuple;
+                    if(typeof key==='string'&&value&&Number.isSafeInteger(value.cursor)&&Number.isSafeInteger(value.scroll))state.readers.set(key,value);
+                }
+                state.selectedKey=preferences.selectedKey;state.pin=preferences.pin===true;
+                if(['Overview','Agents','Processes','Messages','Refs','To-do'].includes(preferences.tab))state.tab=preferences.tab;
             }
-            const save = async () => { await store.write('preferences', { selectedKey: state.selectedKey, pin: state.pin, tab: state.tab, collapsed: [...state.collapsed].slice(0, 512), expanded: [...state.expanded].slice(0, 512), readers: [...state.readers].slice(-64) }); };
-            const marker = async () => { await store.write('pane', { paneId, terminalId }); await store.write('controller', { token: lease!.token, pid: process.pid, paneId, terminalId, endpoint: context.endpoint, startedAt: Date.now() }); };
-            const mailbox = new MailboxServer(context.serverStateDir, lease!.token, async (op, payload) => {
-                if (op === 'ping')
-                    return { alive: true, ready, stale: collector!.data.stale, diagnostics: collector!.data.diagnostics };
-                if (op === 'location')
-                    return { paneId, terminalId };
-                if (op === 'refresh') {
-                    await collector!.refresh();
-                    return { sessions: collector!.data.sessions.length };
-                }
-                if (op === 'shutdown') {
-                    setTimeout(() => void stop(), 100);
-                    return { stopping: true };
-                }
-                if (op === 'set-goal') {
-                    await collector!.setGoal(payload.session, payload.objective, payload.status);
-                    return { saved: true };
-                }
-                if (op === 'message-locator') {
-                    const session = collector!.data.sessions.find(s => s.key === payload.session);
-                    if (!session)
-                        throw new Error('Session unavailable');
-                    return { provider: session.evidence.provider, ref: session.evidence.path ? { kind: 'path', value: session.evidence.path } : { kind: 'id', value: session.evidence.id }, messageId: payload.id, providerHomes: context.settings.providerHomes };
-                }
-                if (op === 'launch') {
-                    await collector!.sampleProcesses();
-                    await collector!.recordLaunch(payload);
-                    return { registered: true };
-                }
-                if (op === 'exit-launch') {
-                    collector!.ledger.exit(payload.id);
-                    await store.write('launches', collector!.ledger.toJSON());
-                    return { recorded: true };
-                }
-                throw new Error('Unknown collector operation');
-            });
-            cleanup = async () => { ui.close(); cache.close(); try {
-                await mailbox.close();
-                await collector!.close();
-                await save();
-            }
-            finally {
-                rpc.close();
-                try {
-                    const own = await store.read<{
-                        token: string;
-                    }>('controller');
-                    if (own?.token === lease!.token)
-                        await store.remove('controller');
-                }
-                finally {
-                    await lease!.release();
-                    await admission.release();
-                }
-            } };
+            const save=async()=>{await store.write('preferences',{selectedKey:state.selectedKey,pin:state.pin,tab:state.tab,collapsed:[...state.collapsed].slice(0,512),expanded:[...state.expanded].slice(0,512),readers:[...state.readers].slice(-64)});};
+            cleanup=async()=>{ui.close();cache.close();try{await collector!.close();await save();}finally{rpc.close();await lease!.release();await admission.release();}};
+            // The service owns its own admission check; do not hold a UI's gate
+            // while waiting for its detached owner to start.
+            await admission.release();
+            const localSelection=()=>data.sessions.find(s=>(s.attachments??(s.attachment?[s.attachment]:[])).some(a=>a.tab_id===tabId))?.key;
             try {
-                await cache.start();
-                const current = paneId ? await rpc.call('pane.current', { caller_pane_id: paneId }) : undefined;
-                paneId = current?.pane?.pane_id ?? current?.pane_id ?? paneId;
-                terminalId = current?.pane?.terminal_id ?? current?.terminal_id;
-                if (paneId) {
-                    try {
-                        const layoutResult = await rpc.call('pane.layout', { pane_id: paneId });
-                        const layout = layoutResult.layout ?? layoutResult;
-                        const rect = layout.panes?.find((p: any) => p.pane_id === paneId)?.rect;
-                        if (rect?.width && layout.area?.width)
-                            widthFraction = Math.min(.6, Math.max(.2, rect.width / layout.area.width));
-                    }
-                    catch { /* Default right-side width is used until layout exposes an area. */ }
-                }
-                await store.write('server', { endpoint: context.endpoint });
-                await store.write('pane', { paneId, terminalId });
-                await marker();
-                await mailbox.start();
-                syncVisibility();
-                await collector.start();
-                data = collector.data;
-                if (!state.selectedKey || !data.sessions.some(session => session.key === state.selectedKey)) {
-                    state.selectedKey = data.sessions.find(session => session.key === collector!.displayedSessionKey)?.key ?? data.sessions.find(session => session.attachment?.focused)?.key ?? data.sessions[0]?.key;
-                    syncVisibility();
-                    await collector.refresh();
-                    data = collector.data;
-                }
-                ready = !data.stale;
-                await admission.release();
-                if (closing) {
-                    await stop();
-                    return;
-                }
-                if (args.options.once || !process.stdin.isTTY) {
-                    paint();
-                    await cleanup();
-                    return;
-                }
+                await collector.start();data=collector.data;
+                if(!state.selectedKey||!data.sessions.some(s=>s.key===state.selectedKey))state.selectedKey=localSelection()??data.sessions[0]?.key;
+                syncVisibility();await collector.refresh();data=collector.data;
+                if(closing){await stop();return;}
+                if(args.options.once||!process.stdin.isTTY){paint();await cleanup();return;}
                 ui.start();
                 const follow = async () => {
-                    const snapshot = cache.snapshot;
-                    if (!snapshot || state.pin || !context.settings.follow || relocating)
-                        return;
-                    const focused = snapshot.agents.find(agent => agent.pane_id === snapshot.focused_pane_id);
-                    if (!focused)
-                        return;
-                    const selectedKey = followSelection.observe(snapshot, data, state.pin);
-                    if (selectedKey) {
-                        state.selectedKey = selectedKey;
-                        paint();
-                    }
-                    const own = snapshot.panes.find(p => p.terminal_id === terminalId);
-                    if (own && typeof own.pane_id === 'string')
-                        paneId = own.pane_id;
-                    if (!paneId || own?.tab_id === focused.tab_id)
-                        return;
-                    relocating = true;
-                    try {
-                        const result = await rpc.call('pane.move', { pane_id: paneId, destination: { type: 'tab', tab_id: focused.tab_id, target_pane_id: focused.pane_id, split: 'right', ratio: 1 - widthFraction }, focus: false });
-                        paneId = result.move_result?.pane?.pane_id ?? result.pane?.pane_id ?? paneId;
-                        await marker();
-                    }
-                    catch (error) {
-                        state.notice = (error as Error).message;
-                    }
-                    finally {
-                        relocating = false;
-                    }
+                    const snapshot=cache.snapshot;
+                    if(!snapshot||state.pin||!context.settings.follow)return;
+                    const focused=snapshot.agents.find(a=>a.pane_id===snapshot.focused_pane_id);
+                    if(!focused||focused.tab_id!==tabId)return;
+                    const selectedKey=followSelection.observe(snapshot,data,state.pin);
+                    if(selectedKey){state.selectedKey=selectedKey;paint();}
                 };
                 cache.on('snapshot', () => { syncVisibility(); collector!.invalidate(); void follow(); });
                 cache.on('stale', () => { collector!.setVisibleSession(state.selectedKey,false); data.stale = true; paint(); });
-                collector.on('data', (next: DashboardData) => { data = next; ready = !data.stale; if (!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey))
-                    state.selectedKey = data.sessions.find(s => s.key === collector!.displayedSessionKey)?.key ?? data.sessions.find(s => s.attachment?.focused)?.key ?? data.sessions[0]?.key; paint(); void follow(); });
+                collector.on('data', (next: DashboardData) => { data = next; if (!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey))
+                    state.selectedKey = localSelection() ?? data.sessions[0]?.key; paint(); void follow(); });
                 collector.on('diagnostic', (message: string) => { state.notice = message; paint(); });
-                ui.on('resize', () => { paint(); if (paneId)
-                    void rpc.call('pane.layout', { pane_id: paneId }).then(result => { const layout = result.layout ?? result; const rect = layout.panes?.find((p: any) => p.pane_id === paneId)?.rect; if (rect?.width && layout.area?.width)
-                        widthFraction = Math.min(.6, Math.max(.2, rect.width / layout.area.width)); }).catch(() => { }); });
+                collector.once('disconnected',()=>void stop());
+                ui.on('resize',paint);
                 let referenceRequest=false;
                 const perform = async (action: UiAction) => {
                     if (action.type === 'quit')
@@ -296,11 +173,11 @@ export async function main(argv = process.argv.slice(2)) {
                             if(action.type==='page-refs'){
                                 const excluded=[...(session.refs??[]),...(!action.restart?state.pagedRefs.get(key)?.refs??[]:[])].map(ref=>ref.id);
                                 const page=await collector!.pageReferences(key,{cursor:action.referencePageCursor,excludeIds:excluded,limit:50});
-                                if(page&&!closing&&state.selectedKey===key&&state.tab==='Refs'&&!state.refSources){if(action.restart)state.pagedRefs.delete(key);addReferencePage(state,key,page,revision);state.notice=page.refs.length?undefined:'No older reference targets';}
+                                if(page&&!closing&&state.selectedKey===key&&state.tab==='Refs'&&!state.refSources){if(action.restart)state.pagedRefs.delete(key);addReferencePage(state,key,page,page.contentRevision??revision);state.notice=page.refs.length?undefined:'No older reference targets';}
                             }else{
                                 const reader=state.refSources,reference=reader&&reader.reference.id===action.id?reader.reference:visibleReferences(session,state).find(ref=>ref.id===action.id);if(!reference)return;
                                 const page=await collector!.pageReferenceSources(key,reference.id,{cursor:action.referencePageCursor,limit:50});
-                                if(page&&!closing&&state.selectedKey===key&&state.tab==='Refs')showReferenceSources(state,key,reference,page,revision,Boolean(action.referencePageCursor)&&!action.restart);
+                                if(page&&!closing&&state.selectedKey===key&&state.tab==='Refs')showReferenceSources(state,key,reference,page,page.contentRevision??revision,Boolean(action.referencePageCursor)&&!action.restart);
                             }
                         }finally{referenceRequest=false;}return;
                     }

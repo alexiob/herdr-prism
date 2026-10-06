@@ -38,8 +38,11 @@ The Windows installer also configures **Ctrl+B, then `i`** when the shortcut is
 free. Its setup and activation details are in
 [Windows setup](docs/install.md#windows-setup).
 
-Opening Prism from another agent tab brings the existing panel beside that agent
-instead of returning to the tab where Prism was first opened.
+Each agent tab remembers its own Prism right pane. Opening Prism in Claude's
+tab leaves Codex's pane intact. Press **Q** inside a pane to close only that tab's
+view; opening it again restores that view's preferences. Prism restarts restore
+the previously open tabs and keep closed tabs closed. All views share one
+collector, with heavy collection limited to the visible tab.
 
 To uninstall on Windows and remove the installer-owned shortcut:
 

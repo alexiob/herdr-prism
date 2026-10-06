@@ -1,8 +1,9 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { access } from 'node:fs/promises';
-import { parseArguments, openPanel } from "../runtime/actions.js";
+import { parseArguments } from "../runtime/actions.js";
 import { serviceContext, existingController, finiteRefresh } from "../runtime/service.js";
+import { openTabPanel } from "../runtime/collector-service.js";
 import { HerdrClient } from "../herdr/client.js";
 import { StateStore } from "../state/store.js";
 import { activate, deactivate, managedRequest, acknowledge } from "../runtime/lifecycle.js";
@@ -71,22 +72,9 @@ export async function main(argv = process.argv.slice(2)) {
     try {
         const controller = await existingController(context);
         if (args.command === 'open') {
-            let existingPaneId;
-            let existingTerminalId;
-            if (controller) {
-                try {
-                    await controller.client.request('ping');
-                    const current = await controller.client.request('location');
-                    existingPaneId = current.paneId;
-                    existingTerminalId = current.terminalId;
-                }
-                catch { /* Validate/recover through doctor; do not kill an uncertain process. */ }
-            }
-            // A live panel's move/focus failure must not fall back to creating
-            // another pane while its collector still owns the session.
-            if (existingPaneId)
-                return await openPanel(rpc, { existingPaneId, existingTerminalId });
-            return await openPanel(rpc);
+            const response = await rpc.call('session.snapshot');
+            const snapshot = response.snapshot ?? response;
+            return await openTabPanel(context, snapshot.focused_pane_id);
         }
         if (args.command === 'unconfigure')
             return await deactivate(context, rpc);

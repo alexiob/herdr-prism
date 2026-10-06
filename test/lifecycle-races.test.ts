@@ -1,3 +1,4 @@
+import {openPanel} from '../src/runtime/actions.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, unlink, readFile } from 'node:fs/promises';
@@ -47,7 +48,7 @@ test('activation replaces an owned inspector that exits between snapshot and clo
         }
         return {};
     } };
-    const result = await activate(context, rpc, { mode: 'inspector-only', timeoutMs: 3000 });
+    const result = await activate(context, rpc, { openView:()=>openPanel(rpc), mode: 'inspector-only', timeoutMs: 3000 });
     assert.ok(result.activated && opened);
     assert.deepEqual(await store.read('pane'), { paneId: 'replacement', terminalId: 'replacement-terminal' });
 });

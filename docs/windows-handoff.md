@@ -158,3 +158,8 @@ measurements or adopt foreign directories just to obtain a green run. Update
 with exact source/artifact evidence, then commit and push. The full original
 specification remains `docs/design/herdr-prism.md`; broader performance/soak and
 native-client acceptance gates are still open.
+
+The current per-tab inspector architecture and local Windows evidence are in
+[Windows validation](windows-validation.md#independent-agent-tab-panes--local-windows-acceptance).
+It supersedes the moving-pane behavior; preserve the other machine's UI work
+when merging and regenerate compiled ESM from the combined source.

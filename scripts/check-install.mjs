@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
 export const supportedPlatforms = ['darwin-arm64','darwin-x64','win32-x64','linux-arm64','linux-x64'];
-export const requiredFiles = ['herdr-plugin.toml','package.json','dist/entrypoints/action.js','dist/entrypoints/startup.js','dist/entrypoints/event.js','dist/entrypoints/inspector.js','dist/entrypoints/detail.js','dist/herdr/protocol.json','companion/pi/index.js','dist/config/index.js','dist/config/safe-file.js','scripts/check-install.mjs','scripts/live-install.mjs'];
+export const requiredFiles = ['herdr-plugin.toml','package.json','dist/entrypoints/action.js','dist/entrypoints/startup.js','dist/entrypoints/event.js','dist/entrypoints/inspector.js','dist/entrypoints/collector.js','dist/entrypoints/detail.js','dist/herdr/protocol.json','companion/pi/index.js','dist/config/index.js','dist/config/safe-file.js','scripts/check-install.mjs','scripts/live-install.mjs'];
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 function inside(root,path){const rel=relative(root,path);return rel===''||!isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+(process.platform==='win32'?'\\':'/'));}
 export async function checkedRead(root,file,limit=64*1024*1024){

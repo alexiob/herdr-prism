@@ -242,3 +242,46 @@ plugin build failure. A user-authorized activation through the verified absolute
 Node executable opened the real right pane without stopping existing agents.
 Normal actions in that already-running server need an environment refresh via
 a convenient restart; the installer never silently stops the server.
+
+## Independent agent-tab panes — local Windows acceptance
+
+The requested per-tab behavior supersedes the single moving-pane change. Each
+view has tab-scoped private preferences and a separate lease; one service keeps
+the endpoint's exclusive collector/sampler ownership. Opening another tab never
+moves the first panel. Q closes only the current view; activation restart
+restores open views and preserves closed tabs. Complete removal still waits for
+all owned views and the service before purging state.
+
+Actual Herdr 0.9.3 on Windows x64 passed the independent-panel harness on Node
+22.23.3 and 24.21.0: two separately rendered right panes, repeat-open without
+creation, unchanged shared collector PID, close-one/preserve-other, restart
+open/closed restoration, complete uninstall preserving native panes/config,
+actual abrupt collector death recovery, and bounded exit after server loss.
+Proofs: `artifacts/per-tab-panels-node22-final/panels.json` and
+`artifacts/per-tab-panels-node24-final/panels.json`.
+
+Both majors also passed live install/restart/complete-removal and the advanced
+interaction harness including actual reference keyboard navigation (2,106
+fixture targets, 106 older targets, 150 source mentions), pinning, hidden-tab
+pause/resume, native TTL expiry, stale occupant guards, publication coexistence
+and edited-config refusal. Proof directories:
+`artifacts/per-tab-lifecycle-node22-final`,
+`artifacts/per-tab-lifecycle-node24-final`,
+`artifacts/per-tab-features-node22-final`,
+`artifacts/per-tab-features-node24-v5`.
+
+The final packaged helper retains SHA-256
+`606d61f8aa935e633638ccde01e8fa90ddc14350774ca2798e84ae6eeb0bd82c`.
+Install/integrity and Windows system-only dependency checks passed for
+`artifacts/per-tab-release-final`. Full Node 24 tests: 320 total, 310 passed,
+10 platform skips, zero failures. The final delayed-poll recovery regression
+also passed on both majors. No new macOS/Linux execution is claimed locally;
+the shared acceptance gate now includes independent panes on all CI platforms.
+
+Full Node 22 suite: 321 total, 311 passed, 10 platform skips, zero failures
+(`artifacts/per-tab-tests-node22-final.log`). Node 24's full suite ran before the
+last delayed-poll test was added; the complete eight-test view suite passed
+separately on both majors afterward. The final packaged build also passed the
+independent-panel harness on both majors in
+`artifacts/per-tab-panels-node22-packaged` and
+`artifacts/per-tab-panels-node24-packaged`.

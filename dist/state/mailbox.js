@@ -5,9 +5,9 @@ import { ensurePrivateDir } from "../config/index.js";
 import { atomicWrite, restrict } from "../config/safe-file.js";
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const validId = (name) => /^[a-f0-9-]{36}\.json$/.test(name);
-async function readBounded(file) {
+async function readBounded(file, limit = 1024 * 1024) {
     const info = await lstat(file);
-    if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024)
+    if (!info.isFile() || info.isSymbolicLink() || info.size > limit)
         throw new Error('Invalid mailbox file');
     return JSON.parse(await readFile(file, 'utf8'));
 }
@@ -63,7 +63,9 @@ export class MailboxClient {
     dir;
     token;
     timeout;
-    constructor(dir, token, timeout = 5000) { this.dir = dir; this.token = token; this.timeout = timeout; }
+    maxResponseBytes;
+    constructor(dir, token, timeout = 5000, maxResponseBytes = 1024 * 1024) { if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1 || maxResponseBytes > 16 * 1024 * 1024)
+        throw new Error('Invalid mailbox response limit'); this.dir = dir; this.token = token; this.timeout = timeout; this.maxResponseBytes = maxResponseBytes; }
     async request(op, payload = {}) {
         const name = randomUUID() + '.json';
         const requestDir = path.join(this.dir, 'requests');
@@ -77,7 +79,7 @@ export class MailboxClient {
         try {
             while (Date.now() < deadline) {
                 try {
-                    const result = await readBounded(response);
+                    const result = await readBounded(response, this.maxResponseBytes);
                     if (result.error)
                         throw new Error(result.error);
                     return result.result;

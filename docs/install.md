@@ -399,3 +399,9 @@ install the new reviewed release. This removes prior local plugin state as reque
 by complete uninstall. An existing collector is not assumed to restart merely
 because Herdr registers a new installation. Actual macOS/Linux/Windows live
 lifecycle tests and CI runs are required before advertising certification.
+
+Each Herdr tab remembers its own Prism right pane and inspector preferences.
+The open shortcut creates or focuses the pane in the current tab. Q closes only
+that view; other tabs and the shared collector continue running. Activation
+restart restores open views and preserves closed tabs. Deactivate or uninstall
+closes every recorded plugin view and stops the shared collector.

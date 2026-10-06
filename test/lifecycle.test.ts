@@ -1,3 +1,4 @@
+import {openPanel} from '../src/runtime/actions.ts';
 import {freshPrivateDirectory} from './helpers/private-dir.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -86,7 +87,7 @@ test('live activation waits for authenticated ready pane and marks only owned di
             return{plugin_pane:{plugin_id:'iob.herdr-prism',entrypoint:'inspector',pane:{pane_id:'panel',terminal_id:'panel-term'}}};
         } return {}; } };
     try {
-        const result = await activate(context, rpc, { mode: 'inspector-only', request, root, timeoutMs: 3000 });
+        const result = await activate(context, rpc, { openView:()=>openPanel(rpc), mode: 'inspector-only', request, root, timeoutMs: 3000 });
         assert.equal(result.activated, true);
         assert.equal(ready, true);
         const owner = JSON.parse(await readFile(path.join(context.stateDir, '.hat-lifecycle-owner.json'), 'utf8'));
@@ -115,12 +116,12 @@ test('reactivation closes every recorded old owned pane before opening replaceme
  await store.write('pane',{paneId:'persisted-old',terminalId:'persisted-term'});await start('old-token','controller-old','controller-term');
  const panes=[{pane_id:'agent',terminal_id:'agent-term'},{pane_id:'persisted-old',terminal_id:'persisted-term'},{pane_id:'controller-old',terminal_id:'controller-term'},{pane_id:'foreign',terminal_id:'foreign-term'}];const closed:string[]=[];
  const rpc={call:async(method:string,params:any={}):Promise<any>=>{if(method==='session.snapshot')return{snapshot:{focused_pane_id:'agent',panes}};if(method==='plugin.pane.close'){closed.push(params.pane_id);panes.splice(panes.findIndex(p=>p.pane_id===params.pane_id),1);}if(method==='plugin.pane.open'){assert.deepEqual(new Set(closed),new Set(['persisted-old','controller-old']),'all old owned panes close before marker is replaced');const pane={pane_id:'replacement',terminal_id:'replacement-term'};panes.push(pane);await store.write('pane',{paneId:'replacement',terminalId:'replacement-term'});await start('new-token','replacement','replacement-term');return{plugin_pane:{plugin_id:'iob.herdr-prism',entrypoint:'inspector',pane}};}return{};}};
- await activate(context,rpc,{mode:'inspector-only',timeoutMs:3000});await deactivate(context,rpc,{timeoutMs:3000});assert.deepEqual(new Set(closed),new Set(['persisted-old','controller-old','replacement']));assert.ok(panes.some(p=>p.pane_id==='foreign'));assert.ok(panes.some(p=>p.pane_id==='agent'));
+ await activate(context,rpc,{openView:()=>openPanel(rpc),mode:'inspector-only',timeoutMs:3000});await deactivate(context,rpc,{timeoutMs:3000});assert.deepEqual(new Set(closed),new Set(['persisted-old','controller-old','replacement']));assert.ok(panes.some(p=>p.pane_id==='foreign'));assert.ok(panes.some(p=>p.pane_id==='agent'));
 });
 
 test('failed inspector startup retains authoritative opened-pane identity for complete cleanup',async t=>{
  const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'hat-start-failure-'));t.after(()=>rm(dir,{recursive:true,force:true}));const context={stateDir:path.join(dir,'state'),configDir:path.join(dir,'config'),configPath:path.join(dir,'config.toml'),endpoint:'failed-start',serverStateDir:path.join(dir,'state','servers',identityName('failed-start'))};const store=new StateStore(context.serverStateDir);await store.init();const closed:string[]=[];const pane={pane_id:'never-started',terminal_id:'never-started-term'};
  await store.write('pane',{paneId:'reused',terminalId:'gone-term'});
  const rpc={call:async(method:string,params:any={}):Promise<any>=>{if(method==='session.snapshot')return{snapshot:{focused_pane_id:'agent',panes:[pane,{pane_id:'reused',terminal_id:'replacement-term'}]}};if(method==='plugin.pane.open')return{plugin_pane:{plugin_id:'iob.herdr-prism',entrypoint:'inspector',pane}};if(method==='plugin.pane.close')closed.push(params.pane_id);return{};}};
- await assert.rejects(activate(context,rpc,{mode:'inspector-only',timeoutMs:150}),/did not become ready/);assert.deepEqual(await store.read('pane'),{paneId:pane.pane_id,terminalId:pane.terminal_id});await deactivate(context,rpc,{timeoutMs:150});assert.deepEqual(closed,['never-started']);
+ await assert.rejects(activate(context,rpc,{openView:()=>openPanel(rpc),mode:'inspector-only',timeoutMs:150}),/did not become ready/);assert.deepEqual(await store.read('pane'),{paneId:pane.pane_id,terminalId:pane.terminal_id});await deactivate(context,rpc,{timeoutMs:150});assert.deepEqual(closed,['never-started']);
 });

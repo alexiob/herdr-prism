@@ -44,24 +44,7 @@ export function runtimeContext(options: Record<string, string | boolean> = {}) {
 }
 export async function openPanel(rpc: Rpc, options: {
     targetPaneId?: string;
-    existingPaneId?: string;
-    existingTerminalId?: string;
 } = {}) {
-    if (options.existingPaneId) {
-        const response = await rpc.call('session.snapshot');
-        const snapshot = response.snapshot ?? response;
-        const targetId = options.targetPaneId ?? snapshot.focused_pane_id;
-        const target = snapshot.panes?.find((pane: any) => pane.pane_id === targetId);
-        const existing = snapshot.panes?.find((pane: any) => options.existingTerminalId ? pane.terminal_id === options.existingTerminalId : pane.pane_id === options.existingPaneId);
-        let paneId = existing?.pane_id ?? (options.existingTerminalId ? undefined : options.existingPaneId);
-        if (!paneId)
-            throw new Error('Existing dashboard pane is unavailable; retry or inspect doctor');
-        if (target?.tab_id && existing?.tab_id && target.tab_id !== existing.tab_id) {
-            const moved = await rpc.call('pane.move', { pane_id: paneId, destination: { type: 'tab', tab_id: target.tab_id, target_pane_id: target.pane_id, split: 'right', ratio: 0.68 }, focus: false });
-            paneId = moved.move_result?.pane?.pane_id ?? moved.pane?.pane_id ?? paneId;
-        }
-        return rpc.call('plugin.pane.focus', { pane_id: paneId });
-    }
     let target = options.targetPaneId;
     if (!target) {
         const response = await rpc.call('session.snapshot');

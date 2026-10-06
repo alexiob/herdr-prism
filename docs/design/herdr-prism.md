@@ -530,3 +530,23 @@ remote jobs, clipboard forwarding, and complete owned remote removal. Two-server
 tests must distinguish identical pane/session IDs. Verify exact client-visible
 heavy-work pause after the visibility API is available. Windows testing remains
 explicitly deferred until the user resumes on a Windows machine.
+
+## Independent tab views (2026-10-06 amendment)
+
+Each Herdr tab owns a separate right inspector pane and private, tab-scoped UI
+preferences. Opening one tab never moves or closes another tab's pane. Closing
+a view with Q records only that tab as closed; activation restart restores open
+views and leaves closed tabs closed. Deactivate and complete uninstall still
+stop all plugin-owned views before removing their state.
+
+One authenticated collector service owns the endpoint's existing exclusive
+collector lease, native publication and sampler. Inspector panes are clients;
+only the host-confirmed visible view enables detailed collection. Responses
+are bounded at 16 MiB for view data, while mailbox requests retain their 1 MiB
+bound. Missing terminals clear stale visibility. A dead collector can be
+replaced only after proving its PID absent; live/uncertain leases are never
+reclaimed. The service stops after sustained loss of its Herdr endpoint.
+
+This supersedes the earlier single moving-panel behavior. Separate agents in
+the same Herdr tab share that tab's view, which follows native focus unless
+pinned. Checkboxes and goals remain shared session data.

@@ -1,15 +1,16 @@
 import path from 'node:path';
 import { readdir, lstat, readFile, unlink } from 'node:fs/promises';
-import { openPanel } from "./actions.js";
 import { existingController } from "./service.js";
 import { StateStore, processIsAbsent } from "../state/store.js";
 import { HerdrClient } from "../herdr/client.js";
 import { configure, unconfigure, loadSettings } from "../config/index.js";
-import { atomicWrite, readOptional, securePluginNamespace } from "../config/safe-file.js";
+import { atomicWrite, readOptional, securePluginNamespace, restrict } from "../config/safe-file.js";
 import { acquireAdmission } from "./admission.js";
 import { pluginId, source, clearPublication } from "../native/publisher.js";
+import { openTabPanel, ensureCollectorService } from "./collector-service.js";
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-async function recordedPanes(store, controller) { return [await store.read('pane'), controller].filter((value) => !!value && typeof value.terminalId === 'string'); }
+async function recordedPanes(store, controller) { const views = await store.read('views') ?? []; if (!Array.isArray(views) || views.length > 128)
+    throw new Error('Invalid panel ownership records'); return [...views, await store.read('pane'), controller].filter((value) => !!value && typeof value.terminalId === 'string'); }
 async function closeOwnedPanes(store, rpc, owned) {
     if (!owned.length)
         return;
@@ -89,18 +90,35 @@ export async function activate(context, rpc, options = {}) {
     const prior = await existingController(context);
     const serverStore = new StateStore(context.serverStateDir);
     const oldPanes = await recordedPanes(serverStore, prior?.marker);
+    const remembered = await serverStore.read('views') ?? [];
     if (prior) {
         await prior.client.request('shutdown');
         await waitForStopped(context.serverStateDir, options.timeoutMs ?? 15000);
     }
     await closeOwnedPanes(serverStore, rpc, oldPanes);
-    const opened = await openPanel(rpc);
-    const pluginPane = opened.plugin_pane;
-    if (pluginPane?.plugin_id !== pluginId || pluginPane.entrypoint !== 'inspector' || typeof pluginPane.pane?.pane_id !== 'string' || typeof pluginPane.pane?.terminal_id !== 'string')
-        throw new Error('Invalid dashboard pane ownership response');
-    // The child may fail before it writes its controller; the server's open result
-    // is the authoritative identity needed to close that pane during recovery.
-    await serverStore.write('pane', { paneId: pluginPane.pane.pane_id, terminalId: pluginPane.pane.terminal_id });
+    await waitForViewsStopped(context.serverStateDir, options.timeoutMs ?? 15000);
+    const openView = options.openView ?? ((targetPaneId) => openTabPanel(context, targetPaneId));
+    let opened;
+    if (remembered.length) {
+        const response = await rpc.call('session.snapshot'), snapshot = response.snapshot ?? response;
+        for (const record of remembered.filter(r => r.open)) {
+            const target = snapshot.panes.find((p) => p.terminal_id === record.targetTerminalId) ?? snapshot.agents?.find((a) => a.tab_id === record.tabId);
+            if (target)
+                opened = await openView(target.pane_id);
+        }
+        if (!opened)
+            await ensureCollectorService(context);
+    }
+    else
+        opened = await openView();
+    if (opened) {
+        const pluginPane = opened.plugin_pane;
+        if (pluginPane?.plugin_id !== pluginId || pluginPane.entrypoint !== 'inspector' || typeof pluginPane.pane?.pane_id !== 'string' || typeof pluginPane.pane?.terminal_id !== 'string')
+            throw new Error('Invalid dashboard pane ownership response');
+        // The child may fail before it writes its controller; the server's open result
+        // is the authoritative identity needed to close that pane during recovery.
+        await serverStore.write('pane', { paneId: pluginPane.pane.pane_id, terminalId: pluginPane.pane.terminal_id });
+    }
     const deadline = Date.now() + (options.timeoutMs ?? 15000);
     while (Date.now() < deadline) {
         const controller = await existingController(context);
@@ -143,6 +161,48 @@ export async function waitForStopped(dir, timeoutMs = 15000) {
         await sleep(50);
     }
     throw new Error('Collector shutdown did not complete; refusing to purge live state');
+}
+export async function waitForViewsStopped(dir, timeoutMs = 15000) {
+    const directory = path.join(dir, 'views'), deadline = Date.now() + timeoutMs;
+    try {
+        const info = await lstat(directory);
+        if (!info.isDirectory() || info.isSymbolicLink())
+            throw new Error('Unsafe panel state directory');
+        await restrict(directory, false);
+    }
+    catch (error) {
+        if (error.code === 'ENOENT')
+            return;
+        throw error;
+    }
+    while (Date.now() < deadline) {
+        let live = false;
+        for (const entry of await readdir(directory, { withFileTypes: true }).catch(e => { if (e.code === 'ENOENT')
+            return []; throw e; })) {
+            if (!/^[a-f0-9]{64}$/.test(entry.name) || !entry.isDirectory() || entry.isSymbolicLink())
+                throw new Error('Unsafe panel state path');
+            await restrict(path.join(directory, entry.name), false);
+            const lock = path.join(directory, entry.name, 'collector.lock');
+            try {
+                const info = await lstat(lock);
+                if (!info.isFile() || info.isSymbolicLink() || info.size > 4096)
+                    throw new Error('Unsafe panel lease');
+                const owner = JSON.parse(await readFile(lock, 'utf8'));
+                if (processIsAbsent(owner.pid))
+                    await unlink(lock);
+                else
+                    live = true;
+            }
+            catch (error) {
+                if (error.code !== 'ENOENT')
+                    throw error;
+            }
+        }
+        if (!live)
+            return;
+        await sleep(50);
+    }
+    throw new Error('Panel view shutdown did not complete; refusing to purge live state');
 }
 export async function waitForDetailsStopped(dir, timeoutMs = 15000) {
     const deadline = Date.now() + timeoutMs;
@@ -209,6 +269,7 @@ export async function deactivate(context, rpc, options = {}) {
             const client = endpoint === context.endpoint ? rpc : factory(endpoint);
             try {
                 await closeOwnedPanes(serverStore, client, ownedPanes);
+                await waitForViewsStopped(dir, options.timeoutMs);
                 await clearPublication(client, await serverStore.read('publication') ?? []);
                 await client.call('agent.view.clear', { source });
             }

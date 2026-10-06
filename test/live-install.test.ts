@@ -12,7 +12,7 @@ async function fixture(t:any){
  const dir=await freshPrivateDirectory(join(tmpdir(),'hat lifecycle-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const root=join(dir,'reviewed release'),managedDir=join(dir,'managed install'),control=join(dir,'control.json'),registry=join(dir,'registry.json'),log=join(dir,'argv.json'),job=join(dir,'job.json');
  await mkdir(root);for(const sub of ['dist/entrypoints','dist/herdr','dist/config','companion/pi','scripts'])await mkdir(join(root,sub),{recursive:true});
- for(const name of ['action','startup','event','inspector','detail'])await writeFile(join(root,'dist/entrypoints',name+'.js'),'export const fixture=true;');
+ for(const name of ['action','startup','event','inspector','collector','detail'])await writeFile(join(root,'dist/entrypoints',name+'.js'),'export const fixture=true;');
  await writeFile(join(root,'dist/herdr/protocol.json'),JSON.stringify({protocol:22,schemas:{request:{}}}));await writeFile(join(root,'companion/pi/index.js'),'export default ()=>{};');
  await writeFile(join(root,'package.json'),JSON.stringify({name:'herdr-prism',type:'module',version:'0.1.0'}));await writeFile(join(root,'herdr-plugin.toml'),'id = "iob.herdr-prism"\n');
  // Tests run before the project build in CI. Compile test-only security fixtures from source.

@@ -5,7 +5,7 @@ import { ensurePrivateDir } from '../config/index.ts';
 import { atomicWrite, restrict } from '../config/safe-file.ts';
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const validId = (name: string) => /^[a-f0-9-]{36}\.json$/.test(name);
-async function readBounded(file: string): Promise<any> { const info = await lstat(file); if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024)
+async function readBounded(file: string,limit=1024*1024): Promise<any> { const info = await lstat(file); if (!info.isFile() || info.isSymbolicLink() || info.size > limit)
     throw new Error('Invalid mailbox file'); return JSON.parse(await readFile(file, 'utf8')); }
 function authenticated(actual: unknown, expected: string) { if (typeof actual !== 'string')
     return false; const a = Buffer.from(actual), b = Buffer.from(expected); return a.length === b.length && timingSafeEqual(a, b); }
@@ -55,7 +55,8 @@ export class MailboxClient {
     private dir: string;
     private token: string;
     private timeout: number;
-    constructor(dir: string, token: string, timeout = 5000) { this.dir = dir; this.token = token; this.timeout = timeout; }
+    private maxResponseBytes:number;
+    constructor(dir: string, token: string, timeout = 5000,maxResponseBytes=1024*1024) { if(!Number.isSafeInteger(maxResponseBytes)||maxResponseBytes<1||maxResponseBytes>16*1024*1024)throw new Error('Invalid mailbox response limit');this.dir = dir; this.token = token; this.timeout = timeout;this.maxResponseBytes=maxResponseBytes; }
     async request<T = any>(op: string, payload: any = {}): Promise<T> {
         const name = randomUUID() + '.json';
         const requestDir = path.join(this.dir, 'requests');
@@ -69,7 +70,7 @@ export class MailboxClient {
         try {
             while (Date.now() < deadline) {
                 try {
-                    const result = await readBounded(response);
+                    const result = await readBounded(response,this.maxResponseBytes);
                     if (result.error)
                         throw new Error(result.error);
                     return result.result as T;
