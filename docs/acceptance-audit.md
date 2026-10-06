@@ -1,6 +1,6 @@
 # Non-Windows acceptance audit
 
-Audited 2026-10-06 at source `47e7a43`, against `docs/design/herdr-prism.md`. This is a read-only implementation review; no product code changed. Windows is explicitly deferred. Performance measurements belong to the separate performance investigation and are not assessed here.
+Original read-only audit: 2026-10-06 at source `47e7a43`, against `docs/design/herdr-prism.md`. No product code changed in that audit, and Windows was deferred. Subsequent corrections are recorded separately below. Performance measurements belong to the separate performance investigation and are not assessed here.
 
 Subsequent remote amendment: the user chose per-server Prism installation and
 kept exact client visibility as an upstream Herdr API dependency. See
@@ -38,17 +38,28 @@ Acceptance proof needed: either explicitly narrow the approved native requiremen
 
 The design's latest-mention grouping and retained earlier provenance (line 155) are correctly implemented inside the supplied window, but session-wide coverage is not. Acceptance proof needed: a reference and explicit edit in the first messages followed by more than 200 unrelated messages; verify retained reference/source semantics, or an explicit limited-history label and recovery behavior. Existing extraction tests do not establish this case.
 
-### P2 — Mouse disclosure hit testing fails on deeper rows
+## Resolved mouse disclosure finding — 2026-10-06
 
-Agent disclosure glyphs are indented by `depth * 2` in `src/tui/screen.ts:72`–74. `src/entrypoints/inspector.ts:353` maps any body click in columns 1–3 to Space and every later column to Enter, independent of the row's actual disclosure location. A depth-two agent's glyph is at column 5, so clicking that glyph activates/focuses instead of folding. Indented process rows have the same fixed-threshold limitation. Keyboard folding works and is tested; this is specifically the design's disclosure-control mouse behavior (line 321).
+The fixed columns 1–3 shortcut reproduced an incorrect focus action when the
+depth-two disclosure glyph was clicked at column 5. Agent and process renderers
+now include the disclosure's actual terminal column in each row. The inspector
+routes body clicks through `handleRowClick`, which uses that rendered coordinate,
+accounts for scroll position and rejects header/footer clicks. A pending keyboard
+number cannot redirect a row click to a previously captured agent target.
 
-Acceptance proof needed: mouse clicks at disclosure coordinates for root, depth-one, depth-two and deeply indented agent/process rows must fold that row; clicks on its label should retain the documented explicit activation behavior.
+`test/tui.test.ts` exercises root, depth-one, depth-two and deeply indented rows,
+including capped/clipped indentation, a 26-column scrolled viewport, ASCII agent
+glyphs, leaf rows, label activation and pending numeric input. Fold/unfold is
+asserted through the rendered descendant rows. These regressions passed after
+failing against the old fixed-column behavior. This closes the source-backed
+mouse hit-testing finding; actual native client mouse transport/rendering remains
+part of the broader live acceptance scenario.
 
 ## Requirement and evidence checklist
 
 | Area | Implemented and directly tested evidence | Remaining acceptance or scope boundary |
 | --- | --- | --- |
-| Six-view dashboard | `src/tui/screen.ts`, `test/tui.test.ts`: Overview, Agents, Processes, Messages, Refs, To-do; narrow widths, keyboard folds, stable numeric target capture, per-reader history/anchor, tool and goal details | Deep disclosure mouse defect above; actual native theme/client screenshots remain separate |
+| Six-view dashboard | `src/tui/screen.ts`, `test/tui.test.ts`: Overview, Agents, Processes, Messages, Refs, To-do; narrow widths, keyboard folds, disclosure-coordinate mouse regressions, stable numeric target capture, per-reader history/anchor, tool and goal details | Actual native mouse transport and theme/client screenshots remain separate |
 | Token accounting and provenance | `src/metrics/usage-reducer.ts` and `test/metrics.test.ts`: cumulative/delta epochs, request identity, cache semantics, model changes, context/rate evidence, partial priced cost, subtree deduplication, current/last turn baselines | Do not treat unsupported provider counters or unavailable generation timing as a missing fabricated metric. Exact real-provider breadth is documented in `docs/provider-compatibility.md` |
 | Provider messages, goals and lineage | `test/providers.test.ts`: exact identities, deep Codex children, paired spawn evidence, Claude child records/streaming, Pi fork distinction, rotation and partial records, metadata-only scoping; current Codex plaintext/goal/turn-accounting shapes | Existing real transcripts were read-only audited; actual Pi companion goal/parent evidence remains fixture-only. A combined real Codex/Claude/Pi scenario has not passed |
 | Messages, Refs, To-do | `test/content.test.ts` and TUI tests: chronological visible messages, source reader, latest ref grouping, explicit edits, ACTION complete-list/clear, local checks, repeated requests, safe copy/open targets; Todo historical replay in collector | Refs retained-window gap above. Local checkboxes do not mutate transcripts; no provider instruction installation is needed or performed |

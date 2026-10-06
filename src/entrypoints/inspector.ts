@@ -11,7 +11,7 @@ import { SnapshotCache } from '../herdr/subscription.ts';
 import { StateStore } from '../state/store.ts';
 import { MailboxServer } from '../state/mailbox.ts';
 import { TerminalUi } from '../tui/terminal.ts';
-import { createUiState, renderScreen, handleKey, showDetail, addMessagePage } from '../tui/screen.ts';
+import { createUiState, renderScreen, handleKey, handleRowClick, showDetail, addMessagePage } from '../tui/screen.ts';
 import { diagnosticExport } from '../tui/export.ts';
 import { copyText, openTarget } from '../tui/platform.ts';
 import type { DashboardData, RenderedScreen, UiAction } from '../tui/types.ts';
@@ -346,14 +346,9 @@ export async function main(argv = process.argv.slice(2)) {
                             state.cursorId = undefined;
                         }
                         else if (event.button === 0) {
-                            const index = event.y - 1 - frame.bodyStart + state.scroll;
-                            if (index >= 0 && index < frame.rows.length) {
-                                state.cursor = index;
-                                state.cursorId = frame.rows[index].id;
-                                const action = handleKey(state, event.x <= 3 ? 'space' : 'enter', data, frame);
-                                if (action)
-                                    await perform(action);
-                            }
+                            const action = handleRowClick(state, event.x, event.y, data, frame);
+                            if (action)
+                                await perform(action);
                         }
                     }
                     else {

@@ -11,7 +11,7 @@ import { SnapshotCache } from "../herdr/subscription.js";
 import { StateStore } from "../state/store.js";
 import { MailboxServer } from "../state/mailbox.js";
 import { TerminalUi } from "../tui/terminal.js";
-import { createUiState, renderScreen, handleKey, showDetail, addMessagePage } from "../tui/screen.js";
+import { createUiState, renderScreen, handleKey, handleRowClick, showDetail, addMessagePage } from "../tui/screen.js";
 import { diagnosticExport } from "../tui/export.js";
 import { copyText, openTarget } from "../tui/platform.js";
 export async function main(argv = process.argv.slice(2)) {
@@ -345,14 +345,9 @@ export async function main(argv = process.argv.slice(2)) {
                                 state.cursorId = undefined;
                             }
                             else if (event.button === 0) {
-                                const index = event.y - 1 - frame.bodyStart + state.scroll;
-                                if (index >= 0 && index < frame.rows.length) {
-                                    state.cursor = index;
-                                    state.cursorId = frame.rows[index].id;
-                                    const action = handleKey(state, event.x <= 3 ? 'space' : 'enter', data, frame);
-                                    if (action)
-                                        await perform(action);
-                                }
+                                const action = handleRowClick(state, event.x, event.y, data, frame);
+                                if (action)
+                                    await perform(action);
                             }
                         }
                         else {

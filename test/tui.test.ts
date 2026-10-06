@@ -59,6 +59,50 @@ test('tab reader positions persist and process cycles render once without recurs
 test('deep agent rows retain depth and full breadcrumb details while activity counts state retained coverage',()=>{
  const sessions=Array.from({length:8},(_,i)=>({key:'codex:'+i,depth:i,parentKey:i?'codex:'+(i-1):undefined,children:i<7?['codex:'+(i+1)]:[],evidence:{...data.sessions[0].evidence,id:String(i),title:'Level '+i}}));const input={...data,sessions};const state=screen.createUiState();state.selectedKey='codex:0';state.tab='Agents';let result=screen.renderScreen(input,state,80,40);assert.ok(result.rows.find((r:any)=>r.id==='codex:7').text.includes('d7'));state.cursor=result.rows.findIndex((r:any)=>r.id==='codex:7');state.cursorId='codex:7';const action=screen.handleKey(state,'d',input,result);assert.equal(action?.type,'message');assert.ok(action.text.includes('Level 0'));assert.ok(action.text.includes('Level 7'));state.tab='Overview';result=screen.renderScreen(input,state,80,40);assert.ok(result.rows.find((r:any)=>r.id==='messages').text.includes('retained'));assert.ok(result.rows.find((r:any)=>r.id==='tools').text.includes('retained'));
 });
+test('mouse disclosure follows each visible agent glyph at root, nested and capped indentation without focusing',()=>{
+ assert.equal(typeof screen.handleRowClick,'function','row mouse controller missing');
+ const sessions=Array.from({length:9},(_,i)=>({key:'codex:'+i,depth:i,parentKey:i?'codex:'+(i-1):undefined,children:i<8?['codex:'+(i+1)]:[],evidence:{...data.sessions[0].evidence,id:String(i),title:'Level '+i}}));
+ const input={...data,sessions};
+ for(const ascii of [false,true])for(const [depth,column]of [[0,1],[1,3],[2,5],[5,11],[7,11]]){
+  const state=screen.createUiState();state.tab='Agents';state.ascii=ascii;state.selectedKey='codex:0';state.cursor=depth;state.cursorId='codex:'+depth;
+  let result=screen.renderScreen(input,state,26,12);const row=result.rows[depth];assert.equal(row.text[column-1],ascii?'-':'▾');
+  const y=result.bodyStart+depth-state.scroll+1;
+  assert.equal(screen.handleRowClick(state,column,y,input,result),undefined);
+  assert.ok(state.collapsed.has(row.id));assert.equal(state.selectedKey,'codex:0');
+  result=screen.renderScreen(input,state,26,12);assert.equal(result.rows.length,depth+1);
+  assert.equal(screen.handleRowClick(state,column,result.bodyStart+depth-state.scroll+1,input,result),undefined);
+  result=screen.renderScreen(input,state,26,12);assert.equal(result.rows.length,9);
+  state.numberPrefix='1';state.numberTargets=new Map([[1,'codex:0']]);
+  const action=screen.handleRowClick(state,column+3,result.bodyStart+depth-state.scroll+1,input,result);
+  assert.equal(action?.type,'focus');assert.equal(action.sessionKey,row.id);assert.equal(state.collapsed.has(row.id),false);
+  state.cursor=8;state.cursorId='codex:8';result=screen.renderScreen(input,state,26,12);
+  assert.equal(screen.handleRowClick(state,11,result.bodyStart+8-state.scroll+1,input,result)?.sessionKey,'codex:8');
+  assert.equal(state.expanded.has('codex:8'),false);
+ }
+});
+test('process mouse disclosure follows clipped indentation and footer clicks cannot activate hidden rows',()=>{
+ assert.equal(typeof screen.handleRowClick,'function','row mouse controller missing');
+ const processes=Array.from({length:12},(_,i)=>({key:'p'+i,pid:100+i,ppid:99+i,startTime:String(i+1),cpuNs:'0',rssBytes:'1024',name:'process '+i,owner:'codex:a',availability:'known'}));
+ const input={...data,sessions:[{...data.sessions[0],resource:{...data.sessions[0].resource,processes}}]};
+ for(const [depth,column]of [[0,1],[1,3],[2,5],[7,11]]){
+  const state=screen.createUiState();state.tab='Processes';state.selectedKey='codex:a';state.cursor=depth+1;state.cursorId='p'+depth;
+  let result=screen.renderScreen(input,state,26,12);assert.equal(result.rows[depth+1].text[column-1],'▾');
+  const y=result.bodyStart+depth+1-state.scroll+1;
+  assert.equal(screen.handleRowClick(state,column,y,input,result),undefined);
+  assert.ok(state.collapsed.has('process:codex:a:p'+depth));
+  result=screen.renderScreen(input,state,26,12);assert.equal(result.rows.length,depth+2);
+  assert.equal(screen.handleRowClick(state,column,result.bodyStart+depth+1-state.scroll+1,input,result),undefined);
+  result=screen.renderScreen(input,state,26,12);assert.equal(result.rows.length,13);
+  const action=screen.handleRowClick(state,column+3,result.bodyStart+depth+1-state.scroll+1,input,result);
+  assert.equal(action?.type,'message');assert.match(action.text,new RegExp('\\nPID '+(100+depth)+' PPID '));
+  const cursor=state.cursorId;
+  for(const [x,y]of [[1,1],[2,result.bodyStart],[4,result.bodyStart+result.bodyHeight+1],[0,result.bodyStart+1]])assert.equal(screen.handleRowClick(state,x,y,input,result),undefined);
+  assert.equal(state.cursorId,cursor);
+  state.cursor=12;state.cursorId='p11';result=screen.renderScreen(input,state,26,12);
+  assert.equal(screen.handleRowClick(state,11,result.bodyStart+12-state.scroll+1,input,result)?.type,'message');
+  assert.equal(state.collapsed.has('process:codex:a:p11'),false);
+ }
+});
 test('demo mode remains labeled on any selected child and positive small resident values do not look like measured zero',()=>{
  const input={...data,demo:true,sessions:[{...data.sessions[0],resource:{...data.sessions[0].resource,memoryBytes:'1024',availability:'known'}} ,data.sessions[1]]};const state=screen.createUiState();state.selectedKey='codex:b';let result=screen.renderScreen(input,state,80,30);assert.ok(result.lines[0].includes('[DEMO]'));state.selectedKey='codex:a';result=screen.renderScreen(input,state,80,30);assert.ok(result.rows.find((r:any)=>r.id==='memory').text.includes('1KiB'));
 });
