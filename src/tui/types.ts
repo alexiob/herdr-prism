@@ -4,7 +4,8 @@ import type {UsageSummary} from '../metrics/usage-reducer.ts';
 import type {GitSummary} from '../git/cache.ts';
 import type {ReferenceCursor,RefSource} from '../content/refs.ts';
 import type {ReferencePageCursor} from '../providers/reference-pages.ts';
-export const tabs=['Overview','Agents','Processes','Messages','Refs','To-do'] as const;
+import type {TextSpan,ThemeName,ColorRole} from './theme.ts';
+export const tabs=['Overview','Agents','Processes','Messages','Refs','To-do','Git','Notes'] as const;
 export type Tab=typeof tabs[number];
 export interface UiRef {id:string;target:string;messageId:string;line?:number;edited:boolean;exists?:boolean;kind?:string;source?:string;cursor?:ReferenceCursor;sources?:RefSource[];}
 export interface UiTodo {id:string;text:string;messageId:string;checked:boolean;firstSeenAt?:number;latestMessageId?:string;repeated?:boolean;source?:string;}
@@ -14,7 +15,13 @@ export interface ReaderPosition {cursor:number;cursorId?:string;scroll:number;}
 export interface MessageReader {lastIds:string[];following:boolean;newCount:number;initialized?:boolean;anchorId?:string;}
 export interface ReferenceReader {refs:UiRef[];cursor?:ReferencePageCursor;hasMore:boolean;partial:boolean;observedAt:number;revision?:string;stale?:boolean;}
 export interface ReferenceSourceReader {sessionKey:string;reference:UiRef;sources:RefSource[];cursor?:ReferencePageCursor;hasMore:boolean;partial:boolean;observedAt:number;revision?:string;stale?:boolean;}
-export interface UiState {tab:Tab;selectedKey?:string;cursor:number;cursorId?:string;scroll:number;collapsed:Set<string>;expanded:Set<string>;filter:string;editingFilter:boolean;pin:boolean;subtree:boolean;ascii:boolean;monochrome:boolean;help:boolean;detail?:string;numberPrefix:string;numberTargets:Map<number,string>;view:'lineage'|'worktrees';notice?:string;pagedMessages:Map<string,Message[]>;messageReaders:Map<string,MessageReader>;readers:Map<string,ReaderPosition>;detailReader?:ReaderPosition;readerKey?:string;followMessages:boolean;pagedRefs:Map<string,ReferenceReader>;refSources?:ReferenceSourceReader;sourceDetailReader?:ReaderPosition;}
-export interface UiAction {type:'focus'|'select'|'open-ref'|'message'|'source'|'toggle-todo'|'copy'|'pin'|'scope'|'quit'|'settings'|'export'|'page-messages'|'page-refs'|'ref-sources';sessionKey?:string;id?:string;target?:string;line?:number;text?:string;beforeId?:string;referenceCursor?:ReferenceCursor;referencePageCursor?:ReferencePageCursor;restart?:boolean;}
-export interface ScreenRow {id:string;text:string;action?:UiAction;sourceId?:string;copy?:string;disclosureColumn?:number;}
-export interface RenderedScreen {lines:string[];rows:ScreenRow[];selectedLine?:number;bodyStart:number;bodyHeight:number;numericTargets:Map<number,string>;}
+export interface DetailField {label:string;value:string;role?:ColorRole;}
+export interface DetailSection {id:string;title:string;fields?:DetailField[];text?:string;rows?:ScreenRow[];column?:0|1;}
+export interface DetailDocument {title:string;sections:DetailSection[];capturedAt?:number;help?:string;}
+export interface NotesEditorState {sessionKey:string;title:string;text:string;cursor:number;editing:boolean;status:'loading'|'saved'|'dirty'|'saving'|'error'|'conflict';savedAt?:number;error?:string;}
+export interface UiState {tab:Tab;selectedKey?:string;cursor:number;cursorId?:string;scroll:number;collapsed:Set<string>;expanded:Set<string>;filter:string;editingFilter:boolean;pin:boolean;subtree:boolean;ascii:boolean;monochrome:boolean;theme?:ThemeName;help:boolean;helpText?:string;helpReader?:ReaderPosition;detail?:string;detailDocument?:DetailDocument;detailStack?:{text:string;document?:DetailDocument;position:ReaderPosition}[];refParent?:{text:string;document?:DetailDocument;position:ReaderPosition};notes?:NotesEditorState;numberPrefix:string;numberTargets:Map<number,string>;view:'lineage'|'worktrees';notice?:string;pagedMessages:Map<string,Message[]>;messageReaders:Map<string,MessageReader>;readers:Map<string,ReaderPosition>;detailReader?:ReaderPosition;readerKey?:string;followMessages:boolean;pagedRefs:Map<string,ReferenceReader>;refSources?:ReferenceSourceReader;sourceDetailReader?:ReaderPosition;}
+export interface UiAction {type:'focus'|'select'|'tab'|'notes-edit'|'notes-save'|'open-ref'|'message'|'source'|'toggle-todo'|'copy'|'pin'|'scope'|'quit'|'settings'|'export'|'page-messages'|'page-refs'|'ref-sources';tab?:Tab;document?:DetailDocument;sessionKey?:string;id?:string;target?:string;line?:number;text?:string;beforeId?:string;referenceCursor?:ReferenceCursor;referencePageCursor?:ReferencePageCursor;restart?:boolean;}
+export interface ScreenRow {id:string;text:string;label?:string;value?:string;role?:ColorRole;section?:string;column?:0|1;help?:string;document?:DetailDocument;selectable?:boolean;action?:UiAction;sourceId?:string;copy?:string;disclosureColumn?:number;}
+export interface RowRegion {index:number;x:number;y:number;width:number;display:string;disclosureX?:number;}
+export interface TabRegion {tab:Tab;x:number;y:number;width:number;}
+export interface RenderedScreen {lines:string[];spans?:TextSpan[][];rows:ScreenRow[];selectedLine?:number;bodyStart:number;bodyHeight:number;numericTargets:Map<number,string>;rowRegions?:RowRegion[];tabRegions?:TabRegion[];terminalCursor?:{line:number;column:number};theme?:ThemeName;}

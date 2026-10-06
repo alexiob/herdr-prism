@@ -12,15 +12,18 @@ import { SnapshotCache } from '../herdr/subscription.ts';
 import { StateStore } from '../state/store.ts';
 import { TerminalUi } from '../tui/terminal.ts';
 import { createUiState, renderScreen, handleKey, handleRowClick, showDetail, addMessagePage, addReferencePage, showReferenceSources } from '../tui/screen.ts';
+import {messageDocument} from '../tui/facts.ts';
 import {visibleReferences} from '../tui/reference-readers.ts';
 import { diagnosticExport } from '../tui/export.ts';
 import { copyText, openTarget } from '../tui/platform.ts';
+import {tabs} from '../tui/types.ts';
 import type { DashboardData, RenderedScreen, UiAction } from '../tui/types.ts';
 export async function main(argv = process.argv.slice(2)) {
     const args = parseArguments(['inspector', ...argv]);
     const state = createUiState();
     state.ascii = args.options.ascii === true;
     state.monochrome = args.options.monochrome === true;
+    if(args.options.theme){if(!['dark','light','mono'].includes(String(args.options.theme)))throw new Error('Theme must be dark, light or mono');state.theme=args.options.theme as any;}
     const ui = new TerminalUi({ monochrome: state.monochrome });
     let data: DashboardData;
     let frame: RenderedScreen;
@@ -34,7 +37,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (args.options.demo) {
         data = demoData();
         state.selectedKey = data.sessions[0]?.key;
-        if (args.options.view && ['Overview', 'Agents', 'Processes', 'Messages', 'Refs', 'To-do'].includes(String(args.options.view)))
+        if (args.options.view && tabs.includes(String(args.options.view) as any))
             state.tab = args.options.view as any;
         if (args.options.once || !process.stdin.isTTY) {
             paint();
@@ -90,7 +93,7 @@ export async function main(argv = process.argv.slice(2)) {
                     if(typeof key==='string'&&value&&Number.isSafeInteger(value.cursor)&&Number.isSafeInteger(value.scroll))state.readers.set(key,value);
                 }
                 state.selectedKey=preferences.selectedKey;state.pin=preferences.pin===true;
-                if(['Overview','Agents','Processes','Messages','Refs','To-do'].includes(preferences.tab))state.tab=preferences.tab;
+                if(tabs.includes(preferences.tab))state.tab=preferences.tab;
             }
             const save=async()=>{await store.write('preferences',{selectedKey:state.selectedKey,pin:state.pin,tab:state.tab,collapsed:[...state.collapsed].slice(0,512),expanded:[...state.expanded].slice(0,512),readers:[...state.readers].slice(-64)});};
             cleanup=async()=>{ui.close();cache.close();try{await collector!.close();await save();}finally{rpc.close();await lease!.release();await admission.release();}};
@@ -120,10 +123,9 @@ export async function main(argv = process.argv.slice(2)) {
                 collector.on('diagnostic', (message: string) => { state.notice = message; paint(); });
                 collector.once('disconnected',()=>void stop());
                 ui.on('resize',paint);
-                let referenceRequest=false;
+                let referenceRequest=false;let contentRequest=0;
                 const perform = async (action: UiAction) => {
-                    if (action.type === 'quit')
-                        return stop();
+                    if (action.type === 'quit'){contentRequest++;return stop();}
                     if (action.type === 'pin') {
                         await save();
                         if (!state.pin) {
@@ -181,6 +183,9 @@ export async function main(argv = process.argv.slice(2)) {
                             }
                         }finally{referenceRequest=false;}return;
                     }
+                    if(action.type==='tab'){contentRequest++;return;}
+                    if(action.type==='notes-edit'){state.notice='Notes editor is loading';return;}
+                    if(action.type==='select'){contentRequest++;const selected=data.sessions.find(session=>session.key===action.sessionKey);if(selected){state.selectedKey=selected.key;state.tab='Overview';state.cursor=0;state.cursorId=undefined;state.scroll=0;syncVisibility();collector!.invalidate();}return;}
                     if (action.type === 'focus') {
                         const selected = data.sessions.find(s => s.key === action.sessionKey);
                         if (!selected)
@@ -197,22 +202,18 @@ export async function main(argv = process.argv.slice(2)) {
                         return;
                     }
                     if (action.type === 'source') {
+                        const request=++contentRequest,tab=state.tab;
                         const message = action.referenceCursor?await collector!.referenceMessage(action.referenceCursor):await collector!.message(action.sessionKey!, action.id!);
-                        if(closing||state.selectedKey!==action.sessionKey)return;
-                        showDetail(state, message ? `${message.role}\n${message.text}` : 'Source message unavailable');
+                        if(closing||state.selectedKey!==action.sessionKey||state.tab!==tab||request!==contentRequest)return;
+                        showDetail(state, message ? `${message.role}\n${message.text}` : 'Source message unavailable',message?messageDocument(message):undefined);
                         return;
                     }
                     if (action.type === 'message') {
+                        const request=++contentRequest,tab=state.tab,key=state.selectedKey;
                         const message = action.id && action.sessionKey ? await collector!.message(action.sessionKey, action.id) : undefined;
+                        if(closing||key!==state.selectedKey||tab!==state.tab||request!==contentRequest)return;
                         const text = message ? `${message.role}\n${message.text}\n${(message.tools ?? []).map(t => `${t.status} ${t.name}: ${t.summary ?? ''}`).join('\n')}` : action.text ?? 'No detail';
-                        if (message && action.sessionKey) {
-                            try {
-                                await rpc.call('plugin.pane.open', { plugin_id: 'iob.herdr-prism', entrypoint: 'detail', placement: 'popup', env: { ...(process.platform==='win32'?windowsPaneEnvironment():{}), HAT_DETAIL_SESSION: action.sessionKey, HAT_DETAIL_MESSAGE: action.id! }, focus: true });
-                                return;
-                            }
-                            catch { /* ui_busy or unsupported popup uses the in-panel detail. */ }
-                        }
-                        showDetail(state, text);
+                        showDetail(state, text, action.document??(message?messageDocument(message):undefined));
                         return;
                     }
                 };
@@ -220,22 +221,7 @@ export async function main(argv = process.argv.slice(2)) {
                     if (event.type === 'mouse') {
                         if (event.release)
                             return;
-                        if (event.y === 3 && event.button === 0 && ui.columns >= 65) {
-                            const { tabs } = await import('../tui/types.ts');
-                            let start = 1;
-                            for (const tab of tabs) {
-                                const width = tab.length + (tab === state.tab ? 2 : 0);
-                                if (event.x >= start && event.x < start + width) {
-                                    state.tab = tab;
-                                    state.cursor = 0;
-                                    state.cursorId = undefined;
-                                    state.scroll = 0;
-                                    break;
-                                }
-                                start += width + 1;
-                            }
-                        }
-                        else if (event.button === 64 || event.button === 65) {
+                        if (event.button === 64 || event.button === 65) {
                             state.cursor += event.button === 64 ? -3 : 3;
                             state.cursorId = undefined;
                         }
@@ -277,10 +263,10 @@ export async function main(argv = process.argv.slice(2)) {
         ui.on('input', async (event: any) => { if (event.type !== 'key')
             return; const action = handleKey(state, event.key, data, frame); if (action?.type === 'quit')
             await stop();
-        else if (action?.type === 'focus')
-            state.selectedKey = action.sessionKey;
+        else if (action?.type === 'focus'||action?.type==='select')
+            {state.selectedKey = action.sessionKey;if(action.type==='select')state.tab='Overview';}
         else if (action?.type === 'message')
-            showDetail(state, action.text ?? '');
+            showDetail(state, action.text ?? '',action.document);
         else if(action?.type==='ref-sources'){
             const session=data.sessions.find(session=>session.key===action.sessionKey),reference=session?.refs?.find(ref=>ref.id===action.id);if(reference)showReferenceSources(state,session!.key,reference,{sources:reference.sources??[{messageId:reference.messageId,source:reference.source}],hasMore:false,partial:true,observedAt:Date.now()},session!.evidence.contentRevision);
         }

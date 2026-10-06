@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { InputDecoder } from './input.ts';
 import type { InputEvent } from './input.ts';
 import type { RenderedScreen } from './types.ts';
+import {styleSpans} from './theme.ts';
 export class TerminalUi extends EventEmitter {
     private decoder = new InputDecoder();
     private frame?: RenderedScreen;
@@ -48,12 +49,13 @@ export class TerminalUi extends EventEmitter {
             const selected = i === frame.selectedLine;
             const previous = this.frame?.lines[i];
             const wasSelected = i === this.frame?.selectedLine;
-            if (previous === frame.lines[i] && selected === wasSelected)
+            if (previous === frame.lines[i] && selected === wasSelected && JSON.stringify(this.frame?.spans?.[i])===JSON.stringify(frame.spans?.[i]))
                 continue;
             const line = frame.lines[i];
-            const style = selected ? '\x1b[7m' : this.mono ? '' : i < 3 ? '\x1b[1;36m' : line.includes('conflicts') ? '\x1b[33m' : '';
-            output += `\x1b[${i + 1};1H\x1b[2K${style}${line}\x1b[0m`;
+            const rendered=frame.spans?.[i]?styleSpans(frame.spans[i]!,{theme:this.mono?'mono':frame.theme??'dark',depth:/^(truecolor|24bit)$/.test(process.env.COLORTERM??'')?24:process.env.TERM?.includes('256color')?8:4}):line;
+            output += `\x1b[${i + 1};1H\x1b[2K${rendered}\x1b[0m`;
         }
+        output+=frame.terminalCursor?`\x1b[${frame.terminalCursor.line};${frame.terminalCursor.column}H\x1b[?25h`:'\x1b[?25l';
         if (output)
             process.stdout.write(output);
         this.frame = frame;
