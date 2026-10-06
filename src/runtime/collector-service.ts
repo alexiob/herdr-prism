@@ -1,3 +1,4 @@
+import {migrateNativeLayout} from '../config/index.ts';
 import {spawn} from 'node:child_process';
 import {open,readFile} from 'node:fs/promises';
 import {join,extname} from 'node:path';
@@ -79,7 +80,7 @@ export async function runCollectorService(options:Record<string,string|boolean>=
   finally{rpc.close();const marker=await store.read<{token:string}>('controller');if(marker?.token===lease?.token)await store.remove('controller');await lease?.release();await admission.release();finish();}
  })();
  try{
-  await store.init();lease=await store.acquire();collector=new Collector({rpc,endpoint:context.endpoint,settings:context.settings,stateDir:context.serverStateDir});
+  await store.init();lease=await store.acquire();if(context.settings.nativeMode!=='inspector-only'){const migration=await migrateNativeLayout(context.configPath,context.stateDir,context.settings.theme);if(migration.changed)await rpc.call('server.reload_config');}collector=new Collector({rpc,endpoint:context.endpoint,settings:context.settings,stateDir:context.serverStateDir});
   const host=new CollectorHost(collector,store,rpc),global=new StateStore(context.stateDir);
   mailbox=new MailboxServer(context.serverStateDir,lease.token,async(op,p)=>{
    if(op==='ping')return{alive:true,ready,stale:collector!.data.stale,diagnostics:collector!.data.diagnostics,kind:'collector-service'};

@@ -49,6 +49,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
     else {
         const context = await serviceContext(args.options);
+        state.theme??=context.settings.theme;
         state.ascii = state.ascii || context.settings.ascii;
         state.monochrome = state.monochrome || context.settings.monochrome;
         ui.setMonochrome(state.monochrome);
