@@ -1,5 +1,12 @@
 import {test}from'node:test';import assert from'node:assert/strict';
 const native=await import('../src/native/publisher.ts').catch(()=>({}))as any;
+test('native reference counts distinguish bounded history and unavailable source from a complete zero',async()=>{
+ for(const [refCoverage,expected]of [['partial','r1+'],['retained','r1+'],['unavailable','r—'],['session','r1']]){
+  let tokens:any;const publisher=new native.NativePublisher({call:async(method:string,params:any)=>{if(method==='pane.get')return{pane:{terminal_id:'t',tokens:{}}};if(method==='pane.report_metadata')tokens=params.tokens;return{};}});
+  await publisher.publish([{key:'x',depth:0,children:[],evidence:{id:'x',provider:'pi',messages:[],tools:[],usage:[],goals:[]},attachment:{pane_id:'p',terminal_id:'t'},refs:[{id:'r',target:'/fixture/ref',messageId:'m',edited:false}],refCoverage}],1000);
+  assert.ok(tokens.hat_counts.endsWith(expected),tokens.hat_counts);
+ }
+});
 test('native publisher uses display-only bounded tokens, renews TTL and clears its owner safely',async()=>{
   assert.equal(typeof native.NativePublisher,'function','native publisher missing');
   const calls:any[]=[];const tokens:any={foreign:'safe'};const rpc={call:async(method:string,params:any)=>{calls.push({method,params});if(method==='pane.get')return{pane:{terminal_id:'t',tokens:{...tokens}}};if(method==='pane.report_metadata')for(const[key,value]of Object.entries(params.tokens))if(value===null)delete tokens[key];else tokens[key]=value;return {type:'agent_view',source:'plugin:iob.herdr-prism'};}};

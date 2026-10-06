@@ -6,6 +6,15 @@ import {tmpdir} from 'node:os';
 import type {Message} from '../src/model/types.ts';
 const api = await import('../src/content/index.ts').catch(()=>({})) as any;
 const message=(id:string,text:string,timestamp=10,complete=true):Message=>({id,text,role:'assistant',timestamp,complete,source:'fixture'});
+test('incremental reference metadata keeps earlier sources and edits across a long reference-free interval',async()=>{
+ assert.equal(typeof api.ReferenceList,'function','streaming reference reducer missing');
+ const list=new api.ReferenceList('/repo');
+ list.update([{...message('first','See `src/a.ts`',1),tools:[{id:'patch',name:'apply_patch',status:'done',editedPaths:['src/a.ts']}]}]);
+ for(let i=0;i<250;i++)list.update([message('plain'+i,'No reference here',2+i)]);
+ list.update([message('latest','Again `src/a.ts`',300)]);
+ list.update([message('latest','Again `src/a.ts`',300)]);
+ const refs=await list.snapshot();assert.equal(refs.length,1);assert.equal(refs[0].messageId,'latest');assert.equal(refs[0].edited,true);assert.deepEqual(refs[0].sources.map((s:any)=>s.messageId),['first','latest']);
+});
 test('messages directed to another agent never replace user ACTION lists or create user refs',async()=>{
  const inter:Message={...message('between','ACTION: Deploy\nSee `src/private.ts`'),kind:'inter-agent',author:'parent',recipient:'child'};const list=new api.TodoList();list.update([message('chat','ACTION: Review'),inter]);assert.equal(list.items.length,1);assert.equal(list.items[0].text,'Review');assert.deepEqual(await api.extractRefs([inter],'/repo'),[]);
 });

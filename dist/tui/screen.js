@@ -286,6 +286,9 @@ function contentRows(session, state, columns, now, data) {
         }
     }
     else if (state.tab === 'Refs') {
+        const coverage = session.refCoverage;
+        const label = coverage === 'session' ? 'Session reference history' : coverage === 'partial' ? 'Partial reference history' : coverage === 'unavailable' ? 'Reference source unavailable' : 'Retained message references';
+        rows.push({ id: 'refs-coverage', text: `${label} · ${session.refs?.length ?? 0} retained · ${age(session.refUpdatedAt, now)} ago` });
         let group = '';
         for (const ref of session.refs ?? []) {
             if (!match(ref.target, state))

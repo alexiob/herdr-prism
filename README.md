@@ -62,6 +62,13 @@ for the lifecycle and configuration details.
 | Refs | Mentioned or explicitly edited references, source jump, deliberate open/copy |
 | To-do | Opt-in complete ACTION lists with local checked state and source provenance |
 
+Refs are recovered from the selected session's transcript history independently
+of the 200-message hot window. The coverage row shows when history is partial
+or unavailable and when local existence was last checked. Native `rN+` means a
+bounded or partial count; `r—` means the source is unavailable. The current
+index keeps at most 2,000 targets and 100 source mentions per target; pagination
+beyond those limits is still pending.
+
 `Tab` changes views; arrows or `j`/`k` move; `Enter` activates the selected item;
 `Space` folds or expands; `/` filters; `?` shows help; `q` closes the inspector.
 `p` pins, `u` selects subtree scope, `w` switches Agents grouping, `s` jumps to a

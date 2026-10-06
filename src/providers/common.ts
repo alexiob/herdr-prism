@@ -23,12 +23,13 @@ export class EvidenceBuilder {
  messages=new Map<string,Message>(); tools=new Map<string,ToolCall>(); usage=new Map<string,UsageRecord>();
  turnId?:string; turnStart?:number;
  supported=true;
+ onEditedPaths?: (paths:string[],cwd?:string)=>void;
  max:number;
  constructor(provider:string,path:string,max:number) {this.max=max;this.evidence={id:'',provider,path,messages:[],tools:[],usage:[],goals:[],availability:'known',diagnostics:[]};}
  source(offset:number):string {return `${this.evidence.path}#${offset}`;}
  diagnostic(message:string) {if(!this.evidence.diagnostics!.includes(message))this.evidence.diagnostics!.push(message);this.evidence.diagnostics=this.evidence.diagnostics!.slice(-64);this.evidence.availability='partial';}
  message(message:Message) { const old=this.messages.get(message.id);this.messages.set(message.id,{...old,...message,tools:message.tools?.length?message.tools:old?.tools});const offset=Number(message.source?.slice(message.source.lastIndexOf('#')+1));if(message.kind!=='inter-agent'&&message.role==='user'&&message.complete===true&&!this.evidence.initialRequest&&Number.isFinite(offset)&&offset<=1024*1024)this.evidence.initialRequest=structuredClone(message);this.bound(this.messages); }
- tool(tool:ToolCall) {this.tools.set(tool.id,{...this.tools.get(tool.id),...tool});this.bound(this.tools);}
+ tool(tool:ToolCall,cwd=this.evidence.cwd) {this.tools.set(tool.id,{...this.tools.get(tool.id),...tool});this.bound(this.tools);if(tool.status==='done'&&tool.editedPaths?.length)this.onEditedPaths?.(tool.editedPaths,cwd);}
  usageRecord(record:UsageRecord) {if(Object.entries(record).some(([k,v])=>['input','output','cacheRead','cacheWrite','total','turnMs','generationMs','contextUsed','contextLimit'].includes(k)&&v!==undefined)){const defined=Object.fromEntries(Object.entries(record).filter(([,v])=>v!==undefined));this.usage.set(record.id,{...this.usage.get(record.id),...defined} as UsageRecord);this.bound(this.usage);}}
  bound<T>(map:Map<string,T>) {while(map.size>this.max){map.delete(map.keys().next().value!);this.diagnostic('retained record window limit reached; lifetime coverage partial');}}
  snapshot():SessionEvidence { const e=this.evidence;e.messages=[...this.messages.values()].sort((a,b)=>(a.timestamp??0)-(b.timestamp??0));e.tools=[...this.tools.values()];e.usage=[...this.usage.values()];return structuredClone(e); }
@@ -45,7 +46,7 @@ export class EvidenceBuilder {
  if(call.name==='apply_patch'&&/Success|success|"success"\s*:\s*true/.test(summary)) for(const match of call.raw.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm))paths.push(match[1]!);
  if(paths.length)tool.editedPaths=[...new Set(paths)].slice(0,200);
  }
- this.tool(tool);this.message({id:`tool:${id}`,role:'tool',text:summary.slice(0,4096),timestamp,cwd:call.cwd,source,complete:true,tools:[tool]});
+ this.tool(tool,call.cwd);this.message({id:`tool:${id}`,role:'tool',text:summary.slice(0,4096),timestamp,cwd:call.cwd,source,complete:true,tools:[tool]});
  const output=json(content);
  if(!error&&['create_goal','get_goal','update_goal'].includes(call.name)){
  const goal=object(output.goal);const objective=clean(goal.objective,8192);const created=number(goal.createdAt);const thread=identity(goal.threadId);const goalId=thread&&created!==undefined?`goal:${thread}:${created}`:undefined;

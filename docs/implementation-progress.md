@@ -332,6 +332,51 @@ the direct collector/publisher regression establishes this ordering correction.
 The disposable Linux test container was removed. Windows-specific implementation
 and validation remain with the other agent.
 
+## Selected-session reference history — 2026-10-06
+
+The former 200-message reference loss case is corrected with a separate streaming
+metadata reducer. Only the selected visible session's canonical transcript files
+are read; appends are incremental and replacement/truncation rebuilds the affected
+file. Cancellation stops record reads and discards the cancelled reader. Successful
+tool and standalone patch events retain their original checkout context, while
+failed patch events do not earn an edited marker. Immutable reference snapshots
+reuse unchanged existence evidence for five seconds, with at most four concurrent
+local stats. Temporary source failures retry on that same visible-session cadence.
+
+Regressions recover an early reference and edit after 250 unrelated messages,
+preserve first/latest sources, deduplicate mirror files, follow appends and
+rotation, stop cancelled reads, and prove that hidden panes cannot retry reference
+reads. Refs show coverage and existence-evidence age; native counts use `rN+`
+for partial/retained history and `r—` for unavailable sources. The hot message
+window remains 200. Current metadata bounds are 2,000 targets, 2,000 edited paths,
+100 mention sources per target and eight transcript readers. Older target/source
+pagination remains required in the
+[reference history plan](superpowers/plans/2026-10-06-reference-history.md);
+this component does not certify the complete reference feature or performance budget.
+
+Windows commits through `5965de8` were fetched and pulled with rebase; this was a
+fast-forward with no conflicts, and the uncommitted reference component was
+restored intact. Typecheck/build and 97 targeted content/provider/collector/native/
+TUI tests passed. The combined strict macOS suite passed with 275 total, 265 passed,
+ten platform skips and zero failures. Strict Linux arm64 Node 24 Podman passed with
+275 total, 264 passed, eleven platform skips and zero failures, using `--init`
+and the checksummed Linux helper. Logs:
+`/private/tmp/prism-reference-history-merged-strict-macos.log` and
+`/private/tmp/prism-reference-history-merged-strict-linux-arm64.log`.
+
+The combined product build staged at
+`artifacts/release-prism-reference-history-merged-macos/` passed all ten existing
+isolated live Herdr interaction/ownership gates. Proof:
+`artifacts/prism-reference-history-merged-live-macos/features.json`.
+Actual macOS arm64 Node 26 to Linux arm64 Node 24 SSH acceptance also passed,
+including real host PTY navigation, remote CPU/RSS/Git/Refs/To-do, OSC52 copy,
+disconnect preservation, reconnect and complete remote uninstall. Proof:
+`artifacts/remote-reference-history-merged/remote.json`. Owned SSH files and
+containers were removed. These fixtures use synthetic provider records/processes;
+they do not certify paid-provider interaction, native sidebar pixels, WAN behavior
+or the missing upstream viewer-visibility contract. Windows-specific fixes and
+validation remain with the other agent.
+
 ## Performance evidence
 
 `scripts/profile-host.mjs` now profiles 50 declared fixture sessions, 500 real
@@ -368,6 +413,8 @@ replace the aggregate budgets. Active CPU remains above the strict 3% target.
 - Exercise the full mixed-provider/deep-child/second-worktree/registered-detached
   scenario, launch ownership, selected-session visibility and reconnect/upgrade
   recovery in live Herdr. Complete provider audit limitations remain explicit.
+- Finish older reference target/source pagination, exact historical source
+  navigation and native numeric badge mapping under a provable host contract.
 - Meet active CPU and full live-host performance budgets; run long recovery/soak
   acceptance. Unit fixtures and controlled transport profiles are not substitutes.
 - Finish a requirement-by-requirement evidence audit and stage/install/remove

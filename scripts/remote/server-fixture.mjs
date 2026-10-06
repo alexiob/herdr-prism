@@ -64,7 +64,7 @@ try{
    const screenFacts=async()=>{const screen=(await exec('herdr',['--session',name,'pane','read',panel.pane_id,'--source','visible','--lines','60','--format','ansi'],{env,encoding:'utf8'})).stdout;return{refsTab:/\[Refs\]|< Refs >/.test(screen),remoteRefVisible:screen.includes(repo+'/remote.txt'),copyRequested:screen.includes('Copy requested'),clipboardUnavailable:screen.includes('Clipboard unavailable')};};
    await cli(['pane','focus','--direction','right','--pane',state.target.pane_id]);assert.equal((await rpc.call('session.snapshot')).snapshot.focused_pane_id,panel.pane_id);
    await cli(['pane','send-text',panel.pane_id,'\t\t\t\t']);await delay(700);const afterTabs=await screenFacts();assert.ok(afterTabs.refsTab);assert.ok(afterTabs.remoteRefVisible);
-   await cli(['pane','send-text',panel.pane_id,'\x1b[B']);await delay(250);const afterDown=await screenFacts();
+   await cli(['pane','send-text',panel.pane_id,'\x1b[H\x1b[B\x1b[B']);await delay(250);const afterDown=await screenFacts();
    await cli(['pane','send-text',panel.pane_id,'y']);await delay(350);const afterCopy=await screenFacts();assert.ok(afterCopy.copyRequested);
    await cli(['pane','send-text',panel.pane_id,'\t\t']);
    result={copyRequestedFromRemoteRefs:true,originPaneFocused:true,herdrEnvPresent:processEnvironment.some(v=>v.startsWith('HERDR_ENV=')),herdrEnvIs1:processEnvironment.includes('HERDR_ENV=1'),stdoutTTY,afterTabs,afterDown,afterCopy};

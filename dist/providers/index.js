@@ -8,6 +8,7 @@ import { PiAdapter } from "./pi.js";
 import { JsonlTail } from "./tail.js";
 import { metadata } from "./metadata.js";
 import { TodoList } from "../content/todo.js";
+import { ReferenceHistory } from "./reference-history.js";
 function freeze(value) { if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const child of Object.values(value))
         freeze(child);
@@ -30,6 +31,7 @@ export class ProviderIndex {
     inventory = new Map();
     activeRefs;
     detailedRefs;
+    referenceHistory;
     metadataIndex = new Map();
     scanRound = 0;
     metadataCache = new Map();
@@ -531,5 +533,19 @@ export class ProviderIndex {
         }
         return available ? todo.toJSON() : undefined;
     }
-    close() { this.closed = true; this.entries.clear(); this.sessions.clear(); this.inventory.clear(); this.metadataIndex.clear(); this.metadataCache.clear(); this.pathAliases.clear(); this.snapshots = Object.freeze([]); this.assemblyKey = undefined; }
+    async readReferences(provider, ref, isCurrent = () => true) {
+        if (this.closed || !isCurrent())
+            return;
+        const evidence = this.resolveSnapshotCached(provider, ref);
+        if (!evidence?.path || evidence.availability === 'unavailable')
+            return;
+        const key = `${provider}:${evidence.id}`;
+        if (this.referenceHistory?.key !== key) {
+            this.referenceHistory?.reader.close();
+            this.referenceHistory = { key, reader: new ReferenceHistory(provider, this.maxRecord) };
+        }
+        const files = [...this.entries.values()].filter(entry => entry.provider === provider && entry.adapter.evidence.id === evidence.id).sort((a, b) => (a.adapter.evidence.startedAt ?? 0) - (b.adapter.evidence.startedAt ?? 0) || a.path.localeCompare(b.path)).map(entry => entry.path);
+        return this.referenceHistory.reader.read(files, () => !this.closed && isCurrent());
+    }
+    close() { this.closed = true; this.referenceHistory?.reader.close(); this.referenceHistory = undefined; this.entries.clear(); this.sessions.clear(); this.inventory.clear(); this.metadataIndex.clear(); this.metadataCache.clear(); this.pathAliases.clear(); this.snapshots = Object.freeze([]); this.assemblyKey = undefined; }
 }
