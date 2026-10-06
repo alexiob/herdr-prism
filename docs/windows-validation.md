@@ -285,3 +285,18 @@ separately on both majors afterward. The final packaged build also passed the
 independent-panel harness on both majors in
 `artifacts/per-tab-panels-node22-packaged` and
 `artifacts/per-tab-panels-node24-packaged`.
+
+Standard Herdr GitHub installation was verified for implementation
+`85c64b25bdbef96f0c0d06060a47a2b68f4770aa` on both Node majors,
+including exact commit resolution, activation, deactivation/reinstall/restart,
+disable/enable and ordinary uninstall with retained user state:
+`artifacts/per-tab-github-node22/github.json` and
+`artifacts/per-tab-github-node24/github.json`.
+
+The current user installation was upgraded through that standard pinned GitHub
+command, then the Windows installer helper restored absolute verified Node
+commands and checked the existing owned shortcut. Prism alone was restarted.
+Actual Claude and Codex tabs now each have their own correctly rendered view,
+with one unchanged collector PID, both native agents preserved, focus restored
+and todosEnabled still true. Proof:
+`artifacts/per-tab-current-proof/current.json`. No user agent input was sent.

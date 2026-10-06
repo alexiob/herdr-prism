@@ -575,3 +575,15 @@ iteration; the production UI and persistent Notes editor remain to be replaced.
 Gallery + existing TUI/input tests pass 29/29, with TypeScript checks and actual
 PTY help/detail/back/exit proof. Collection schedules and Windows code are
 unchanged by this preview.
+
+## Remembered per-tab panes
+
+Implementation `85c64b2` replaces the single moving inspector with independent
+right panes per Herdr tab and one authenticated collector per endpoint. Closing
+one view preserves other views and native publication. Restart restores open
+views and keeps closed tabs closed; view preferences and leases are isolated.
+Local Windows Node 22/24 full tests and live lifecycle/advanced interaction/
+independent-panel/GitHub-install checks passed. The current Claude and Codex
+views were upgraded and checked without restarting either agent. Detailed
+counts and evidence are in docs/windows-validation.md; fresh CI remains a
+separate cross-platform verification result.
