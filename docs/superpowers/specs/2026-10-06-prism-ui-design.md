@@ -50,6 +50,12 @@ RSS/working-set sums, not a fabricated percentage. Gaps stay gaps. Coverage,
 provenance, timings, peak definitions, cost/cache semantics and retained-window
 limits are accessible in details and help.
 
+Process, scope-coverage and reference detail views use aligned label/value
+columns with different semantic styles. Process facts group Identity, Resources
+and Ownership; scope facts group Selected scope, Readable samples and Aggregate
+readings; ref facts group Reference target and Recorded facts. Full paths wrap
+at directory boundaries, and explanatory metric prose stays in `?` help.
+
 Palette roles: text, secondary, border, one cyan accent, green additions,
 amber stale/wait, red deletions/errors. Default terminal background; selectable
 rows use a subdued background and a visible marker. Dark/light/mono and ASCII

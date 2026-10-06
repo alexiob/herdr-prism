@@ -31,6 +31,9 @@ npm run ui:preview -- --width 50 --theme dark
 npm run ui:preview -- --width 80 --theme light
 npm run ui:preview -- --width 36 --ascii --theme mono
 npm run ui:preview -- --view Processes --plain
+npm run ui:preview -- --view Detail --entry p1
+npm run ui:preview -- --view Detail --entry process-scope
+npm run ui:preview -- --view Detail --entry ref-session
 npm run ui:preview -- --width 50 --save artifacts/ui-design/50
 ```
 
@@ -38,6 +41,12 @@ The `--save` option creates both plain `.txt` and colored `.ansi` files for
 every design. Use `cat` to print a saved design. The frame reserves space for
 tabs, context and footer; selected entries scroll into view. Long entries show
 their meaningful summary with a right arrow and retain complete detail.
+
+Process details group Identity, Resources and Ownership. Scope details separate
+the selected scope, readable-sample coverage and aggregate readings. Reference
+details separate the full target path and recorded facts. Labels use the quiet
+secondary style; values align in one column with semantic emphasis. Long paths
+wrap at directory boundaries. Metric explanations remain in `?` help.
 
 In the current local Herdr session, the preview is in the pane named
 **Prism UI Gallery** (`w2:pN`), beside the agent's original pane. These IDs are

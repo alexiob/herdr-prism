@@ -8,7 +8,8 @@ export type PreviewView=typeof previewViews[number];
 export interface PreviewEntry {
   id:string;label:string;value?:string;help:string;detail?:string;target?:PreviewView;role?:ColorRole;display?:string;
 }
-interface Section {title:string;entries:PreviewEntry[];description?:string[];}
+interface DetailField {label:string;value:string;role?:ColorRole;}
+interface Section {title:string;entries:PreviewEntry[];description?:string[];fields?:DetailField[];}
 export interface PreviewOptions {width?:number;height?:number;selected?:number;scroll?:number;ascii?:boolean;theme?:ThemeName;entry?:PreviewEntry;}
 export interface PreviewFrame {
   view:PreviewView;lines:string[];spans:TextSpan[][];entries:(PreviewEntry&{display:string})[];
@@ -123,12 +124,48 @@ function readableWrap(value:string,width:number):string[]{
     let rest=raw;if(!rest){lines.push('');continue;}
     while(cellWidth(rest)>width){
       const fit=wrap(rest,width,1)[0]!;const boundary=fit.lastIndexOf(' ');
-      const cut=boundary>0?boundary:fit.length;
+      const separator=Math.max(fit.lastIndexOf('/'),fit.lastIndexOf('\\'));
+      const cut=boundary>0?boundary:separator>0?separator+1:fit.length;
       lines.push(rest.slice(0,cut).trimEnd());rest=rest.slice(cut).replace(/^ +/,'');
     }
     lines.push(rest);
   }
   return lines;
+}
+/** Detail presentation uses the fixture's facts, keeping metric explanations in help. */
+function structuredDetail(entry:PreviewEntry):Section[]|undefined{
+  const text=entry.detail??'';
+  const values=new Map<string,string>();
+  for(const line of text.split('\n')){const field=/^([A-Za-z][A-Za-z -]*):\s+(.+)$/.exec(line);if(field)values.set(field[1]!,field[2]!);}
+  const section=(title:string,fields:DetailField[]):Section=>({title,entries:[],fields});
+  const known=(keys:[string,string,ColorRole?][]):DetailField[]=>keys.flatMap(([key,label,role])=>values.has(key)?[{label,value:values.get(key)!,role}]:[]);
+  if(/^p\d+$/.test(entry.id))return[
+    section('Identity',known([['Process','Name','accent'],['PID','PID'],['PPID','PPID'],['Birth identity','Birth']])),
+    section('Resources',known([['CPU','CPU','accent'],['RSS','RSS','accent'],['Threads','Threads'],['Availability','Status','warning']])),
+    section('Ownership',known([['Owner','Agent','accent']])),
+  ].filter(item=>item.fields!.length);
+  if(entry.id==='process-scope')return[
+    section('Selected scope',known([['Scope','Includes','accent']])),
+    section('Readable samples',known([['CPU','CPU','positive'],['Memory','Memory','positive']])),
+    section('Aggregate readings',known([['Aggregate CPU','CPU','accent'],['Aggregate RSS','RSS','accent']])),
+  ];
+  if(entry.id.startsWith('ref-')){
+    const target=text.split('\n').find(line=>/^(?:\/|[A-Za-z]:[\\/])/.test(line));
+    if(!target)return;
+    const match=/^(.*?)(?::(\d+))?$/.exec(target)!;const fullPath=match[1]!,name=fullPath.split(/[\\/]/).at(-1)!;
+    const missing=entry.id==='ref-missing';
+    return[
+      section('Reference target',[
+        {label:'Name',value:name,role:'accent'},
+        {label:'Path',value:fullPath},
+        ...(match[2]?[{label:'Line',value:match[2]}]:[]),
+      ]),
+      section('Recorded facts',[
+        {label:'State',value:missing?'Missing target':'Recorded target',role:missing?'warning':'text'},
+        ...known([['Edited','Edited'],['Sources','Sources','accent'],['Source message','Message','accent']]),
+      ]),
+    ];
+  }
 }
 function semanticText(text:string,role:ColorRole='text',selected=false):TextSpan[]{
   return text.split(/([+]\d+|-\d+)/g).filter(Boolean).map(part=>span(part,/^\+\d+$/.test(part)?'positive':/^-\d+$/.test(part)?'negative':role,selected));
@@ -144,6 +181,13 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
     const result:BodyLine[]=[];
     for(const section of items){
       const heading=`┌ ${section.title} `;result.push({parts:[span(heading,'accent'),span('─'.repeat(Math.max(0,innerWidth-cellWidth(heading)-1))+'┐','border')],entries:[]});
+      for(const field of section.fields??[]){
+        const labelWidth=10,valueWidth=innerWidth-4-labelWidth;
+        for(const [index,line]of readableWrap(field.value,valueWidth).entries())result.push({parts:[
+          span('│ ','border'),span(pad(index?'':field.label,labelWidth),'secondary'),
+          span(pad(line,valueWidth),field.role??'text'),span(' │','border'),
+        ],entries:[]});
+      }
       for(const text of section.description??[])for(const line of readableWrap(text,innerWidth-4))result.push({parts:[span('│ ','border'),...semanticText(pad(line,innerWidth-4),'secondary'),span(' │','border')],entries:[]});
       for(const entry of section.entries){
         const index=allEntries.length,display=compactEntry(entry,innerWidth-4);allEntries.push({...entry,display});
@@ -158,7 +202,7 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
     const entry=options.entry??sections.Overview[0]!.entries[0]!;
     const title=view==='Help'?`Help · ${entry.label}`:`Detail · ${entry.label}`;
     const text=view==='Help'?`${entry.help}\n\nEnter opens ${entry.target??'full content'}.\n? shows this entry's help.\nEscape returns to your previous selection.`:entry.detail??`${entry.label}\n\n${entry.value??''}\n\nDestination: ${entry.target??'none'}`;
-    body=sectionLines([{title,description:text.split('\n'),entries:[]}],width);
+    body=sectionLines(view==='Detail'?structuredDetail(entry)??[{title,description:text.split('\n'),entries:[]}]:[{title,description:text.split('\n'),entries:[]}],width);
   }else if(two){
     const colWidth=Math.floor((width-2)/2),items=sections.Overview;
     const left=sectionLines([items[1]!,items[2]!],colWidth);
@@ -167,14 +211,15 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
       const l=left[i],r=right[i];return {parts:[...(l?.parts??[span(' '.repeat(colWidth))]),span('  '),...(r?.parts??[span(' '.repeat(width-colWidth-2))])],entries:[...l?.entries??[],...(r?.entries??[]).map(e=>({...e,column:e.column+colWidth+2}))]};
     });
   }else body=sectionLines(sections[view],width);
-  const active=view==='Notes editor'?'Notes':inspectorPreviewTabs.includes(view as any)?view:'Overview';
+  const detailContext=options.entry?.id.startsWith('ref-')?'Refs':options.entry?.id==='process-scope'||/^p\d+$/.test(options.entry?.id??'')?'Processes':'Overview';
+  const active=view==='Notes editor'?'Notes':view==='Detail'||view==='Help'?detailContext:inspectorPreviewTabs.includes(view as any)?view:'Overview';
   const tabNames=width<50?['Overview','Agents','Procs','Msgs','Refs','To-do','Git','Notes']:inspectorPreviewTabs;
   const tabParts=tabNames.map((name,i)=>({name,active:inspectorPreviewTabs[i]===active}));
   const tabLines:TextSpan[][]=[];let tabLine:TextSpan[]=[],used=0;
   for(const item of tabParts){const label=(item.active?'['+item.name+']':item.name)+' ';if(used+cellWidth(label)>width&&tabLine.length){tabLines.push(tabLine);tabLine=[];used=0;}tabLine.push(span(label,item.active?'accent':'secondary'));used+=cellWidth(label);}
   if(tabLine.length)tabLines.push(tabLine);
   const chrome:TextSpan[][]=[
-    [span(truncate(`PRISM · DESIGN · ${view}`,width),'accent')],
+    [span(truncate(`PRISM · DESIGN · ${view==='Detail'&&detailContext==='Processes'?options.entry?.id==='process-scope'?'Scope coverage':'Process details':view==='Detail'&&detailContext==='Refs'?'Reference details':view}`,width),'accent')],
     [span(width<50?'Monitor · codex · working':'Monitor · codex / demo-model · working','text')],
     [span(truncate('local/main · Self + jobs · Follow',width),'secondary')],...tabLines,
   ];

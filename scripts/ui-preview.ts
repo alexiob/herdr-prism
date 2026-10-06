@@ -1,6 +1,6 @@
 import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import {previewViews,renderPreview,formatPreview} from '../src/tui/preview.ts';
+import {previewViews,inspectorPreviewTabs,renderPreview,formatPreview} from '../src/tui/preview.ts';
 import type {PreviewView} from '../src/tui/preview.ts';
 import type {ThemeName} from '../src/tui/theme.ts';
 import {InputDecoder} from '../src/tui/input.ts';
@@ -19,16 +19,19 @@ if(args.includes('--help')){
 }
 const color=!args.includes('--plain')&&theme!=='mono';
 const render=(view:PreviewView,extra:Parameters<typeof renderPreview>[1]={})=>renderPreview(view,{width,height,theme,ascii:args.includes('--ascii'),...extra});
+const entryId=option('--entry');
+const initial=entryId?inspectorPreviewTabs.flatMap(tab=>render(tab).entries.map(entry=>({tab,entry}))).find(item=>item.entry.id===entryId):undefined;
+if(entryId&&!initial)throw new Error('Unknown preview entry: '+entryId);
 const save=option('--save');
 if(save){
   await mkdir(save,{recursive:true});
   for(const view of previewViews){const frame=render(view);const name=view.toLowerCase().replace(/[^a-z0-9]+/g,'-');await writeFile(path.join(save,name+'.txt'),formatPreview(frame,{color:false}));await writeFile(path.join(save,name+'.ansi'),formatPreview(frame,{color:true}));}
 }
 if(!args.includes('--browse')){
-  for(const view of requested?[requested]:previewViews)process.stdout.write('\n'+formatPreview(render(view),{color}));
+  for(const view of requested?[requested]:initial?['Detail'] as const:previewViews)process.stdout.write('\n'+formatPreview(render(view,{entry:initial?.entry}),{color}));
 }else{
   if(!process.stdin.isTTY||!process.stdout.isTTY)throw new Error('--browse needs an interactive terminal');
-  let view:PreviewView=requested??'Overview',selected=0,scroll=0,entry:NonNullable<Parameters<typeof renderPreview>[1]>['entry'];
+  let view:PreviewView=requested??(initial?'Detail':'Overview'),selected=0,scroll=0,entry:NonNullable<Parameters<typeof renderPreview>[1]>['entry']=initial?.entry;
   const history:{view:PreviewView;selected:number;scroll:number}[]=[];
   let frame=render(view),closed=false;
   const draw=()=>{frame=render(view,{width:Math.min(width,process.stdout.columns||width),height:Math.min(height,process.stdout.rows||height),selected,scroll,entry});scroll=frame.scroll;process.stdout.write('\x1b[H\x1b[2J'+formatPreview(frame,{color}));};
@@ -37,7 +40,7 @@ if(!args.includes('--browse')){
   const key=(key:string)=>{
     if(key==='q'||key==='ctrl+c'){clearTimeout(timer);close();return;}
     if(key==='tab'||key==='shift+tab'){const i=previewViews.indexOf(view);view=previewViews[(i+(key==='tab'?1:previewViews.length-1))%previewViews.length]!;selected=0;scroll=0;history.length=0;}
-    else if(key==='escape'){const previous=history.pop();if(previous)({view,selected,scroll}=previous);}
+    else if(key==='escape'){const previous=history.pop();if(previous)({view,selected,scroll}=previous);else if(view==='Detail'||view==='Help'){view=initial?.tab??'Overview';selected=0;scroll=0;}}
     else if(key==='?'||key==='enter'){
       const picked=frame.entries[Math.max(0,Math.min(selected,frame.entries.length-1))];
       if(picked){entry=picked;history.push({view,selected,scroll});view=key==='?'?'Help':picked.target??'Detail';selected=0;scroll=0;}

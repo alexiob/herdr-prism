@@ -67,3 +67,23 @@ test('every selected entry is fully displayed and Git colors distinguish additio
   assert.ok(spans.some((span:any)=>span.text==='+128'&&span.role==='positive'));
   assert.ok(spans.some((span:any)=>span.text==='-37'&&span.role==='negative'));
 });
+
+test('process, scope and ref details separate aligned labels from styled full values',()=>{
+  const process=api.renderPreview('Processes',{width:50,height:34}).entries.find((entry:any)=>entry.id==='p1');
+  const coverage=api.renderPreview('Processes',{width:50,height:34}).entries.find((entry:any)=>entry.id==='process-scope');
+  const ref=api.renderPreview('Refs',{width:50,height:34}).entries.find((entry:any)=>entry.id==='ref-session');
+  for(const width of [36,50,80,120])for(const [entry,headings,label,value] of [
+    [process,['Identity','Resources','Ownership'],'PID','4102'],
+    [coverage,['Selected scope','Readable samples','Aggregate readings'],'CPU','4/4 readable'],
+    [ref,['Reference target','Recorded facts'],'Name','session.ts'],
+  ] as any[]){
+    const frame=api.renderPreview('Detail',{entry,width,height:40});
+    for(const heading of headings)assert.ok(frame.lines.some((line:string)=>line.includes(heading)),`${entry.id}: ${heading}`);
+    const line=frame.spans.find((line:any[])=>line.some(span=>span.text.trim()===label));
+    assert.ok(line,`${entry.id}: ${label}`);
+    assert.equal(line.find((span:any)=>span.text.trim()===label).role,'secondary');
+    assert.ok(line.some((span:any)=>span.text.includes(value)&&span.role!=='secondary'),`${entry.id}: styled ${value}`);
+    if(entry.id==='process-scope')assert.ok(line.some((span:any)=>span.text.trim()===value));
+    for(const line of frame.lines)assert.ok(cellWidth(line)<=width);
+  }
+});
