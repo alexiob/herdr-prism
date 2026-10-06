@@ -241,5 +241,24 @@
     "ctrlSFlushed": true,
     "ctrlCClosedCleanly": true
   },
-  "testHarnessCorrection": "Initial Linux transfer omitted install.sh/native packager and included macOS AppleDouble metadata. Corrected archive had no plugin source changes for these failures; full and live tests then passed."
+  "testHarnessCorrection": "Initial Linux transfer omitted install.sh/native packager and included macOS AppleDouble metadata. Corrected archive had no plugin source changes for these failures; full and live tests then passed.",
+  "ciFixtureCorrection": {
+    "firstRun": "https://github.com/alexiob/herdr-prism/actions/runs/37514194470",
+    "firstRunOutcome": "failed",
+    "unixFailure": "Old narrow Agents caption in required PTY smoke",
+    "windowsNode24Failure": "Autosave test read before slow disk/ACL save completed",
+    "bothReproducedOnMacos": true,
+    "changes": "Shared PTY/ConPTY marker updated; autosave test uses deliberately slow storage and waits for saved completion. No Windows runtime changes.",
+    "targetedWithRealPty": {
+      "macos": {
+        "passed": 10,
+        "failed": 0
+      },
+      "linux": {
+        "passed": 10,
+        "failed": 0
+      }
+    },
+    "freshCi": "pending"
+  }
 }

@@ -86,7 +86,7 @@ try:
     quiet()
     at = len(output)
     size(26, 12)
-    wait_for(lambda: b'< Agents >' in output[at:], '80x24 to 26x12 resize repaint')
+    wait_for(lambda: b'[Agents]' in output[at:], '80x24 to 26x12 resize repaint')
     quiet()
     at = len(output)
     size(80, 24)

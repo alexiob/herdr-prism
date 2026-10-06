@@ -642,3 +642,14 @@ the root installer/native packager and included AppleDouble metadata; those
 harness inputs were corrected. macOS's rebuilt package passes the same pipeline,
 now opening Notes through its Overview arrow rather than direct tab traversal.
 The shared collector and all incoming Windows changes remain intact.
+
+
+The first pushed CI run at `40128fd` passed Unix strict source tests but failed
+required terminal smoke: the fixture still required the old narrow `< Agents >`
+caption. Windows Node 24 additionally exposed the new autosave test's fixed
+70 ms assumption. Both failures were reproduced locally; the shared Unix/ConPTY
+marker now matches the approved tab label, and the autosave test deliberately
+adds storage latency and waits for the saved completion before reading disk.
+Real PTY + Notes fixture suites pass 10/10 on macOS and Linux. No Windows runtime
+code was changed. This first CI failure remains recorded; a fresh matrix run is
+required for the corrected commit.

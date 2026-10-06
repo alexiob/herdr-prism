@@ -83,7 +83,7 @@ public static class HatConPtySmoke {
    int at=capture.Text().Length;Send(inputWrite,"\t");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("[Agents]"),"Tab changing Agents view");Thread.Sleep(150);
    at=capture.Text().Length;Send(inputWrite,"\x1b[B");Expect(capture,s=>s.Length>at,"Down arrow changing selection");Thread.Sleep(150);
    at=capture.Text().Length;Send(inputWrite,"\x1b[A");Expect(capture,s=>s.Length>at,"Up arrow changing selection");Thread.Sleep(150);
-   at=capture.Text().Length;HResult(ResizePseudoConsole(console,new Coord(26,12)),"ResizePseudoConsole narrow");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("< Agents >"),"80x24 to 26x12 resize repaint");Thread.Sleep(150);
+   at=capture.Text().Length;HResult(ResizePseudoConsole(console,new Coord(26,12)),"ResizePseudoConsole narrow");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("[Agents]"),"80x24 to 26x12 resize repaint");Thread.Sleep(150);
    at=capture.Text().Length;HResult(ResizePseudoConsole(console,new Coord(80,24)),"ResizePseudoConsole wide");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("[Agents]"),"26x12 to 80x24 resize repaint");Thread.Sleep(150);
    at=capture.Text().Length;Send(inputWrite,"q");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("PRISM_SAVED_SCREEN"),"saved original-screen restoration on quit");
    if(WaitForSingleObject(process.process,3000)!=0)throw new Exception("ConPTY child did not terminate on quit capabilities="+(File.Exists(report)?File.ReadAllText(report):"missing"));uint exit;Check(GetExitCodeProcess(process.process,out exit),"ConPTY exit status");if(exit!=0)throw new Exception("ConPTY child exit "+exit);

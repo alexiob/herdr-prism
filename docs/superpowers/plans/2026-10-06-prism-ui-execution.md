@@ -19,3 +19,5 @@ Final: Ruling: Actual Windows console/ACL acceptance stays with the owning Windo
 Final: Ruling: Native pixel rendering and missing upstream visibility/focus APIs remain existing gates, as agreed; no host fork or invented indices. Cost if wrong: native visual/remote acceptance needs another pass.
 Final: no deferred minor findings. Full reviewed profiles macOS342/320/22 and Linux342/319/23 (total/pass/skip), zero failures; actual isolated Herdr reference/Notes/shared-collector/lifecycle pipelines passed on both.
 Task 5: complete (commits b33a7a6..96deef9, tests: node --experimental-strip-types --test test/config.test.ts test/native.test.ts test/lifecycle-races.test.ts test/tui-redesign.test.ts test/notes-editor.test.ts test/notes.test.ts test/tui.test.ts test/ui-preview.test.ts → ℹ duration_ms 1252.537125)
+
+Post-push CI: fixed stale narrow-tab smoke expectation and a fixed-delay autosave assertion; each was reproduced RED→GREEN locally. Shared Notes/real-PTY suites macOS10/10 and Linux10/10. Windows runtime unchanged; original failed run remains recorded.
