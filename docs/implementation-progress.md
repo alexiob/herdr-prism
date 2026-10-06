@@ -115,8 +115,11 @@ that every later edit has been executed on every platform.
   keyboard/resize/restoration/EOF/reaping with initialized standard slots.
   ConPTY can consume alternate-buffer escape bytes; the smoke candidate now
   checks real saved-screen restoration and measured raw-mode cleanup instead.
-  One final candidate run remains; unresolved Windows work after it is deferred
-  to a Windows machine as requested.
+  Final [run 37450329250](https://github.com/alexiob/herdr-prism/actions/runs/37450329250)
+  passed all eight Unix jobs. Windows Node 22 passed 240 tests and failed eight;
+  Node 24 passed 241 and failed seven (three platform skips each). Further Windows
+  changes/testing stopped as requested. [Windows handoff](windows-handoff.md)
+  records exact failures and reproduction/delivery steps for a Windows machine.
 - The ordinary default-branch macOS GitHub installation passed against exact
   commit `2655fa4f3000e623e31a044e6f1149b54185e982` using Herdr 0.9.3:
   `artifacts/prism-github-install-macos/github.json`. It verified build-hook
@@ -170,8 +173,9 @@ replace the aggregate budgets. Active CPU remains above the strict 3% target.
 
 ## Remaining completion gates
 
-- Rerun the corrected source on all ten actual-platform CI jobs; validate and
-  include the Windows helper with its exact checksums and matching notices.
+- Resume Windows only on a Windows machine as requested, using the handoff.
+  Resolve its remaining tests and validate/include the Windows helper with exact
+  checksums and matching notices. Keep the eight passing Unix jobs intact.
   Then exercise ordinary GitHub installation on every packaged platform.
 - Run the renamed advanced acceptance gate on all Unix CI targets; add actual
   Windows TTL coverage, native client/theme pixels and multiple clients.
@@ -185,4 +189,6 @@ replace the aggregate budgets. Active CPU remains above the strict 3% target.
   release publication are separate from working development packages.
 
 Full-access local testing and remote CI are available. No sandbox restriction is
-an outstanding blocker. The original implementation goal remains active.
+an outstanding blocker. The original implementation goal remains active for
+remaining acceptance; Windows work is explicitly deferred until user-requested
+resumption on a Windows machine.

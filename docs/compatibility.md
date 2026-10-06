@@ -2,19 +2,20 @@
 
 Updated 2026-10-06. The first complete release requires actual macOS, Linux and
 Windows execution plus live Herdr acceptance. Those gates are **not yet complete**.
-The initial actual-platform CI run completed with seven passing jobs and three
-failures. The corrected source still requires a fresh run; see the exact evidence
-below and the [progress ledger](implementation-progress.md).
+The latest actual-platform CI run passed all eight macOS/Linux jobs. Windows
+Node 22/24 still failed the strict suite, and further Windows work is deferred
+to a Windows machine at the user's request. See the [handoff](windows-handoff.md)
+and [progress ledger](implementation-progress.md).
 
 ## Platform matrix
 
 | Target | Runtime backend | Packaged native artifact | Evidence recorded in this workspace |
 | --- | --- | --- | --- |
-| macOS arm64 | Rust libproc/sysctl helper | `bin/darwin-arm64/hat-sampler` | Actual host resource tests, local live lifecycle and ordinary GitHub installation passed. CI Node 24 passed; Node 22 hit a restart race now corrected locally, awaiting rerun. |
+| macOS arm64 | Rust libproc/sysctl helper | `bin/darwin-arm64/hat-sampler` | Actual host resource tests, ordinary GitHub installation and final Node 22/24 CI passed, including PTY, distribution, live lifecycle and advanced interactions. |
 | macOS x64 | Rust libproc/sysctl helper | `bin/darwin-x64/hat-sampler` | Physical Intel CI passed on Node 22/24, including strict native/socket tests, PTY, distribution and live lifecycle. |
 | Linux x64 | TypeScript procfs | Not required | Actual CI passed on Node 22/24 with strict procfs/socket tests, PTY, distribution and live lifecycle. Node 24 also passed ordinary GitHub installation. |
 | Linux arm64 | TypeScript procfs | Not required | Actual CI passed on Node 22/24 with strict procfs/socket tests, PTY, distribution and live lifecycle. Node 24 also passed ordinary GitHub installation; earlier Podman acceptance passed. |
-| Windows x64 | Rust Win32 working-set/process helper | Pending inclusion after acceptance | Actual Node 22/24 CI built the native helper and passed typecheck, then failed ACL, ConPTY and portability tests. Corrections are awaiting actual Windows rerun. |
+| Windows x64 | Rust Win32 working-set/process helper | Pending inclusion after acceptance | Final Node 22/24 CI passed native build/unit tests and typecheck, then failed 8/7 strict tests. Existing-directory protection, mailbox/launch behavior and one CPU-history observation remain unresolved; work deferred to a Windows machine. |
 
 Windows arm64 and other platforms are not release targets; the installation
 checker rejects them rather than selecting a mismatched helper. Host platform
@@ -27,7 +28,7 @@ release provenance. Linux does not require a native runtime helper.
 
 | Component | Supported/tested contract | Limits |
 | --- | --- | --- |
-| Node.js | Minimum 22.13.0; actual CI matrix 22 and 24 | Seven jobs passed in the first run; three need corrected-source reruns. Local arm64 development used Node 26.10.0. Release code is compiled ESM, with no runtime npm install. |
+| Node.js | Minimum 22.13.0; actual CI matrix 22 and 24 | Final eight Unix jobs passed; two Windows jobs failed. Local arm64 development used Node 26.10.0. Release code is compiled ESM, with no runtime npm install. |
 | Herdr | Installed 0.9.3, protocol 22 | Actual ordinary RPC/subscription and macOS live install/restart/remove exercised. Ordinary calls use separate connections; event subscriptions have dedicated streams. Complete native renderer and cross-platform lifecycle acceptance remain required. |
 | Native sidebar | Real agent rows, ≤16 rows/tokens per row; ≤14 `hat_` keys in default template | No synthetic native nodes or per-field click handlers. Metadata shares the pane's retained-key budget. |
 | Native projection | One source-guarded owner | Radar/Pi-tree cannot concurrently own the same layout/projection; inspector-only mode is the fallback. |
@@ -90,9 +91,9 @@ with its matching `rust-docs` notices. None of these build tools is installed by
 ## Remaining acceptance
 
 The platform evidence above applies to source commit
-`2655fa4f3000e623e31a044e6f1149b54185e982` in
-[run 37445486188](https://github.com/alexiob/herdr-prism/actions/runs/37445486188).
-It does not certify later corrections. Rerun all jobs and ordinary repository
+`376d3a6b1453275485c6f52f34111d791612b6e9` in
+[run 37450329250](https://github.com/alexiob/herdr-prism/actions/runs/37450329250).
+It does not certify later changes. Complete Windows validation and ordinary repository
 installation on every platform before advertising complete platform support. Live
 Herdr acceptance must still verify right placement/follow/pin, multi-client local
 rows, metadata TTL/readback, source-safe coexistence, pane/PID replacement,

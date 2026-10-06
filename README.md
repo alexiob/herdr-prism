@@ -6,8 +6,9 @@ local To-do checkboxes and Git checkout state. An optional native overview adds
 compact summaries to Herdr's existing Agents panel.
 
 **Release status:** implementation candidate. Actual macOS and Linux CI and
-GitHub installation checks have passed. Windows validation is in progress, and
-its native helper is not yet included in the repository installation. See
+GitHub installation checks have passed. Windows validation is deferred to a
+Windows machine; see the [handoff](docs/windows-handoff.md). The Windows native
+helper is not yet included in the repository installation. See
 [compatibility](docs/compatibility.md) for the exact evidence and remaining gates.
 
 ## Install and open
