@@ -106,7 +106,7 @@ export async function bootstrapUnix({root=rootDefault,herdrBin,session,prepareOn
  const temp=await mkdtemp(join(tmpdir(),'prism-bootstrap-'));
  try{
   const release=join(temp,'release');
-  await stageRelease({root,output:release,platforms:[target],nodeBin:process.execPath});
+  await stageRelease({root,output:release,platforms:[target],nodeBin:process.execPath,helperSource:'bin'});
   const result=await install({root:release,herdrBin,session,env,inspectorOnly,shortcut:true,timeoutMs:60000});
   return {...result,herdrBin,nodeBin:process.execPath,startedServer};
  }finally{await rm(temp,{recursive:true,force:true});}

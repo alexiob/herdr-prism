@@ -38,3 +38,12 @@ test('Unix bootstrap release binds every Node command before checksumming, with 
  await assert.rejects(stageRelease({root,output:join(root,'relative'),platforms:['linux-x64'],nodeBin:'node'}),/absolute.*Unix/i);
  await assert.rejects(stageRelease({root,output:join(root,'foreign'),platforms:['all'],nodeBin}),/Unix/i);
 });
+
+test('GitHub bootstrap stages committed helper binaries without requiring ignored build artifacts',async t=>{
+ const root=await fixture(t),h=await helper(root,'darwin','arm64'),{cp}=await import('node:fs/promises');
+ await cp(h.dir,join(root,'bin/darwin-arm64'),{recursive:true});await rm(join(root,'native'),{recursive:true});
+ const output=join(root,'committed-helper');await stageRelease({root,output,platforms:['darwin-arm64'],helperSource:'bin'});
+ assert.equal((await checkInstall({root:output,platform:'darwin',arch:'arm64',nodeVersion:'24.21.0'})).ok,true);
+ await writeFile(join(root,'bin/darwin-arm64/hat-sampler'),'tampered');
+ await assert.rejects(stageRelease({root,output:join(root,'tampered-helper'),platforms:['darwin-arm64'],helperSource:'bin'}),/checksum/i);
+});
