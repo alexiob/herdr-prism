@@ -3,12 +3,15 @@ import { lstat, open, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { atomicWrite, privateDir, readOptional, restrict } from "./safe-file.js";
 import { scanToml, put, replaceValues } from "./toml.js";
+import { normalizeTabOrder } from "./tab-order.js";
+import { normalizeNativeGrouping } from "./native-grouping.js";
 import { shortcutDecision } from "./shortcut.js";
 export { privateDir as ensurePrivateDir } from "./safe-file.js";
-const defaults = { nativeMode: 'overview', providerHomes: {}, todosEnabled: true, sampleIntervalMs: 2000, follow: true, ascii: false, monochrome: false };
+const defaults = { nativeMode: 'overview', providerHomes: {}, todosEnabled: true, sampleIntervalMs: 2000, follow: true, ascii: false, monochrome: false, ui: { tabOrder: normalizeTabOrder(undefined), nativeGrouping: normalizeNativeGrouping(undefined) } };
 export async function loadSettings(configDir) { const text = await readOptional(join(configDir, 'settings.json')); if (!text)
-    return { ...defaults, providerHomes: {} }; const value = JSON.parse(text); if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error('Settings must be an object'); const data = value; const result = { ...defaults, ...data }; if (!['overview', 'inspector-only', 'native'].includes(result.nativeMode))
+    return { ...defaults, providerHomes: {}, ui: { tabOrder: normalizeTabOrder(undefined), nativeGrouping: normalizeNativeGrouping(undefined) } }; const value = JSON.parse(text); if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('Settings must be an object'); const data = value; const result = { ...defaults, ...data }; if (data.ui !== undefined && (!data.ui || typeof data.ui !== 'object' || Array.isArray(data.ui)))
+    throw new Error('Invalid ui settings section'); result.ui = { ...(data.ui ?? {}), tabOrder: normalizeTabOrder(data.ui?.tabOrder), nativeGrouping: normalizeNativeGrouping(data.ui?.nativeGrouping) }; if (!['overview', 'inspector-only', 'native'].includes(result.nativeMode))
     throw new Error('Invalid nativeMode'); for (const key of ['todosEnabled', 'follow', 'ascii', 'monochrome'])
     if (typeof result[key] !== 'boolean')
         throw new Error('Invalid setting ' + key); if (result.theme !== undefined && !['dark', 'light', 'mono'].includes(result.theme))
@@ -30,8 +33,25 @@ export async function loadSettings(configDir) { const text = await readOptional(
                 throw new Error('Invalid cost rate');
     }
 } return result; }
-export function nativeRows(theme = 'dark') { const add = theme === 'light' ? '#17784C' : '#42B883', del = theme === 'light' ? '#B42335' : '#E06C75'; return [['state_icon', 'agent', '$hat_line', 'tab'], ['$hat_goal'], ['$hat_load', '$hat_fresh'], ['machine', 'workspace', '$hat_branch', theme === 'mono' ? '$hat_add' : { token: '$hat_add', fg: add }, theme === 'mono' ? '$hat_del' : { token: '$hat_del', fg: del }, '$hat_conflict']]; }
-function rowsToml(theme) { return '[\n' + nativeRows(theme).map(row => '  [' + row.map(token => typeof token === 'string' ? JSON.stringify(token) : `{ token = ${JSON.stringify(token.token)}, fg = ${JSON.stringify(token.fg)} }`).join(', ') + ']').join(',\n') + '\n]'; }
+export function nativeRows(theme = 'dark') {
+    const light = theme === 'light', mono = theme === 'mono';
+    const style = (token, fg, bold = false, optional = false) => ({ token, ...(!mono ? { fg } : {}), bold, dim: false, ...(optional ? { rules: [{ equals: '', hide: true }] } : {}) });
+    return [['state_icon', style('agent', light ? '#202938' : '#D6DFE8', true), style('tab', light ? '#374151' : '#B7C9DA')],
+        [style('$hat_group', light ? '#155E75' : '#64D9E9', true, true)],
+        [style('$hat_attention', light ? '#854D0E' : '#F2C66D', true, true)],
+        [style('$hat_load', light ? '#202938' : '#D6DFE8')],
+        ['machine', style('$hat_branch', light ? '#5B317B' : '#C6AFE2'), style('$hat_add', light ? '#166534' : '#61C28A', true, true), style('$hat_del', light ? '#9F1239' : '#F18B96', true, true), style('$hat_conflict', light ? '#854D0E' : '#F2C66D', true, true)]];
+}
+function inlineToml(value) { if (Array.isArray(value))
+    return '[' + value.map(inlineToml).join(', ') + ']'; if (value && typeof value === 'object')
+    return '{ ' + Object.entries(value).map(([key, v]) => key + ' = ' + inlineToml(v)).join(', ') + ' }'; return JSON.stringify(value); }
+function rowsToml(theme) { return '[\n' + nativeRows(theme).map(row => '  ' + inlineToml(row)).join(',\n') + '\n]'; }
+function removeEmptyOwnedTables(text, original, values, conflicts) {
+    const initial = new Set(scanToml(original).tables.map(t => t.path));
+    const created = new Set(values.filter(v => v.original === undefined).map(v => v.path.slice(0, v.path.lastIndexOf('.'))).filter(p => !initial.has(p)));
+    const doc = scanToml(text);
+    return replaceValues(text, doc.tables.filter(t => created.has(t.path) && !conflicts.some(p => p.startsWith(t.path + '.')) && text.slice(t.end, t.bodyEnd).replace(/^[ \t]*#.*$/gm, '').trim() === '').map(t => ({ start: t.start, end: t.end, text: '' })));
+}
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 async function withLock(stateDir, operation) { await privateDir(stateDir); const path = join(stateDir, 'configuration.lock'); let handle; try {
     handle = await open(path, 'wx', 0o600);
@@ -73,6 +93,7 @@ export async function configure(configPath, stateDir, options = {}) {
         const desired = new Map();
         if (options.mode !== 'inspector-only') {
             desired.set('ui.sidebar.agents.rows', rowsToml(options.theme));
+            desired.set('theme.custom.active_row_bg', JSON.stringify(options.theme === 'light' ? '#BDD0F5' : '#203A47'));
             for (const entry of doc.entries)
                 if (entry.path === 'ui.sidebar.agents.rows_by_agent' || entry.path.startsWith('ui.sidebar.agents.rows_by_agent.'))
                     desired.set(entry.path, entry.path === 'ui.sidebar.agents.rows_by_agent' ? '{}' : rowsToml(options.theme));
@@ -86,7 +107,7 @@ export async function configure(configPath, stateDir, options = {}) {
         let after = before;
         for (const [target, written] of desired) {
             const current = doc.entries.find(e => e.path === target)?.value, previous = old?.values.find(v => v.path === target);
-            const native = target.startsWith('ui.sidebar.agents.');
+            const native = target.startsWith('ui.sidebar.agents.') || target === 'theme.custom.active_row_bg';
             if (native && (options.migrateOwnedNative && (!previous || current !== previous.written) || options.preserveNativeEdits && previous && current !== previous.written)) {
                 if (previous) {
                     conflicts.push(target);
@@ -186,6 +207,7 @@ else {
         else
             conflicts.push('keys.command.plugin_action');
     }
+    after = removeEmptyOwnedTables(after, managed.original, managed.values, conflicts);
     scanToml(after);
 } if (after !== before)
     await writeConfig(path, before, after); if (!conflicts.length)

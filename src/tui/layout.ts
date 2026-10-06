@@ -1,4 +1,4 @@
-import {tabs} from './types.ts';
+import {orderedTabs,tabLabel} from './types.ts';
 import type {DashboardData,UiState,ScreenRow,RenderedScreen,DetailDocument,DetailSection,TabRegion,RowRegion} from './types.ts';
 import type {TextSpan} from './theme.ts';
 import {span,pad,summary,readableWrap,valueSpans,asciiText,fitSpans} from './widgets.ts';
@@ -11,21 +11,21 @@ export function groupRows(rows:ScreenRow[],fallback:string):LayoutSection[]{
 }
 export function renderLayout(data:DashboardData,state:UiState,sections:LayoutSection[],columns:number,height:number,now:number,numericTargets=new Map<number,string>(),document?:DetailDocument,minimumBodyRows=1):RenderedScreen{
   columns=Math.max(1,Math.floor(columns));height=Math.max(1,Math.floor(height));
-  const session=data.sessions.find(s=>s.key===state.selectedKey)??(!state.notes?.editing?data.sessions[0]:undefined);
+  const session=data.sessions.find(s=>s.key===state.selectedKey)??(!state.restrictAutomaticSelection&&!state.notes?.editing?data.sessions[0]:undefined);
   const name=session?.evidence.title??session?.evidence.id??state.notes?.title??'No session';
   const stateName=session?.evidence.state??'unknown',provider=session?.evidence.provider??'—',model=session?.evidence.model??session?.usage?.model??'model —';
   const tail=` · ${stateName}`;const metadata=(cellWidth(`${provider} · ${model}${tail}`)<=columns?`${provider} · ${model}`:truncate(provider,Math.max(1,columns-cellWidth(tail))))+tail;
   const header=[ [span(truncate(`${data.demo?'[DEMO] ':''}Prism · ${name}`,columns),'accent')], [span(metadata,'identity')], [span(truncate(`${data.server?data.server.host+'/'+data.server.session:'Server —'} · ${state.subtree?'Subtree':'Self + jobs'} · ${state.pin?'Pinned':'Follow'}`,columns),'secondary')] ];
   const tabRegions:TabRegion[]=[];let tabLine:TextSpan[]=[],used=0;
-  const labels=columns<50?['Overview','Agents','Procs','Msgs','Refs','To-do','Git','Notes']:tabs;
-  for(const [i,tab]of tabs.entries()){
+  const order=orderedTabs(state),labels=order.map(tab=>tabLabel(tab,columns<50));
+  for(const [i,tab]of order.entries()){
     const name=labels[i]!,label=(tab===state.tab?'['+name+']':name),size=cellWidth(label);
     if(used+size>columns&&tabLine.length){header.push(tabLine);tabLine=[];used=0;}
     tabRegions.push({tab,x:used+1,y:header.length+1,width:size});tabLine.push(span(label+' ',tab===state.tab?'accent':'secondary'));used+=size+1;
   }
   if(tabLine.length)header.push(tabLine);
   // Keep room for the selected entry in short terminals; tabs keep measured targets.
-  if(header.length>height-2-minimumBodyRows){header.splice(1,Math.min(2,header.length-(height-2-minimumBodyRows)));for(const region of tabRegions)region.y=header.findIndex(line=>line.some(part=>part.text.trim()===(region.tab===state.tab?'['+labels[tabs.indexOf(region.tab)]+']':labels[tabs.indexOf(region.tab)])))+1;}
+  if(header.length>height-2-minimumBodyRows){header.splice(1,Math.min(2,header.length-(height-2-minimumBodyRows)));for(const region of tabRegions)region.y=header.findIndex(line=>line.some(part=>part.text.trim()===(region.tab===state.tab?'['+labels[order.indexOf(region.tab)]+']':labels[order.indexOf(region.tab)])))+1;}
   const rows=sections.flatMap(section=>section.rows),indices=new Map(rows.map((row,i)=>[row,i]));
   const sectionLines=(items:LayoutSection[],width:number):BodyLine[]=>{
     const lines:BodyLine[]=[];for(const section of items){
@@ -44,7 +44,7 @@ export function renderLayout(data:DashboardData,state:UiState,sections:LayoutSec
       lines.push({parts:[span('└'+'─'.repeat(Math.max(0,width-2))+'┘','border')],positions:[]});
     }return lines;
   };
-  const two=columns>=80&&sections.some(section=>section.column===1);
+  const two=columns>=80&&sections.some(section=>section.column===1)&&sections.some(section=>section.column!==1);
   let body:BodyLine[];
   if(two){const leftWidth=Math.floor((columns-2)/2),left=sectionLines(sections.filter(s=>s.column!==1),leftWidth),right=sectionLines(sections.filter(s=>s.column===1),columns-leftWidth-2);body=Array.from({length:Math.max(left.length,right.length)},(_,i)=>({parts:[...(left[i]?.parts??[span(' '.repeat(leftWidth))]),span('  '),...(right[i]?.parts??[span(' '.repeat(columns-leftWidth-2))])],positions:[...left[i]?.positions??[],...(right[i]?.positions??[]).map(p=>({...p,column:p.column+leftWidth+2,disclosureX:p.disclosureX===undefined?undefined:p.disclosureX+leftWidth+2}))]}));}
   else body=sectionLines(sections,columns);

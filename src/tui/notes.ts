@@ -1,3 +1,5 @@
+import {tabs,tabLabel} from './types.ts';
+import type {Tab} from './types.ts';
 import {EventEmitter} from 'node:events';
 import type {NotesEditorState,DashboardData,UiState,RenderedScreen,ScreenRow} from './types.ts';
 import {NotesStore,noteLimit} from '../state/notes.ts';
@@ -6,9 +8,9 @@ import {sanitize,cellWidth} from './text.ts';
 import {span,fitSpans,asciiText} from './widgets.ts';
 import {renderLayout} from './layout.ts';
 
-export interface EditorViewport {columns:number;height:number;}
+export interface EditorViewport {columns:number;height:number;tabOrder?:readonly Tab[];}
 export function notesEditorFits(viewport:EditorViewport):boolean{
-  let lines=1,used=0;for(const name of viewport.columns<50?['Overview','Agents','Procs','Msgs','Refs','To-do','Git','[Notes]']:['Overview','Agents','Processes','Messages','Refs','To-do','Git','[Notes]']){if(used&&used+name.length>viewport.columns){lines++;used=0;}used+=name.length+1;}return viewport.columns>=12&&viewport.height>=Math.max(10,lines+6);
+  let lines=1,used=0;for(const tab of viewport.tabOrder??tabs){const name=(tab==='Notes'?'[':'')+tabLabel(tab,viewport.columns<50)+(tab==='Notes'?']':'');if(used&&used+name.length>viewport.columns){lines++;used=0;}used+=name.length+1;}return viewport.columns>=12&&viewport.height>=Math.max(10,lines+6);
 }
 const segments=new Intl.Segmenter(undefined,{granularity:'grapheme'});
 function boundaries(text:string){return [...segments.segment(text)].map(s=>s.index).concat(text.length);}
@@ -85,7 +87,7 @@ export function renderNotes(data:DashboardData,state:UiState,columns:number,heig
   const note=state.notes,editing=note?.editing===true;
   const action:ScreenRow={id:'notes-edit',text:'Edit Markdown notes',help:'Enter edits. Text autosaves after 500 ms. Escape returns to reading; Ctrl+S flushes. Follow is held while editing. Tab leaves after saving. Complete Prism removal deletes notes.',action:{type:'notes-edit',sessionKey:state.selectedKey}};if(note?.recoveryPath)action.help+=' Recovery draft: '+note.recoveryPath;
   state.cursor=0;state.cursorId='notes-edit';
-  if(!notesEditorFits({columns,height})){
+  if(!notesEditorFits({columns,height,tabOrder:state.tabOrder})){
     const small=renderLayout(data,state,[{id:'notes',title:'Notes · enlarge panel',rows:[{...action,action:undefined,selectable:false}]}],columns,height,now);
     if(height>=2){small.spans![height-2]=fitSpans([span(editing?'Editing paused · enlarge panel':'Enlarge panel to edit','warning')],columns);small.spans![height-1]=fitSpans([span(editing?'Esc read · Ctrl+S save · Tab leave':'? help · Tab views · q close','secondary')],columns);for(const i of [height-2,height-1])small.lines[i]=small.spans![i]!.map(p=>p.text).join('');}return small;
   }

@@ -24,6 +24,14 @@ export class JsonlTail {
  const last=chunk.subarray(start);if(last.length){this.append(last,diagnostic);this.offset+=last.length;}
  }
  this.anchor=Buffer.alloc(Math.min(32,this.offset));if(this.anchor.length)await file.read(this.anchor,0,this.anchor.length,this.offset-this.anchor.length);
+ }catch(error){
+  if((error as Error).name==='AbortError'){
+   // offset/pending already describe committed bytes. Preserve their comparison
+   // anchor so reopening resumes here instead of mistaking cancellation for rotation.
+   this.anchor=Buffer.alloc(Math.min(32,this.offset));
+   if(this.anchor.length)await file.read(this.anchor,0,this.anchor.length,this.offset-this.anchor.length);
+  }
+  throw error;
  }finally{await file.close();}
  }
  append(piece:Buffer,diagnostic:(text:string)=>void){if(this.discard)return;if(this.pending.length+piece.length>this.max){this.pending=Buffer.alloc(0);this.discard=true;this.contentRevision++;diagnostic('oversize JSONL record omitted (record byte limit)');return;}this.pending=Buffer.concat([this.pending,piece]);}

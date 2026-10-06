@@ -80,7 +80,7 @@ public static class HatConPtySmoke {
    // Entry/exit are verified through actual buffer restoration below, not passthrough.
    Expect(capture,s=>s.Contains("[Overview]"),"interactive ConPTY Overview");Thread.Sleep(150);
    foreach(string name in new[]{"stdinTTY","stdoutTTY","stderrTTY","rawEnabled"})if(!Capability(report,name))throw new Exception("ConPTY missing measured capability "+name);
-   int at=capture.Text().Length;Send(inputWrite,"\t");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("[Agents]"),"Tab changing Agents view");Thread.Sleep(150);
+   int at=capture.Text().Length;Send(inputWrite,"\t\t\t\t");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("[Agents]"),"Tab changing Agents view");Thread.Sleep(150);
    at=capture.Text().Length;Send(inputWrite,"\x1b[B");Expect(capture,s=>s.Length>at,"Down arrow changing selection");Thread.Sleep(150);
    at=capture.Text().Length;Send(inputWrite,"\x1b[A");Expect(capture,s=>s.Length>at,"Up arrow changing selection");Thread.Sleep(150);
    at=capture.Text().Length;HResult(ResizePseudoConsole(console,new Coord(26,12)),"ResizePseudoConsole narrow");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("[Agents]"),"80x24 to 26x12 resize repaint");Thread.Sleep(150);

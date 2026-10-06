@@ -2,7 +2,7 @@ import {cellWidth,sanitize,truncate,wrap} from './text.ts';
 import {styleSpans} from './theme.ts';
 import type {ColorRole,TextSpan,ThemeName} from './theme.ts';
 
-export const inspectorPreviewTabs=['Overview','Agents','Processes','Messages','Refs','To-do','Git','Notes'] as const;
+export const inspectorPreviewTabs=['Overview','Notes','To-do','Git','Agents','Processes','Refs','Messages'] as const;
 export const previewViews=[...inspectorPreviewTabs,'Notes editor','Sidebar','Help','Detail'] as const;
 export type PreviewView=typeof previewViews[number];
 export interface PreviewEntry {

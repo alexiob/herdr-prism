@@ -58,6 +58,11 @@ title = "Prism: compact native refresh"
 command = ["node", "dist/entrypoints/action.js", "native"]
 
 [[actions]]
+id = "reload-settings"
+title = "Prism: reload panel settings"
+command = ["node", "dist/entrypoints/action.js", "reload-settings"]
+
+[[actions]]
 id = "settings"
 title = "Prism: settings"
 command = ["node", "dist/entrypoints/action.js", "settings"]

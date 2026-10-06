@@ -1,3 +1,7 @@
+import { normalizeTabOrder } from "../config/tab-order.js";
+import { normalizeNativeGrouping } from "../config/native-grouping.js";
+import { realpath } from 'node:fs/promises';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { buildForest, sessionKey } from "../model/graph.js";
 import { ProviderIndex } from "../providers/index.js";
@@ -74,7 +78,7 @@ export class Collector extends EventEmitter {
     rootProofs = new Map();
     todoHydrated = new Set();
     derived = new Map();
-    constructor(options) { super(); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
+    constructor(options) { super(); this.data.tabOrder = normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
     async init() {
         await this.store.init();
         this.data.server = await loadServerIdentity(this.store, { session: serverSession(this.endpoint) });
@@ -118,6 +122,7 @@ export class Collector extends EventEmitter {
         this.warmup = true;
         if (open && key)
             this.todoHydrated.delete(key);
+        this.index.setDetailedRefs([]);
         this.scheduleProcessSample();
         if (this.timer || this.starting)
             void this.refresh().then(() => this.refresh());
@@ -218,7 +223,37 @@ export class Collector extends EventEmitter {
                     throw new Error('Invalid Herdr snapshot');
                 this.snapshot = snapshot;
                 this.index.setActiveRefs(snapshot.agents.flatMap(agent => agent.agent_session ? [{ provider: agent.agent ?? 'unknown', kind: agent.agent_session.kind, value: agent.agent_session.value }] : []));
-                const detailRef = this.detailedRef(snapshot);
+                const rejected = new Set();
+                if (typeof this.index.resolveMetadataCached === 'function') {
+                    // Discovery is header-only. A shared Codex daemon can misroute SessionStart
+                    // through its first client's inherited HERDR_PANE_ID. Never hydrate that
+                    // other project's body merely because the host reported its exact ID.
+                    if (this.paneOpen)
+                        await this.index.refreshMetadata();
+                    for (const agent of snapshot.agents) {
+                        if (agent.agent !== 'codex' || !agent.agent_session || agent.agent_session.source !== 'herdr:codex')
+                            continue;
+                        const header = this.index.resolveMetadataCached('codex', agent.agent_session);
+                        const roots = [agent.cwd, agent.foreground_cwd].filter((v) => typeof v === 'string' && !!v);
+                        if (!header?.cwd || !roots.length)
+                            continue;
+                        const canonical = async (value) => { try {
+                            return await realpath(value);
+                        }
+                        catch {
+                            return path.resolve(value);
+                        } };
+                        const origin = await canonical(header.cwd), native = await Promise.all(roots.map(canonical));
+                        if (!native.includes(origin))
+                            rejected.add(agent.terminal_id);
+                    }
+                }
+                let detailRef = this.detailedRef(snapshot);
+                const refKey = (provider, ref) => sessionKey(provider, this.index.resolveMetadataCached?.(provider, ref)?.id ?? ref.value);
+                const accepted = new Set(snapshot.agents.filter(a => !rejected.has(a.terminal_id) && a.agent_session).map(a => refKey(a.agent ?? 'unknown', a.agent_session)));
+                const refused = new Set(snapshot.agents.filter(a => rejected.has(a.terminal_id) && a.agent_session).map(a => refKey(a.agent ?? 'unknown', a.agent_session)));
+                if (detailRef && refused.has(refKey(detailRef.provider, detailRef)) && !accepted.has(refKey(detailRef.provider, detailRef)))
+                    detailRef = undefined;
                 this.index.setDetailedRefs(detailRef ? [detailRef] : []);
                 const all = this.paneOpen ? await this.index.refreshSnapshots() : [];
                 const known = new Map(all.map(s => [sessionKey(s.provider, s.id), s]));
@@ -227,17 +262,26 @@ export class Collector extends EventEmitter {
                 const nativeOrder = new Map();
                 for (const agent of snapshot.agents) {
                     const provider = agent.agent ?? 'unknown';
-                    const ref = agent.agent_session;
+                    const ref = rejected.has(agent.terminal_id) ? undefined : agent.agent_session;
                     let evidence = ref ? this.index.resolveSnapshotCached(provider, ref) : undefined;
                     if (!evidence && ref?.kind === 'path' && this.paneOpen)
                         evidence = await this.index.resolve(provider, ref);
                     evidence = evidence ? { ...evidence } : blank(provider, ref?.value ?? `pane-${agent.terminal_id}`, agent.foreground_cwd ?? agent.cwd ?? undefined);
+                    if (rejected.has(agent.terminal_id))
+                        evidence.reason = 'Codex session report belongs to a different working directory. A shared daemon may inherit another pane: launch future Codex sessions with --no-daemon, or correct the Herdr session report.';
                     if (ref?.kind === 'path' && evidence.id === ref.value && !evidence.path)
                         evidence.path = ref.value;
                     evidence.state = nativeState(agent);
-                    evidence.title = agent.name ?? agent.display_agent ?? evidence.title ?? undefined;
+                    const pane = snapshot.panes?.find(p => p.terminal_id === agent.terminal_id);
+                    const title = agent.terminal_title_stripped ?? pane?.title_stripped ?? pane?.terminal_title_stripped;
+                    evidence.title = agent.name ?? (!this.publisher.ownsDisplay(agent) ? agent.display_agent : undefined) ?? evidence.title ?? (typeof title === 'string' ? title : undefined);
                     evidence.cwd = evidence.cwd ?? agent.foreground_cwd ?? agent.cwd ?? undefined;
                     const key = sessionKey(provider, evidence.id);
+                    const prior = this.data.sessions.find(s => s.attachment?.terminal_id === agent.terminal_id);
+                    if (prior && prior.key === this.visibleSession && (rejected.has(agent.terminal_id) || prior.evidence.id === `pane-${agent.terminal_id}`))
+                        this.visibleSession = key;
+                    if (rejected.has(agent.terminal_id) && agent.agent_session?.kind === 'id' && !accepted.has(sessionKey(provider, agent.agent_session.value)) && this.visibleSession === sessionKey(provider, agent.agent_session.value))
+                        this.visibleSession = key;
                     if (ref?.kind === 'path') {
                         const placeholderKey = sessionKey(provider, ref.value);
                         const placeholder = key !== placeholderKey && this.data.sessions.find(s => s.key === placeholderKey && s.evidence.id === ref.value && s.evidence.path === ref.value && s.evidence.availability === 'unavailable' && (s.attachments ?? (s.attachment ? [s.attachment] : [])).some(a => sameOccupant(a, agent)));
@@ -259,6 +303,8 @@ export class Collector extends EventEmitter {
                         }
                     }
                     if (this.paneOpen && !this.visibleSession && detailRef?.provider === provider && detailRef.kind === ref?.kind && detailRef.value === ref?.value)
+                        this.visibleSession = key;
+                    if (this.paneOpen && !this.visibleSession && rejected.has(agent.terminal_id) && (agent.focused || agent.pane_id === snapshot.focused_pane_id))
                         this.visibleSession = key;
                     known.set(key, evidence);
                     active.add(key);
@@ -292,6 +338,24 @@ export class Collector extends EventEmitter {
                 }
                 const previouslyPaneBacked = new Set(this.data.sessions.filter(s => s.attachment || s.historical).map(s => s.key));
                 const forest = buildForest([...known].filter(([key]) => include.has(key)).map(([, evidence]) => ({ ...evidence })), nativeOrder);
+                const previousSessions = this.data.sessions;
+                // Publish parsed body facts before potentially long ACTION/reference history scans.
+                // The collecting pane can show its model/messages/usage while enrichment continues.
+                if (this.paneOpen && generation === this.visibilityGeneration && !rejected.size) {
+                    this.data = { ...this.data, sessions: forest.order.map(node => {
+                            const old = previousSessions.find(s => s.key === node.key), attached = attachments.get(node.key) ?? [], historical = !attached.length && previouslyPaneBacked.has(node.key);
+                            const evidence = { ...node.evidence, goals: [...node.evidence.goals, ...this.localGoals.get(node.key) ?? []] };
+                            if (historical)
+                                evidence.state = 'historical';
+                            if (node.key !== this.visibleSession && evidence.messages.length) {
+                                evidence.availability = 'stale';
+                                evidence.reason = 'Cached details; live updates resume when this session is shown';
+                            }
+                            return { ...node, evidence, historical, attachments: attached, attachment: attached.find(a => a.focused) ?? attached[0], resource: old?.resource, git: old?.git, refs: old?.refs ?? [], refCoverage: old?.refCoverage ?? 'unavailable', refUpdatedAt: old?.refUpdatedAt, todos: old?.todos ?? [], todoStatus: old?.todoStatus ?? 'source_unavailable', todoSourceMessageId: old?.todoSourceMessageId, todoReportedAt: old?.todoReportedAt };
+                        }), updatedAt: Date.now(), stale: false };
+                    this.updateResources();
+                    this.emit('data', this.data);
+                }
                 const views = [];
                 for (const node of forest.order) {
                     node.attachments = attachments.get(node.key) ?? [];
@@ -312,7 +376,7 @@ export class Collector extends EventEmitter {
                         node.evidence.availability = 'stale';
                         node.evidence.reason = 'Cached details; live updates resume when this session is shown';
                     }
-                    const previous = this.data.sessions.find(s => s.key === node.key);
+                    const previous = previousSessions.find(s => s.key === node.key);
                     let list = this.todos.get(node.key);
                     if (!list) {
                         list = new TodoList({ enabled: this.settings.todosEnabled });
@@ -327,15 +391,17 @@ export class Collector extends EventEmitter {
                         if (!this.todoHydrated.has(node.key)) {
                             const persisted = await this.store.read('todo-' + identityName(node.key));
                             const ref = node.evidence.path ? { kind: 'path', value: node.evidence.path } : { kind: 'id', value: node.evidence.id };
-                            const history = this.settings.todosEnabled && canDetail() ? await this.index.readTodoState(node.evidence.provider, ref) : undefined;
-                            list.restore(history ?? persisted);
-                            if (history) {
-                                const checks = new Set((persisted?.items ?? []).filter((t) => t.checked === true).map((t) => t.id));
-                                for (const item of list.items)
-                                    if (checks.has(item.id) && !item.checked)
-                                        list.toggle(item.id);
+                            const history = this.settings.todosEnabled && canDetail() ? await this.index.readTodoState(node.evidence.provider, ref, canDetail) : undefined;
+                            if (canDetail()) {
+                                list.restore(history ?? persisted);
+                                if (history) {
+                                    const checks = new Set((persisted?.items ?? []).filter((t) => t.checked === true).map((t) => t.id));
+                                    for (const item of list.items)
+                                        if (checks.has(item.id) && !item.checked)
+                                            list.toggle(item.id);
+                                }
+                                this.todoHydrated.add(node.key);
                             }
-                            this.todoHydrated.add(node.key);
                         }
                         if (canDetail()) {
                             list.setAvailability(node.evidence.availability !== 'unavailable');
@@ -345,7 +411,7 @@ export class Collector extends EventEmitter {
                                 const previousLast = cached?.messages.at(-1)?.id;
                                 if (this.settings.todosEnabled && previousLast && node.evidence.messages.length >= 200 && !node.evidence.messages.some(m => m.id === previousLast) && canDetail()) {
                                     const ref = node.evidence.path ? { kind: 'path', value: node.evidence.path } : { kind: 'id', value: node.evidence.id };
-                                    const recovered = await this.index.readTodoState(node.evidence.provider, ref);
+                                    const recovered = await this.index.readTodoState(node.evidence.provider, ref, canDetail);
                                     if (recovered && canDetail()) {
                                         const checks = new Set(list.items.filter(item => item.checked).map(item => item.id));
                                         list.restore(recovered);
@@ -396,11 +462,11 @@ export class Collector extends EventEmitter {
                     git ??= { availability: 'unavailable', branchState: 'unknown', reason: detailed ? 'Checkout path unavailable' : 'Details load when this session is shown', cwd: node.evidence.cwd ?? '', sampledAt: Date.now(), ageMs: 0 };
                     views.push({ ...node, resource: previous?.resource, refs, refCoverage, refUpdatedAt, todos: list.items.map(t => ({ id: t.id, text: t.text, checked: t.checked, messageId: t.firstMessageId, firstSeenAt: t.firstSeen, latestMessageId: t.latestMessageId, repeated: t.repeated, source: t.source })), todoStatus: list.status, todoSourceMessageId: list.sourceMessageId, todoReportedAt: list.reportedAt, git });
                 }
-                this.data = { server: this.data.server, sessions: views, updatedAt: Date.now(), stale: false, diagnostics: [...forest.diagnostics, ...this.index.diagnostics, ...[...this.todos.values()].flatMap(list => list.diagnostics)] };
+                this.data = { tabOrder: this.data.tabOrder, server: this.data.server, sessions: views, updatedAt: Date.now(), stale: false, diagnostics: [...forest.diagnostics, ...this.index.diagnostics, ...[...this.todos.values()].flatMap(list => list.diagnostics)] };
                 this.updateResources();
                 this.scheduleProcessSample();
                 if (this.settings.nativeMode !== 'inspector-only') {
-                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource: !this.paneOpen || this.sampledGeneration !== this.visibilityGeneration || s.key !== this.visibleSession ? { ...this.tracker.view(s.key), availability: 'stale', reason: 'Updates paused while this session is not shown' } : this.sampleError ? { ...this.tracker.view(s.key), availability: this.lastSample ? 'stale' : 'unavailable', reason: this.sampleError } : this.tracker.view(s.key) }))), Date.now(), views);
+                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource: !this.paneOpen || this.sampledGeneration !== this.visibilityGeneration || s.key !== this.visibleSession ? { ...this.tracker.view(s.key), availability: 'stale', reason: 'Updates paused while this session is not shown' } : this.sampleError ? { ...this.tracker.view(s.key), availability: this.lastSample ? 'stale' : 'unavailable', reason: this.sampleError } : this.tracker.view(s.key) }))), Date.now(), views, { grouping: this.settings.ui?.nativeGrouping, tabs: snapshot.tabs });
                     if (!this.viewInstalled && !this.publisher.diagnostics.length && views.some(s => s.attachment)) {
                         await this.publisher.installView();
                         this.viewInstalled = true;
@@ -616,6 +682,7 @@ export class Collector extends EventEmitter {
         this.emit('data', this.data);
         return { requested: true, pid: live.pid, signal: 'SIGTERM', platform: process.platform };
     }
+    setTabOrder(value, grouping = this.settings.ui?.nativeGrouping) { const order = normalizeTabOrder(value), nativeGrouping = normalizeNativeGrouping(grouping); this.settings.ui = { ...this.settings.ui, tabOrder: order, nativeGrouping }; this.data.tabOrder = order; this.emit('data', this.data); return { reloaded: true, tabOrder: [...order] }; }
     async focus(key) {
         const session = this.data.sessions.find(s => s.key === key);
         const expected = session?.attachment;

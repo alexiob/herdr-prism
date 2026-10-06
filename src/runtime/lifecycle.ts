@@ -88,7 +88,7 @@ export async function activate(context: LifecycleContext, rpc: Rpc, options: {
     await config.init();
     // A failed activation leaves the reversible ownership manifest available to cleanup.
     await state.write('lifecycle', { disabled: false });
-    changed = await configure(context.configPath, context.stateDir, { mode, ownNative: options.ownNative, preserveNativeEdits:true, ...(options.request?.shortcut ? {pluginActionKey:{key:'prefix+i',command:pluginId+'.open',description:'Open Prism'},shortcutIfFree:true}: {}) });
+    changed = await configure(context.configPath, context.stateDir, { mode, ownNative: options.ownNative, preserveNativeEdits:true,theme:(await loadSettings(context.configDir)).theme, ...(options.request?.shortcut ? {pluginActionKey:{key:'prefix+i',command:pluginId+'.open',description:'Open Prism'},shortcutIfFree:true}: {}) });
     await config.write('settings', { ...await loadSettings(context.configDir), nativeMode: mode, autostart: true });
     if (options.request && options.root) {
         const owner = { version: 1, pluginId, token: options.request.token, installRoot: path.resolve(options.root) };

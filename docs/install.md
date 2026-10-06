@@ -278,12 +278,12 @@ For coexistence, choose the fully running inspector without native takeover:
 node scripts/live-install.mjs install --root . --inspector-only
 ```
 
-The explicit flags are mutually exclusive. Native takeover changes Agents rows and only
-explicitly selected optional keys. Unrelated TOML source/comments are preserved.
+The explicit flags are mutually exclusive. Native takeover changes Agents rows, the owned sidebar selection background
+(`theme.custom.active_row_bg`), and explicitly selected optional keys. Unrelated TOML source/comments are preserved.
 Provider-specific `rows_by_agent` values are managed reversibly. Ambiguous dotted
 or inline ancestor topology is rejected before modification; inspector-only is
-available when the existing document cannot be safely patched. No font/global
-theme, Spaces layout, tab bar, provider instructions or project AGENTS.md is changed.
+available when the existing document cannot be safely patched. The original selection background is restored with owned rows on removal. Fonts,
+Spaces layout, tab bar, provider instructions and project AGENTS.md are preserved.
 
 The private ownership manifest records original/written values, hashes and a
 backup. A concurrent config change aborts atomic replacement. Restoration applies
@@ -337,6 +337,28 @@ ACTION To-do parsing enabled on Windows, macOS and Linux. `nativeMode` accepts `
 or `native`; successful activation sets its selected mode plus `autostart: true`.
 Provider homes can contain exact `codex`, `claude` and `pi` paths; paths retain
 Unicode, drive letters and UNC spelling. Sampling intervals are 250–60000 ms.
+
+Panel order lives in the `ui` section of that file:
+
+```json
+{
+  "ui": {
+    "tabOrder": ["Overview", "Notes", "To-do", "Git", "Agents", "Processes", "Refs", "Messages"]
+  }
+}
+```
+
+Merge this section into existing JSON; keep provider homes and other settings.
+Use `herdr plugin config-dir iob.herdr-prism` to find the exact directory, then
+edit its `settings.json`. Names are case-insensitive, omitted tabs are appended,
+and empty/unknown/duplicate lists fail clearly. Run
+`herdr plugin action invoke reload-settings --plugin iob.herdr-prism` in the
+collecting session to update all open panels at their next poll, preserving
+active views, readers and Notes editing. A closed collector uses the file on its
+next start. Removing `ui.tabOrder` and reloading restores the default. Reloading
+Herdr's `config.toml` is separate (`herdr server reload-config`). Other collector
+settings still need reactivation. See [update instructions](../README.md#update-to-the-latest-version)
+for GitHub, Unix installer, Windows and local source installations.
 
 Set `todosEnabled: false` to disable parsing. Existing explicit settings are
 preserved; older installations that saved `false` must change it to `true` and
@@ -394,9 +416,11 @@ and Rust notices. Staging does not compile/download or overwrite existing output
 A GitHub source installation must already contain reviewed compiled release files;
 Herdr's build hook only checks prerequisites. Linking does not build source.
 
-For a fresh upgrade, complete uninstall through the old managed wrapper, then
-install the new reviewed release. This removes prior local plugin state as requested
-by complete uninstall. An existing collector is not assumed to restart merely
+For an update that retains notes and settings, deactivate and wait for success,
+unlink the stopped managed copy, then install the new reviewed release through its
+wrapper. Existing private data remains; the new wrapper takes managed ownership.
+For a deliberate fresh reset, complete uninstall through the old managed wrapper
+first; complete uninstall purges prior local plugin state. An existing collector is not assumed to restart merely
 because Herdr registers a new installation. Actual macOS/Linux/Windows live
 lifecycle tests and CI runs are required before advertising certification.
 
@@ -405,3 +429,8 @@ The open shortcut creates or focuses the pane in the current tab. Q closes only
 that view; other tabs and the shared collector continue running. Activation
 restart restores open views and preserves closed tabs. Deactivate or uninstall
 closes every recorded plugin view and stops the shared collector.
+
+Native grouping uses `ui.nativeGrouping`: `none` (default), `project`, or `tab`.
+Edit the same file and invoke `reload-settings`; grouping uses cached repository
+identity/working directories and real card labels, with no background Git reads.
+See [native cards and Codex identity troubleshooting](../README.md#native-overview-and-privacy).

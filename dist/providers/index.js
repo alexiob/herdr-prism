@@ -32,6 +32,7 @@ export class ProviderIndex {
     inventory = new Map();
     activeRefs;
     detailedRefs;
+    detailGeneration = 0;
     referenceHistory;
     metadataIndex = new Map();
     scanRound = 0;
@@ -86,19 +87,24 @@ export class ProviderIndex {
     report(message) { if (!this.diagnostics.includes(message))
         this.diagnostics.push(message); this.diagnostics = this.diagnostics.slice(-64); }
     setActiveRefs(refs) { this.activeRefs = refs.filter(ref => typeof ref.provider === 'string' && ['id', 'path'].includes(ref.kind) && typeof ref.value === 'string').slice(0, 2048).map(ref => ({ ...ref })); }
-    setDetailedRefs(refs) { this.detailedRefs = refs.filter(ref => typeof ref.provider === 'string' && ['id', 'path'].includes(ref.kind) && typeof ref.value === 'string').slice(0, 128).map(ref => ({ ...ref })); }
+    setDetailedRefs(refs) { const next = refs.filter(ref => typeof ref.provider === 'string' && ['id', 'path'].includes(ref.kind) && typeof ref.value === 'string').slice(0, 128).map(ref => ({ ...ref })); if (JSON.stringify(next) !== JSON.stringify(this.detailedRefs))
+        this.detailGeneration++; this.detailedRefs = next; }
     /** Existing callers receive detached mutable records. */
     async refresh() { return structuredClone(await this.refreshSnapshots()); }
     /** Read-only consumers may reuse deeply frozen snapshots without cloning unchanged bodies. */
     refreshSnapshots() { const run = this.queue.then(() => this.collect()); this.queue = run.catch(() => { }); return run; }
-    snapshot(entry) { const key = entry.detailed ? `${entry.tail.fileId}:${entry.tail.generation}:${entry.tail.contentRevision}` : JSON.stringify([entry.adapter.evidence, this.children(entry)]); if (!entry.snapshot || entry.snapshotKey !== key || entry.detailed && entry.snapshotAdapter !== entry.adapter) {
+    /** Header inventory preflight leaves the selected adapter and incremental tail intact. */
+    refreshMetadata() { const run = this.queue.then(() => this.collect(true)); this.queue = run.catch(() => { }); return run; }
+    snapshot(entry) { const key = entry.detailed ? `${entry.tail.fileId}:${entry.tail.generation}:${entry.tail.contentRevision}:${entry.paused ?? false}` : JSON.stringify([entry.adapter.evidence, this.children(entry)]); if (!entry.snapshot || entry.snapshotKey !== key || entry.detailed && entry.snapshotAdapter !== entry.adapter) {
         entry.snapshot = entry.adapter.snapshot();
+        if (entry.paused && entry.detailed)
+            entry.snapshot = { ...entry.snapshot, availability: 'stale', reason: 'Transcript updates paused after visibility changed' };
         entry.snapshotAdapter = entry.adapter;
         entry.snapshotKey = key;
         entry.snapshotVersion = ++this.snapshotVersion;
     } return entry.snapshot; }
     children(entry) { return !entry.detailed && entry.knownParent === entry.adapter.evidence.id ? entry.knownChildren ?? entry.adapter.children : entry.adapter.children; }
-    async collect() {
+    async collect(metadataOnly = false) {
         if (this.closed)
             return [];
         const scoped = this.activeRefs !== undefined || this.detailedRefs !== undefined;
@@ -249,6 +255,8 @@ export class ProviderIndex {
                     }
             }
         }
+        if (metadataOnly)
+            return [];
         const detailed = this.detailedRefs === undefined ? undefined : new Set();
         for (const ref of this.detailedRefs ?? []) {
             let exactPath = ref.kind === 'path' ? resolve(ref.value) : undefined;
@@ -265,6 +273,7 @@ export class ProviderIndex {
                     active.add(entry.path);
                 }
         }
+        const readGeneration = this.detailGeneration;
         const readDetailed = async (entry) => {
             if (!entry.detailed && scoped) {
                 entry.adapter = this.adapter(entry.provider, entry.path);
@@ -272,12 +281,17 @@ export class ProviderIndex {
             }
             entry.detailed = true;
             try {
-                await entry.tail.read(entry.path, r => entry.adapter instanceof CodexAdapter ? entry.adapter.consume(r) : entry.adapter instanceof ClaudeAdapter ? entry.adapter.consume(r) : entry.adapter.consume(r), () => { entry.adapter = this.adapter(entry.provider, entry.path); }, d => entry.adapter.diagnostic(d));
+                await entry.tail.read(entry.path, r => entry.adapter instanceof CodexAdapter ? entry.adapter.consume(r) : entry.adapter instanceof ClaudeAdapter ? entry.adapter.consume(r) : entry.adapter.consume(r), () => { entry.adapter = this.adapter(entry.provider, entry.path); }, d => entry.adapter.diagnostic(d), () => !this.closed && readGeneration === this.detailGeneration);
+                entry.paused = false;
                 entry.knownChildren = entry.adapter.children;
                 entry.knownParent = entry.adapter.evidence.id;
             }
             catch (error) {
-                entry.missing = `transcript unavailable: ${error.code || 'read error'}`;
+                if (error.name === 'AbortError') {
+                    entry.paused = true;
+                }
+                else
+                    entry.missing = `transcript unavailable: ${error.code || 'read error'}`;
             }
         };
         const read = new Set();
@@ -419,6 +433,16 @@ export class ProviderIndex {
         return;
     } const entry = this.entries.get(this.pathAliases.get(`${provider}:${resolve(ref.value)}`) ?? resolve(ref.value)); if (!entry || entry.provider !== provider)
         return; const evidence = this.sessions.get(`${provider}:${entry.adapter.evidence.id}`) || this.snapshot(entry); return entry.missing ? freeze({ ...evidence, availability: 'unavailable', reason: entry.missing }) : freeze(evidence); }
+    /** Immutable discovery facts, independent of a previously hydrated body's turn cwd. */
+    resolveMetadataCached(provider, ref) {
+        if (this.closed)
+            return;
+        for (const entry of this.entries.values()) {
+            const header = entry.metadata ?? entry.adapter;
+            if (entry.provider === provider && !entry.missing && (ref.kind === 'id' ? header.evidence.id === ref.value : entry.path === (this.pathAliases.get(`${provider}:${resolve(ref.value)}`) ?? resolve(ref.value))))
+                return header.snapshot();
+        }
+    }
     resolveCached(provider, ref) { const evidence = this.resolveSnapshotCached(provider, ref); return evidence ? structuredClone(evidence) : undefined; }
     async resolve(provider, ref) {
         if (this.closed)
@@ -508,16 +532,18 @@ export class ProviderIndex {
         return selected;
     }
     /** Explicit opt-in caller hydrates ACTION state once; no historical body is persisted. */
-    async readTodoState(provider, ref) {
-        if (this.closed)
+    async readTodoState(provider, ref, isCurrent = () => true) {
+        if (this.closed || !isCurrent())
             return;
         const evidence = await this.resolve(provider, ref);
-        if (!evidence?.path || evidence.availability === 'unavailable')
+        if (this.closed || !isCurrent() || !evidence?.path || evidence.availability === 'unavailable')
             return;
         const todo = new TodoList();
         const files = [...this.entries.values()].filter(entry => !entry.missing && entry.provider === provider && entry.adapter.evidence.id === evidence.id).sort((a, b) => (a.adapter.evidence.startedAt ?? 0) - (b.adapter.evidence.startedAt ?? 0) || a.path.localeCompare(b.path));
         let available = false;
         for (const file of files) {
+            if (this.closed || !isCurrent())
+                return;
             const adapter = this.adapter(provider, file.path);
             adapter.max = 2;
             const tail = new JsonlTail(this.maxRecord);
@@ -527,10 +553,13 @@ export class ProviderIndex {
                 else if (adapter instanceof ClaudeAdapter)
                     adapter.consume(record);
                 else
-                    adapter.consume(record); todo.update([...adapter.messages.values()]); }, () => { }, message => { todo.diagnostics.push(message); todo.diagnostics = todo.diagnostics.slice(-64); });
+                    adapter.consume(record); todo.update([...adapter.messages.values()]); }, () => { }, message => { todo.diagnostics.push(message); todo.diagnostics = todo.diagnostics.slice(-64); }, () => !this.closed && isCurrent());
                 available = true;
             }
-            catch { /* All files unavailable yields undefined rather than an inferred empty list. */ }
+            catch (error) {
+                if (error.name === 'AbortError')
+                    return; /* Missing files cannot establish empty ACTION state. */
+            }
         }
         return available ? todo.toJSON() : undefined;
     }

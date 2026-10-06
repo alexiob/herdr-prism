@@ -1,4 +1,4 @@
-import { tabs } from "./types.js";
+import { orderedTabs, tabLabel } from "./types.js";
 import { span, pad, summary, readableWrap, valueSpans, asciiText, fitSpans } from "./widgets.js";
 import { cellWidth, truncate, age } from "./text.js";
 export function groupRows(rows, fallback) {
@@ -17,7 +17,7 @@ export function groupRows(rows, fallback) {
 export function renderLayout(data, state, sections, columns, height, now, numericTargets = new Map(), document, minimumBodyRows = 1) {
     columns = Math.max(1, Math.floor(columns));
     height = Math.max(1, Math.floor(height));
-    const session = data.sessions.find(s => s.key === state.selectedKey) ?? (!state.notes?.editing ? data.sessions[0] : undefined);
+    const session = data.sessions.find(s => s.key === state.selectedKey) ?? (!state.restrictAutomaticSelection && !state.notes?.editing ? data.sessions[0] : undefined);
     const name = session?.evidence.title ?? session?.evidence.id ?? state.notes?.title ?? 'No session';
     const stateName = session?.evidence.state ?? 'unknown', provider = session?.evidence.provider ?? '—', model = session?.evidence.model ?? session?.usage?.model ?? 'model —';
     const tail = ` · ${stateName}`;
@@ -25,8 +25,8 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
     const header = [[span(truncate(`${data.demo ? '[DEMO] ' : ''}Prism · ${name}`, columns), 'accent')], [span(metadata, 'identity')], [span(truncate(`${data.server ? data.server.host + '/' + data.server.session : 'Server —'} · ${state.subtree ? 'Subtree' : 'Self + jobs'} · ${state.pin ? 'Pinned' : 'Follow'}`, columns), 'secondary')]];
     const tabRegions = [];
     let tabLine = [], used = 0;
-    const labels = columns < 50 ? ['Overview', 'Agents', 'Procs', 'Msgs', 'Refs', 'To-do', 'Git', 'Notes'] : tabs;
-    for (const [i, tab] of tabs.entries()) {
+    const order = orderedTabs(state), labels = order.map(tab => tabLabel(tab, columns < 50));
+    for (const [i, tab] of order.entries()) {
         const name = labels[i], label = (tab === state.tab ? '[' + name + ']' : name), size = cellWidth(label);
         if (used + size > columns && tabLine.length) {
             header.push(tabLine);
@@ -43,7 +43,7 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
     if (header.length > height - 2 - minimumBodyRows) {
         header.splice(1, Math.min(2, header.length - (height - 2 - minimumBodyRows)));
         for (const region of tabRegions)
-            region.y = header.findIndex(line => line.some(part => part.text.trim() === (region.tab === state.tab ? '[' + labels[tabs.indexOf(region.tab)] + ']' : labels[tabs.indexOf(region.tab)]))) + 1;
+            region.y = header.findIndex(line => line.some(part => part.text.trim() === (region.tab === state.tab ? '[' + labels[order.indexOf(region.tab)] + ']' : labels[order.indexOf(region.tab)]))) + 1;
     }
     const rows = sections.flatMap(section => section.rows), indices = new Map(rows.map((row, i) => [row, i]));
     const sectionLines = (items, width) => {
@@ -77,7 +77,7 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
         }
         return lines;
     };
-    const two = columns >= 80 && sections.some(section => section.column === 1);
+    const two = columns >= 80 && sections.some(section => section.column === 1) && sections.some(section => section.column !== 1);
     let body;
     if (two) {
         const leftWidth = Math.floor((columns - 2) / 2), left = sectionLines(sections.filter(s => s.column !== 1), leftWidth), right = sectionLines(sections.filter(s => s.column === 1), columns - leftWidth - 2);

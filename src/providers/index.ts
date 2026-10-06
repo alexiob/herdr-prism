@@ -18,7 +18,7 @@ import type {ReferencePage,ReferenceSourcePage,ReferencePageOptions} from './ref
 import type {ReferenceCursor} from '../content/refs.ts';
 export interface ProviderIndexOptions {codexHome?:string;claudeHome?:string;piHome?:string;maxRecordBytes?:number;maxMessages?:number;maxSessions?:number;directoryScanMs?:number;}
 export interface ActiveSessionRef {provider:string;kind:'id'|'path';value:string;}
-type Entry={provider:string;path:string;tail:JsonlTail;adapter:EvidenceBuilder;missing?:string;metadata?:EvidenceBuilder;detailed?:boolean;snapshot?:SessionEvidence;snapshotAdapter?:EvidenceBuilder;snapshotKey?:string;snapshotVersion?:number;knownChildren?:ChildLink[];knownParent?:string;};
+type Entry={provider:string;path:string;tail:JsonlTail;adapter:EvidenceBuilder;missing?:string;metadata?:EvidenceBuilder;detailed?:boolean;snapshot?:SessionEvidence;snapshotAdapter?:EvidenceBuilder;snapshotKey?:string;snapshotVersion?:number;knownChildren?:ChildLink[];knownParent?:string;paused?:boolean;};
 function freeze<T>(value:T):T {if(value&&typeof value==='object'&&!Object.isFrozen(value)){for(const child of Object.values(value))freeze(child);Object.freeze(value);}return value;}
 export class ProviderIndex {
  private roots:{provider:string;path:string}[];
@@ -26,6 +26,7 @@ export class ProviderIndex {
  private maxRecord:number;private maxMessages:number;private maxSessions:number;private queue:Promise<unknown>=Promise.resolve();
  private scanMs:number;private lastScan?:number;private inventory=new Map<string,string>();
  private activeRefs?:ActiveSessionRef[];private detailedRefs?:ActiveSessionRef[];
+ private detailGeneration=0;
  private referenceHistory?:{key:string;reader:ReferenceHistory};
  private metadataIndex=new Map<string,{provider:string;builder:EvidenceBuilder}>();private scanRound=0;private metadataCache=new Map<string,{stamp:string;builder:EvidenceBuilder}>();private pathAliases=new Map<string,string>();
  diagnostics:string[]=[];
@@ -38,14 +39,16 @@ export class ProviderIndex {
  private async metadata(provider:string,path:string):Promise<EvidenceBuilder> {const key=`${provider}:${path}`;try{const info=await stat(path,{bigint:true});if(!info.isFile())throw new Error('transcript is not a regular file');const stamp=`${info.dev}:${info.ino}:${info.birthtimeNs}:${info.mtimeNs}:${info.ctimeNs}:${info.size}`;const cached=this.metadataCache.get(key);if(cached?.stamp===stamp){this.metadataCache.delete(key);this.metadataCache.set(key,cached);return cached.builder;}const builder=await metadata(provider,path,this.maxRecord);this.metadataCache.delete(key);this.metadataCache.set(key,{stamp,builder});while(this.metadataCache.size>2048)this.metadataCache.delete(this.metadataCache.keys().next().value!);return builder;}catch(error){this.metadataCache.delete(key);throw error;}}
  private report(message:string):void {if(!this.diagnostics.includes(message))this.diagnostics.push(message);this.diagnostics=this.diagnostics.slice(-64);}
  setActiveRefs(refs:ActiveSessionRef[]):void {this.activeRefs=refs.filter(ref=>typeof ref.provider==='string'&&['id','path'].includes(ref.kind)&&typeof ref.value==='string').slice(0,2048).map(ref=>({...ref}));}
- setDetailedRefs(refs:ActiveSessionRef[]):void {this.detailedRefs=refs.filter(ref=>typeof ref.provider==='string'&&['id','path'].includes(ref.kind)&&typeof ref.value==='string').slice(0,128).map(ref=>({...ref}));}
+ setDetailedRefs(refs:ActiveSessionRef[]):void {const next=refs.filter(ref=>typeof ref.provider==='string'&&['id','path'].includes(ref.kind)&&typeof ref.value==='string').slice(0,128).map(ref=>({...ref}));if(JSON.stringify(next)!==JSON.stringify(this.detailedRefs))this.detailGeneration++;this.detailedRefs=next;}
  /** Existing callers receive detached mutable records. */
  async refresh():Promise<SessionEvidence[]> {return structuredClone(await this.refreshSnapshots()) as SessionEvidence[];}
  /** Read-only consumers may reuse deeply frozen snapshots without cloning unchanged bodies. */
  refreshSnapshots():Promise<readonly SessionEvidence[]> {const run=this.queue.then(()=>this.collect());this.queue=run.catch(()=>{});return run;}
- private snapshot(entry:Entry):SessionEvidence {const key=entry.detailed?`${entry.tail.fileId}:${entry.tail.generation}:${entry.tail.contentRevision}`:JSON.stringify([entry.adapter.evidence,this.children(entry)]);if(!entry.snapshot||entry.snapshotKey!==key||entry.detailed&&entry.snapshotAdapter!==entry.adapter){entry.snapshot=entry.adapter.snapshot();entry.snapshotAdapter=entry.adapter;entry.snapshotKey=key;entry.snapshotVersion=++this.snapshotVersion;}return entry.snapshot;}
+ /** Header inventory preflight leaves the selected adapter and incremental tail intact. */
+ refreshMetadata():Promise<readonly SessionEvidence[]> {const run=this.queue.then(()=>this.collect(true));this.queue=run.catch(()=>{});return run;}
+ private snapshot(entry:Entry):SessionEvidence {const key=entry.detailed?`${entry.tail.fileId}:${entry.tail.generation}:${entry.tail.contentRevision}:${entry.paused??false}`:JSON.stringify([entry.adapter.evidence,this.children(entry)]);if(!entry.snapshot||entry.snapshotKey!==key||entry.detailed&&entry.snapshotAdapter!==entry.adapter){entry.snapshot=entry.adapter.snapshot();if(entry.paused&&entry.detailed)entry.snapshot={...entry.snapshot,availability:'stale',reason:'Transcript updates paused after visibility changed'};entry.snapshotAdapter=entry.adapter;entry.snapshotKey=key;entry.snapshotVersion=++this.snapshotVersion;}return entry.snapshot;}
  private children(entry:Entry):ChildLink[] {return !entry.detailed&&entry.knownParent===entry.adapter.evidence.id?entry.knownChildren??entry.adapter.children:entry.adapter.children;}
- private async collect():Promise<readonly SessionEvidence[]> {
+ private async collect(metadataOnly=false):Promise<readonly SessionEvidence[]> {
  if(this.closed)return [];const scoped=this.activeRefs!==undefined||this.detailedRefs!==undefined;const refs=[...this.activeRefs??[],...this.detailedRefs??[]];let found=this.inventory;const rescan=this.lastScan===undefined||Date.now()-this.lastScan>=this.scanMs;
  if(rescan){found=new Map<string,string>();this.diagnostics=[];
  this.metadataIndex.clear();const requested=new Set(refs.map(ref=>ref.provider));const wanted=new Set(refs.filter(ref=>ref.kind==='id').map(ref=>`${ref.provider}:${ref.value}`));const exactPaths=new Set<string>();let generic=0;
@@ -73,9 +76,11 @@ export class ProviderIndex {
  for(const entry of this.entries.values())if(entry.provider===ref.provider&&(ref.kind==='id'?(entry.metadata??entry.adapter).evidence.id===ref.value:entry.path===exactPath)){entry.missing=undefined;active.add(entry.path);}
  }
  }
+ if(metadataOnly)return [];
  const detailed=this.detailedRefs===undefined?undefined:new Set<string>();for(const ref of this.detailedRefs??[]){let exactPath=ref.kind==='path'?resolve(ref.value):undefined;if(exactPath){try{exactPath=await this.canonical(ref.provider,exactPath);}catch{}}const selectedId=ref.kind==='id'?ref.value:exactPath?(this.entries.get(exactPath)?.metadata??this.entries.get(exactPath)?.adapter)?.evidence.id:undefined;for(const entry of this.entries.values())if(entry.provider===ref.provider&&selectedId&&(entry.metadata??entry.adapter).evidence.id===selectedId){detailed!.add(entry.path);active.add(entry.path);}}
+ const readGeneration=this.detailGeneration;
  const readDetailed=async(entry:Entry)=>{if(!entry.detailed&&scoped){entry.adapter=this.adapter(entry.provider,entry.path);entry.tail=new JsonlTail(this.maxRecord);}entry.detailed=true;
- try{await entry.tail.read(entry.path,r=>entry.adapter instanceof CodexAdapter?entry.adapter.consume(r):entry.adapter instanceof ClaudeAdapter?entry.adapter.consume(r):(entry.adapter as PiAdapter).consume(r),()=>{entry.adapter=this.adapter(entry.provider,entry.path);},d=>entry.adapter.diagnostic(d));entry.knownChildren=entry.adapter.children;entry.knownParent=entry.adapter.evidence.id;}catch(error){entry.missing=`transcript unavailable: ${(error as NodeJS.ErrnoException).code||'read error'}`;}};
+ try{await entry.tail.read(entry.path,r=>entry.adapter instanceof CodexAdapter?entry.adapter.consume(r):entry.adapter instanceof ClaudeAdapter?entry.adapter.consume(r):(entry.adapter as PiAdapter).consume(r),()=>{entry.adapter=this.adapter(entry.provider,entry.path);},d=>entry.adapter.diagnostic(d),()=>!this.closed&&readGeneration===this.detailGeneration);entry.paused=false;entry.knownChildren=entry.adapter.children;entry.knownParent=entry.adapter.evidence.id;}catch(error){if((error as Error).name==='AbortError'){entry.paused=true;}else entry.missing=`transcript unavailable: ${(error as NodeJS.ErrnoException).code||'read error'}`;}};
  const read=new Set<string>();let changed=true;
  while(changed){changed=false;
  for(const path of active){const entry=this.entries.get(path);if(entry&&!read.has(path)&&!entry.missing){if(detailed===undefined||detailed.has(path))await readDetailed(entry);read.add(path);}}
@@ -99,6 +104,14 @@ export class ProviderIndex {
  if(this.closed)return [];for(const[key,evidence]of sessions){evidence.contentRevision=hash(JSON.stringify(revisions.get(key)));const old=this.sessions.get(key);sessions.set(key,old?.contentRevision===evidence.contentRevision?old:freeze(evidence));}this.sessions=sessions;this.assemblyKey=assemblyKey;this.snapshots=Object.freeze([...sessions.values()]);let genericCount=[...this.entries.keys()].filter(path=>!active.has(path)).length;for(const path of this.entries.keys())if(genericCount>this.maxSessions&&!active.has(path)){this.entries.delete(path);genericCount--;}return this.snapshots;
  }
  resolveSnapshotCached(provider:string,ref:{kind:'id'|'path';value:string}):SessionEvidence|undefined {if(this.closed)return;if(ref.kind==='id'){const known=this.sessions.get(`${provider}:${ref.value}`);if(known)return known;for(const entry of this.entries.values())if(entry.provider===provider&&entry.missing&&entry.adapter.evidence.id===ref.value)return freeze({...this.snapshot(entry),availability:'unavailable',reason:entry.missing});return;}const entry=this.entries.get(this.pathAliases.get(`${provider}:${resolve(ref.value)}`)??resolve(ref.value));if(!entry||entry.provider!==provider)return;const evidence=this.sessions.get(`${provider}:${entry.adapter.evidence.id}`)||this.snapshot(entry);return entry.missing?freeze({...evidence,availability:'unavailable',reason:entry.missing}):freeze(evidence);}
+ /** Immutable discovery facts, independent of a previously hydrated body's turn cwd. */
+ resolveMetadataCached(provider:string,ref:{kind:'id'|'path';value:string}):SessionEvidence|undefined {
+  if(this.closed)return;
+  for(const entry of this.entries.values()){
+   const header=entry.metadata??entry.adapter;
+   if(entry.provider===provider&&!entry.missing&&(ref.kind==='id'?header.evidence.id===ref.value:entry.path===(this.pathAliases.get(`${provider}:${resolve(ref.value)}`)??resolve(ref.value))))return header.snapshot();
+  }
+ }
  resolveCached(provider:string,ref:{kind:'id'|'path';value:string}):SessionEvidence|undefined {const evidence=this.resolveSnapshotCached(provider,ref);return evidence?structuredClone(evidence):undefined;}
  async resolve(provider:string,ref:{kind:'id'|'path';value:string}):Promise<SessionEvidence|undefined>{if(this.closed)return;await this.refresh();if(ref.kind==='id')return this.resolveCached(provider,ref);
  let path:string;try{path=await this.canonical(provider,ref.value);}catch{path=resolve(ref.value);}const entry=this.entries.get(path);if(!entry||entry.provider!==provider)return;const evidence=this.sessions.get(`${provider}:${entry.adapter.evidence.id}`)||entry.adapter.snapshot();return {...structuredClone(evidence),...(entry.missing?{availability:'unavailable' as const,reason:entry.missing}:{})};}
@@ -120,10 +133,10 @@ export class ProviderIndex {
  for(const file of files){const adapter=this.adapter(provider,file.path);adapter.max=2;const tail=new JsonlTail(this.maxRecord);try{await tail.read(file.path,entry=>{if(adapter instanceof CodexAdapter)adapter.consume(entry);else if(adapter instanceof ClaudeAdapter)adapter.consume(entry);else (adapter as PiAdapter).consume(entry);if(adapter.messages.has(id))selected=structuredClone(adapter.messages.get(id));},()=>{},()=>{});}catch{continue;}}return selected;
  }
  /** Explicit opt-in caller hydrates ACTION state once; no historical body is persisted. */
- async readTodoState(provider:string,ref:{kind:'id'|'path';value:string}):Promise<TodoState|undefined> {
- if(this.closed)return;const evidence=await this.resolve(provider,ref);if(!evidence?.path||evidence.availability==='unavailable')return;
+ async readTodoState(provider:string,ref:{kind:'id'|'path';value:string},isCurrent:()=>boolean=()=>true):Promise<TodoState|undefined> {
+ if(this.closed||!isCurrent())return;const evidence=await this.resolve(provider,ref);if(this.closed||!isCurrent()||!evidence?.path||evidence.availability==='unavailable')return;
  const todo=new TodoList();const files=[...this.entries.values()].filter(entry=>!entry.missing&&entry.provider===provider&&entry.adapter.evidence.id===evidence.id).sort((a,b)=>(a.adapter.evidence.startedAt??0)-(b.adapter.evidence.startedAt??0)||a.path.localeCompare(b.path));let available=false;
- for(const file of files){const adapter=this.adapter(provider,file.path);adapter.max=2;const tail=new JsonlTail(this.maxRecord);try{await tail.read(file.path,record=>{if(adapter instanceof CodexAdapter)adapter.consume(record);else if(adapter instanceof ClaudeAdapter)adapter.consume(record);else (adapter as PiAdapter).consume(record);todo.update([...adapter.messages.values()]);},()=>{},message=>{todo.diagnostics.push(message);todo.diagnostics=todo.diagnostics.slice(-64);});available=true;}catch{/* All files unavailable yields undefined rather than an inferred empty list. */}}
+ for(const file of files){if(this.closed||!isCurrent())return;const adapter=this.adapter(provider,file.path);adapter.max=2;const tail=new JsonlTail(this.maxRecord);try{await tail.read(file.path,record=>{if(adapter instanceof CodexAdapter)adapter.consume(record);else if(adapter instanceof ClaudeAdapter)adapter.consume(record);else (adapter as PiAdapter).consume(record);todo.update([...adapter.messages.values()]);},()=>{},message=>{todo.diagnostics.push(message);todo.diagnostics=todo.diagnostics.slice(-64);},()=>!this.closed&&isCurrent());available=true;}catch(error){if((error as Error).name==='AbortError')return;/* Missing files cannot establish empty ACTION state. */}}
  return available?todo.toJSON():undefined;
  }
  async readReferences(provider:string,ref:{kind:'id'|'path';value:string},isCurrent:()=>boolean=()=>true):Promise<ReferenceState|undefined>{

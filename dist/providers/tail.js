@@ -74,6 +74,16 @@ export class JsonlTail {
             if (this.anchor.length)
                 await file.read(this.anchor, 0, this.anchor.length, this.offset - this.anchor.length);
         }
+        catch (error) {
+            if (error.name === 'AbortError') {
+                // offset/pending already describe committed bytes. Preserve their comparison
+                // anchor so reopening resumes here instead of mistaking cancellation for rotation.
+                this.anchor = Buffer.alloc(Math.min(32, this.offset));
+                if (this.anchor.length)
+                    await file.read(this.anchor, 0, this.anchor.length, this.offset - this.anchor.length);
+            }
+            throw error;
+        }
         finally {
             await file.close();
         }

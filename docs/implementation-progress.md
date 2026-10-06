@@ -696,3 +696,55 @@ prefix+i TOML binding, server reload-config, then shortcut/direct-open usage. Th
 user's missing managed binding was installed without replacing another binding;
 live reload returned applied with no diagnostics. Windows platform-specific work
 remains owned by the other machine; this change adds shared code and fixtures.
+
+
+## 2026-10-06 — panel selection, native cards and live UI preferences
+
+The default right-tab order is Overview, Notes, To-do, Git, Agents, Processes,
+Refs, Messages. `ui.tabOrder` and `ui.nativeGrouping` reload through the authenticated
+`reload-settings` action without restarting readers or Notes editing. Configuration
+validation rejects invalid/duplicate tabs and invalid grouping before replacing
+live values. Overview navigation follows view names. Coverage-only facts now use
+one full-width column; To-do help explains ACTION reports, local checks, provenance,
+repetition, replacement, clearing, copying and keys. README covers ordered install,
+updates and reload commands.
+
+Native cards use status + compact session name + native tab, short CPU/RSS/WS and
+human sizes (one decimal), a machine/branch/Git row and optional group/attention
+rows. `project`, `tab`, `none` grouping sorts existing cards without background Git
+reads; group labels are attached to real cards rather than invented native nodes.
+The compact name uses source-owned expiring display metadata and builtin name/tab
+fallbacks, with hash-guarded cleanup. Native mode owns/restores selection background
+alongside rows, preserving user edits. Partial removal drops empty owned table
+headers while retaining unrelated headers and user comments.
+
+A live incident exposed shared Codex daemon hook reports inheriting the first TUI's
+pane environment: a new Prism thread was reported on LocAI while its own pane had
+no ref. Exact live terminal identity observations repaired both host reports;
+readback confirmed LocAI's panel followed its own thread. Prism rejects host-hook
+cross-directory conflicts before loading their bodies, using canonical paths;
+matching cwd never proves identity and no replacement is guessed. Follow observes
+resolved attachment keys as well as host IDs; unpinned startup and empty-tab
+fallbacks stay local. Upstream APIs still lack shared-daemon client PID/thread
+provenance, so future `codex --no-daemon` launches and explicit operator repair are
+documented. Valid cross-directory resumes can trigger the conservative guard.
+
+LocAI's roughly 928 MB rollout also exposed delayed display and scan cancellation.
+Parsed model/messages/usage now publish before ACTION/ref history enrichment. Reads
+cancel after visibility changes, preserve their byte anchor for incremental resume,
+and cannot mark a canceled ACTION hydration complete after reopening. Interim
+frames preserve cached freshness, historical state and explicit local goals.
+
+Regression failures preceded fixes for native layout, cross-project joins, empty-tab
+render fallback, ID/path rejection, follow transitions, canceled reads, incremental
+resume, ACTION reopening and cleanup. Final review reports no important findings.
+macOS Node26: 387 tests, 364 passed, 23 platform/opt-in skips; Linux arm64 Podman
+Node24: 387 tests, 361 passed, 26 skips, no failures. Additional final focused suite:
+72/72, with subsequent cancellation/config/binding/follow review suite 25/25.
+Actual isolated live install/removal, two panes, Notes, reference navigation,
+live tab reload, paused updates, 15s TTL, foreign projection ownership and config
+conflict/recovery passed on both systems. Proofs are locally retained under
+`artifacts/prism-final-mac-live` and `artifacts/prism-final-linux-live`. Native pixel
+appearance and unavailable upstream viewer/disconnect provenance are not certified;
+Windows platform-specific work remains owned by the other machine, with shared
+changes checked by publication CI.

@@ -25,7 +25,26 @@ export const rowHelp:Record<string,string>={
  messages:'These counts cover retained user/assistant messages and tools. Inter-agent messages remain separate. Enter opens Messages; b loads older history without jumping a scrollback reader.',
  children:'All descendants in the reconciled lineage, with cycles excluded. Enter opens Agents. Enter there inspects within Prism; f explicitly focuses a live pane. Numeric targets refer to Prism, not native Herdr focus indices.',
  refs:'Retained or paged reference targets; coverage is labeled. Enter opens Refs. Target details retain the complete path; Space loads mention sources and s opens the exact source cursor.',
- todo:'Reported requests with persistent local checkmarks. Local completion does not edit the harness transcript. Enter opens To-do; x checks or reopens a selected request.',
+ todo:`What To-do contains
+Actions reported for you by this agent. This is a local checklist, separate from the harness's internal plan and task tools. Prism imports ACTION: lines from complete assistant messages outside a code block. User, tool and inter-agent messages do not create items.
+
+How to populate it
+Ask the agent: "Report the complete current list of actions for me. Use one ACTION: <description> line per item outside a code block, or ACTION: none if no actions remain."
+Example:
+ACTION: Review the diff
+ACTION: Run the test suite
+
+How reports change the list
+The latest complete ACTION report replaces the current list. ACTION: none explicitly clears it. Items missing from that report are archived; messages without ACTION lines leave the list unchanged. An empty reported list differs from not_reported, source_unavailable and disabled. A repeated identical item keeps its local checkmark.
+
+Local checks and provenance
+[x] means you checked the item in Prism. It does not change the transcript, tell the agent it is done, or prove that the agent completed work. Checkmarks persist per agent across restarts. Pending counts include only unchecked current items. First seen is the original request time; list age is the latest report time. Full details retain first/latest source and repeated-request markers.
+
+Keys
+From Overview, Enter opens To-do. In the list, arrows or j/k select a request; Enter opens the full text and provenance. x checks or reopens it; completed items sort below pending items. s opens its recorded source message. y copies a single inline backtick command when there is exactly one, otherwise the full request; copying does not run it. ? opens this help. Escape returns to the saved reader; Tab changes views; q closes the panel.
+
+Configuration
+ACTION parsing is enabled by default. Prism's settings.json has a top-level todosEnabled boolean. Set it to false to disable parsing, or true to enable it; preserve the other settings. Then restart Prism through activate-overview (or activate-inspector for inspector-only mode). reload-settings currently applies ui.tabOrder only.`,
  git:'Git facts belong to this exact checkout and repository family. Added/deleted lines differ from untracked file counts. Missing counters are unavailable. Enter opens Git.',
  notes:'Private per-agent Markdown on the collecting server. Enter opens Notes, then Enter edits. Autosave after 500 ms; Ctrl+S flushes. Follow is held while editing. Complete Prism state removal deletes notes.',
 };

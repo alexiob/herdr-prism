@@ -1,5 +1,5 @@
 import { renderNotes } from "./notes.js";
-import { tabs } from "./types.js";
+import { orderedTabs } from "./types.js";
 import { sanitize, wrap, number, bytes, age } from "./text.js";
 import { visibleReferences } from "./reference-readers.js";
 import { overviewRows, processDocument, referenceDocument, gitDocument, identityDocument, rowHelp, resourceDocument, factRow } from "./facts.js";
@@ -229,12 +229,12 @@ function contentRows(session, state, columns, now, data) {
         rows.push({ id: 'refs-page', text: paged && !paged.hasMore && !paged.stale ? 'End of target history · B reloads' : 'Load older reference targets · b', action: paged && !paged.hasMore && !paged.stale ? undefined : { type: 'page-refs', sessionKey: session.key, referencePageCursor: paged?.stale ? undefined : paged?.cursor, restart: paged?.stale } });
     }
     else if (state.tab === 'To-do') {
-        rows.push({ id: 'todo-status', text: `${session.todoStatus ?? 'not reported'} · ${['reported', 'empty'].includes(session.todoStatus ?? '') ? session.todos?.filter(t => !t.checked).length ?? 0 : '—'} pending · list ${age(session.todoReportedAt, now)} ago`, ...(session.todoSourceMessageId ? { action: { type: 'source', sessionKey: session.key, id: session.todoSourceMessageId }, sourceId: session.todoSourceMessageId } : {}) });
+        rows.push({ id: 'todo-status', help: rowHelp.todo, text: `${session.todoStatus ?? 'not reported'} · ${['reported', 'empty'].includes(session.todoStatus ?? '') ? session.todos?.filter(t => !t.checked).length ?? 0 : '—'} pending · list ${age(session.todoReportedAt, now)} ago`, ...(session.todoSourceMessageId ? { action: { type: 'source', sessionKey: session.key, id: session.todoSourceMessageId }, sourceId: session.todoSourceMessageId } : {}) });
         for (const todo of [...session.todos ?? []].sort((a, b) => Number(a.checked) - Number(b.checked))) {
             if (!match(todo.text, state))
                 continue;
             const commands = [...todo.text.matchAll(/`([^`\n]+)`/g)];
-            rows.push({ id: todo.id, text: `[${todo.checked ? 'x' : ' '}] ${todo.text} · ${age(todo.firstSeenAt, now)} ago${todo.repeated ? todo.checked ? ' · repeat · locally checked' : ' · repeated request' : ''}`, help: 'Enter opens the complete request. s opens its source; x checks locally; y copies one inline command or the full request.', action: { type: 'message', text: todo.text, document: { title: 'Reported request', capturedAt: now, sections: [{ id: 'request', title: 'Request', text: todo.text }, { id: 'source', title: 'Recorded facts', column: 1, fields: [{ label: 'First source', value: todo.messageId, role: 'identity' }, { label: 'Latest source', value: todo.latestMessageId ?? todo.messageId, role: 'identity' }, { label: 'First seen', value: age(todo.firstSeenAt, now), role: 'duration' }, { label: 'Repeated', value: todo.repeated ? 'Yes' : 'No' }, { label: 'Locally checked', value: todo.checked ? 'Yes' : 'No', role: todo.checked ? 'positive' : 'text' }] }] } }, sourceId: todo.messageId, copy: commands.length === 1 ? commands[0][1] : todo.text });
+            rows.push({ id: todo.id, text: `[${todo.checked ? 'x' : ' '}] ${todo.text} · ${age(todo.firstSeenAt, now)} ago${todo.repeated ? todo.checked ? ' · repeat · locally checked' : ' · repeated request' : ''}`, help: 'Enter opens this complete request and provenance.\n\n' + rowHelp.todo, action: { type: 'message', text: todo.text, document: { help: rowHelp.todo, title: 'Reported request', capturedAt: now, sections: [{ id: 'request', title: 'Request', text: todo.text }, { id: 'source', title: 'Recorded facts', column: 1, fields: [{ label: 'First source', value: todo.messageId, role: 'identity' }, { label: 'Latest source', value: todo.latestMessageId ?? todo.messageId, role: 'identity' }, { label: 'First seen', value: age(todo.firstSeenAt, now), role: 'duration' }, { label: 'Repeated', value: todo.repeated ? 'Yes' : 'No' }, { label: 'Locally checked', value: todo.checked ? 'Yes' : 'No', role: todo.checked ? 'positive' : 'text' }] }] } }, sourceId: todo.messageId, copy: commands.length === 1 ? commands[0][1] : todo.text });
         }
     }
     if (state.tab === 'Git') {
@@ -248,9 +248,11 @@ function contentRows(session, state, columns, now, data) {
     return rows;
 }
 export function renderScreen(data, state, columns, height, now = Date.now()) {
+    if (data.tabOrder)
+        state.tabOrder = [...data.tabOrder];
     columns = Math.max(1, Math.floor(columns));
     height = Math.max(1, Math.floor(height));
-    const session = data.sessions.find(s => s.key === state.selectedKey) ?? data.sessions[0];
+    const session = data.sessions.find(s => s.key === state.selectedKey) ?? (!state.restrictAutomaticSelection ? data.sessions[0] : undefined);
     if (session && !state.selectedKey)
         state.selectedKey = session.key;
     if (state.refSources && state.refSources.sessionKey !== session?.key) {
@@ -481,8 +483,8 @@ export function handleKey(state, key, data, screen) {
     if (key === 'q' || key === 'ctrl+c')
         return { type: 'quit' };
     if (key === 'tab' || key === 'shift+tab') {
-        const i = tabs.indexOf(state.tab);
-        return changeTab(state, tabs[(i + (key === 'tab' ? 1 : tabs.length - 1)) % tabs.length]);
+        const order = orderedTabs(state), i = order.indexOf(state.tab);
+        return changeTab(state, order[(i + (key === 'tab' ? 1 : order.length - 1)) % order.length]);
     }
     if (state.help && !['j', 'k', 'down', 'up', 'pageup', 'pagedown', 'home', 'end', 'g', 'G'].includes(key))
         return;

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { parseArguments } from "../runtime/actions.js";
 import { serviceContext } from "../runtime/service.js";
 import { acquireAdmission } from "../runtime/admission.js";
-import { FollowSelection, inspectorVisible } from "../runtime/follow.js";
+import { FollowSelection, inspectorVisible, localSelection as selectLocal } from "../runtime/follow.js";
 import { RemoteCollector } from "../runtime/remote-collector.js";
 import { panelViewStore } from "../runtime/panel-views.js";
 import { demoData } from "../runtime/demo.js";
@@ -56,7 +56,7 @@ export async function main(argv = process.argv.slice(2)) {
             if (event.overflow)
                 state.notice = 'Paste exceeds 1 MiB; nothing inserted';
             else
-                notes.paste(event.text, { columns: ui.columns, height: ui.rows });
+                notes.paste(event.text, { columns: ui.columns, height: ui.rows, tabOrder: state.tabOrder });
             return true;
         }
         if (event.type === 'mouse') {
@@ -80,7 +80,7 @@ export async function main(argv = process.argv.slice(2)) {
             await notes.end();
             return false;
         }
-        return notes.key(event.key, { columns: ui.columns, height: ui.rows });
+        return notes.key(event.key, { columns: ui.columns, height: ui.rows, tabOrder: state.tabOrder });
     };
     const paint = () => { syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
     if (args.options.demo) {
@@ -101,6 +101,7 @@ export async function main(argv = process.argv.slice(2)) {
         paint();
     }
     else {
+        state.restrictAutomaticSelection = true;
         const context = await serviceContext(args.options);
         state.theme ??= context.settings.theme;
         state.ascii = state.ascii || context.settings.ascii;
@@ -171,12 +172,12 @@ export async function main(argv = process.argv.slice(2)) {
             // The service owns its own admission check; do not hold a UI's gate
             // while waiting for its detached owner to start.
             await admission.release();
-            const localSelection = () => data.sessions.find(s => (s.attachments ?? (s.attachment ? [s.attachment] : [])).some(a => a.tab_id === tabId))?.key;
+            const localSelection = () => selectLocal(data, tabId, cache.snapshot);
             try {
                 await collector.start();
                 data = collector.data;
-                if (!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey))
-                    state.selectedKey = localSelection() ?? data.sessions[0]?.key;
+                if (!state.pin || !state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey))
+                    state.selectedKey = localSelection();
                 syncVisibility();
                 await collector.refresh();
                 data = collector.data;
@@ -218,7 +219,7 @@ export async function main(argv = process.argv.slice(2)) {
                 collector.on('data', (next) => {
                     data = next;
                     if (!state.processConfirmation && !state.notes?.editing && (!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey)))
-                        state.selectedKey = localSelection() ?? data.sessions[0]?.key;
+                        state.selectedKey = localSelection();
                     paint();
                     queueFollow();
                 });
@@ -320,7 +321,7 @@ export async function main(argv = process.argv.slice(2)) {
                     if (action.type === 'notes-edit') {
                         await ensureNotes(true);
                         if (notes && notes.value?.sessionKey === state.selectedKey)
-                            notes.begin({ columns: ui.columns, height: ui.rows });
+                            notes.begin({ columns: ui.columns, height: ui.rows, tabOrder: state.tabOrder });
                         state.notice = undefined;
                         return;
                     }
@@ -455,7 +456,7 @@ export async function main(argv = process.argv.slice(2)) {
                 else if (action?.type === 'notes-edit') {
                     await ensureNotes(true);
                     if (notes && notes.value?.sessionKey === state.selectedKey)
-                        notes.begin({ columns: ui.columns, height: ui.rows });
+                        notes.begin({ columns: ui.columns, height: ui.rows, tabOrder: state.tabOrder });
                 }
                 else if (action?.type === 'message')
                     showDetail(state, action.text ?? '', action.document);

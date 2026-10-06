@@ -1,6 +1,6 @@
 import { cellWidth, sanitize, truncate, wrap } from "./text.js";
 import { styleSpans } from "./theme.js";
-export const inspectorPreviewTabs = ['Overview', 'Agents', 'Processes', 'Messages', 'Refs', 'To-do', 'Git', 'Notes'];
+export const inspectorPreviewTabs = ['Overview', 'Notes', 'To-do', 'Git', 'Agents', 'Processes', 'Refs', 'Messages'];
 export const previewViews = [...inspectorPreviewTabs, 'Notes editor', 'Sidebar', 'Help', 'Detail'];
 const goal = 'Build reliable monitoring for local and remote harness sessions, with readable telemetry and safe installation.';
 const note = '# Session notes\n\n## Decisions\n- Run Prism on each remote server.\n- Keep visibility API work upstream.\n\n## Follow-up\nVerify the saved draft after reconnecting.';

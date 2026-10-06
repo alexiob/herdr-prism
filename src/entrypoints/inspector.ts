@@ -7,7 +7,7 @@ import path from 'node:path';
 import { parseArguments } from '../runtime/actions.ts';
 import { serviceContext } from '../runtime/service.ts';
 import { acquireAdmission } from '../runtime/admission.ts';
-import { FollowSelection, inspectorVisible } from '../runtime/follow.ts';
+import { FollowSelection, inspectorVisible, localSelection as selectLocal } from '../runtime/follow.ts';
 import { RemoteCollector } from '../runtime/remote-collector.ts';
 import {panelViewStore} from '../runtime/panel-views.ts';
 import { demoData } from '../runtime/demo.ts';
@@ -43,12 +43,12 @@ export async function main(argv = process.argv.slice(2)) {
     const connectNotes=(dir:string)=>{notes=new NotesController(new NotesStore(dir));notes.on('change',()=>{state.notes=notes!.value;if(!closing)paint();});};
     const editorInput=async(event:any)=>{
         if(!notes?.value?.editing)return false;
-        if(event.type==='paste'){if(event.overflow)state.notice='Paste exceeds 1 MiB; nothing inserted';else notes.paste(event.text,{columns:ui.columns,height:ui.rows});return true;}
+        if(event.type==='paste'){if(event.overflow)state.notice='Paste exceeds 1 MiB; nothing inserted';else notes.paste(event.text,{columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});return true;}
         if(event.type==='mouse'){if(event.release)return true;const tab=frame.tabRegions?.find(r=>r.y===event.y&&event.x>=r.x&&event.x<r.x+r.width);if(!tab)return true;await notes.end();return false;}
         if(event.key==='ctrl+s'){await notes.flush();return true;}
         if(event.key==='escape'){await notes.end();return true;}
         if(['tab','shift+tab','ctrl+c'].includes(event.key)){await notes.end();return false;}
-        return notes.key(event.key,{columns:ui.columns,height:ui.rows});
+        return notes.key(event.key,{columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});
     };
     const paint = () => { syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
     if (args.options.demo) {
@@ -66,6 +66,7 @@ export async function main(argv = process.argv.slice(2)) {
         paint();
     }
     else {
+        state.restrictAutomaticSelection=true;
         const context = await serviceContext(args.options);
         state.theme??=context.settings.theme;
         state.ascii = state.ascii || context.settings.ascii;
@@ -120,10 +121,10 @@ export async function main(argv = process.argv.slice(2)) {
             // The service owns its own admission check; do not hold a UI's gate
             // while waiting for its detached owner to start.
             await admission.release();
-            const localSelection=()=>data.sessions.find(s=>(s.attachments??(s.attachment?[s.attachment]:[])).some(a=>a.tab_id===tabId))?.key;
+            const localSelection=()=>selectLocal(data,tabId,cache.snapshot);
             try {
                 await collector.start();data=collector.data;
-                if(!state.selectedKey||!data.sessions.some(s=>s.key===state.selectedKey))state.selectedKey=localSelection()??data.sessions[0]?.key;
+                if(!state.pin||!state.selectedKey||!data.sessions.some(s=>s.key===state.selectedKey))state.selectedKey=localSelection();
                 syncVisibility();await collector.refresh();data=collector.data;
                 if(closing){await stop();return;}
                 if(args.options.once||!process.stdin.isTTY){paint();await cleanup();return;}
@@ -140,7 +141,7 @@ export async function main(argv = process.argv.slice(2)) {
                 cache.on('snapshot', () => { syncVisibility(); collector!.invalidate(); queueFollow(); });
                 cache.on('stale', () => { collector!.setVisibleSession(state.selectedKey,false); data.stale = true; paint(); });
                 collector.on('data', (next: DashboardData) => { data = next; if (!state.processConfirmation&&!state.notes?.editing&&(!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey)))
-                    state.selectedKey = localSelection() ?? data.sessions[0]?.key; paint(); queueFollow(); });
+                    state.selectedKey = localSelection(); paint(); queueFollow(); });
                 collector.on('diagnostic', (message: string) => { state.notice = message; paint(); });
                 collector.once('disconnected',()=>{inputQueue=inputQueue.then(()=>stop());});
                 ui.on('resize',paint);
@@ -206,7 +207,7 @@ export async function main(argv = process.argv.slice(2)) {
                         }finally{referenceRequest=false;}return;
                     }
                     if(action.type==='tab'){contentRequest++;await notes?.end();await ensureNotes();return;}
-                    if(action.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows});state.notice=undefined;return;}
+                    if(action.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});state.notice=undefined;return;}
                     if(action.type==='select'){await notes?.end();contentRequest++;const selected=data.sessions.find(session=>session.key===action.sessionKey);if(selected){state.selectedKey=selected.key;state.tab='Overview';state.cursor=0;state.cursorId=undefined;state.scroll=0;syncVisibility();collector!.invalidate();}return;}
                     if (action.type === 'focus') {
                         await notes?.end();
@@ -292,7 +293,7 @@ export async function main(argv = process.argv.slice(2)) {
             {state.selectedKey = action.sessionKey;if(action.type==='select')state.tab='Overview';}
         else if(action?.type==='terminate-process')state.notice=`Demo: simulated termination of PID ${action.processTarget!.pid}; no OS signal sent`;
         else if(action?.type==='tab')await ensureNotes();
-        else if(action?.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows});}
+        else if(action?.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});}
         else if (action?.type === 'message')
             showDetail(state, action.text ?? '',action.document);
         else if(action?.type==='ref-sources'){

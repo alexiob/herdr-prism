@@ -88,8 +88,19 @@ test('compact quantities style attached binary units quietly and keep signed Git
 });
 test('Overview Notes link selects the edit entry and restores the Overview anchor after leaving',()=>{
  const data=fixture(),state=createUiState();state.selectedKey=data.sessions[0]!.key;state.cursorId='notes';let frame=renderScreen(data,state,50,24);const anchor=state.cursorId;handleKey(state,'enter',data,frame);frame=renderScreen(data,state,50,24);assert.equal(handleKey(state,'enter',data,frame)?.type,'notes-edit');assert.equal(state.cursorId,'notes-edit');
- handleKey(state,'tab',data,frame);frame=renderScreen(data,state,50,24);assert.equal(state.tab,'Overview');assert.equal(state.cursorId,anchor);
+ handleKey(state,'shift+tab',data,frame);frame=renderScreen(data,state,50,24);assert.equal(state.tab,'Overview');assert.equal(state.cursorId,anchor);
 });
 test('mixed reference facts and actions allow reading the entire path before selecting the action list',()=>{
  const data=fixture(),state=createUiState();state.selectedKey=data.sessions[0]!.key;state.tab='Refs';const ref=data.sessions[0]!.refs![0]!;ref.target='/EARLY/'+('long-directory/'.repeat(30))+'ending.ts';state.cursorId=ref.id;let frame=renderScreen(data,state,36,18);const action=handleKey(state,'enter',data,frame)!;showDetail(state,action.text??'',action.document);frame=renderScreen(data,state,36,18);assert.match(frame.lines.join('\n'),/EARLY/);handleKey(state,'end',data,frame);frame=renderScreen(data,state,36,18);handleKey(state,'up',data,frame);frame=renderScreen(data,state,36,18);assert.equal(handleKey(state,'enter',data,frame)?.type,'source');handleKey(state,'home',data,frame);frame=renderScreen(data,state,36,18);assert.match(frame.lines.join('\n'),/EARLY/);assert.equal(state.scroll,0);
+});
+test('coverage-only details occupy the full pane instead of leaving an empty left column',()=>{
+ const data=fixture(),state=createUiState();state.selectedKey=data.sessions[0]!.key;state.tab='Processes';state.cursorId='scope';const action=handleKey(state,'enter',data,renderScreen(data,state,116,30))!;showDetail(state,action.text??'',action.document);const frame=renderScreen(data,state,116,30);
+ assert.ok(frame.lines[frame.bodyStart]?.startsWith('┌ Sample scope'),'scope starts at the left edge');assert.ok(frame.lines[frame.bodyStart]?.endsWith('┐'));
+ assert.ok(!frame.lines.some(line=>/^ {40,}┌/.test(line)),'no empty half-pane');
+});
+test('To-do help explains report format, replacement/clear behavior, local checks, provenance and every key',()=>{
+ const data=fixture(),state=createUiState();state.selectedKey=data.sessions[0]!.key;
+ for(const id of ['todo','todo-status',data.sessions[0]!.todos![0]!.id]){state.tab=id==='todo'?'Overview':'To-do';state.cursorId=id;let frame=renderScreen(data,state,50,24);handleKey(state,'?',data,frame);const text=state.helpText!;
+ for(const phrase of ['ACTION:', 'ACTION: none', 'complete', 'code block', 'latest', 'local', 'repeated', 'Enter', 'x', 's', 'y', 'Escape', 'todosEnabled'])assert.ok(text.includes(phrase),phrase);
+ frame=renderScreen(data,state,50,24);handleKey(state,'end',data,frame);frame=renderScreen(data,state,50,24);assert.match(frame.lines.join('\n'),/todosEnabled|restart|activate/);handleKey(state,'escape',data,frame);}
 });

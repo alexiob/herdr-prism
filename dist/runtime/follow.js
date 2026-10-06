@@ -1,3 +1,9 @@
+/** Automatic selection stays in the panel's tab. A reader can explicitly choose others. */
+export function localSelection(data, tabId, snapshot) {
+    const local = data.sessions.filter(s => (s.attachments ?? (s.attachment ? [s.attachment] : [])).some(a => a.tab_id === tabId));
+    const focused = snapshot?.agents.find(a => a.pane_id === snapshot.focused_pane_id && a.tab_id === tabId);
+    return (focused && local.find(s => (s.attachments ?? (s.attachment ? [s.attachment] : [])).some(a => a.terminal_id === focused.terminal_id)) || local[0])?.key;
+}
 /** Follow genuine native focus/occupant changes; leave an inspected child alone on refresh. */
 export class FollowSelection {
     identity;
@@ -8,11 +14,11 @@ export class FollowSelection {
         const focused = snapshot.agents.find(a => a.pane_id === snapshot.focused_pane_id);
         if (!focused)
             return;
-        const identity = JSON.stringify([focused.terminal_id, focused.agent, focused.agent_session?.kind, focused.agent_session?.value]);
-        if (identity === this.identity)
-            return;
         const selected = data.sessions.find(s => (s.attachments ?? (s.attachment ? [s.attachment] : [])).some(a => a.terminal_id === focused.terminal_id && a.agent_session?.kind === focused.agent_session?.kind && a.agent_session?.value === focused.agent_session?.value));
         if (!selected)
+            return;
+        const identity = JSON.stringify([focused.terminal_id, focused.agent, focused.agent_session?.kind, focused.agent_session?.value, selected.key]);
+        if (identity === this.identity)
             return;
         this.identity = identity;
         return selected.key;

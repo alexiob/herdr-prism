@@ -1,3 +1,4 @@
+import { tabs, tabLabel } from "./types.js";
 import { EventEmitter } from 'node:events';
 import { noteLimit } from "../state/notes.js";
 import { sanitize, cellWidth } from "./text.js";
@@ -5,7 +6,8 @@ import { span, fitSpans, asciiText } from "./widgets.js";
 import { renderLayout } from "./layout.js";
 export function notesEditorFits(viewport) {
     let lines = 1, used = 0;
-    for (const name of viewport.columns < 50 ? ['Overview', 'Agents', 'Procs', 'Msgs', 'Refs', 'To-do', 'Git', '[Notes]'] : ['Overview', 'Agents', 'Processes', 'Messages', 'Refs', 'To-do', 'Git', '[Notes]']) {
+    for (const tab of viewport.tabOrder ?? tabs) {
+        const name = (tab === 'Notes' ? '[' : '') + tabLabel(tab, viewport.columns < 50) + (tab === 'Notes' ? ']' : '');
         if (used && used + name.length > viewport.columns) {
             lines++;
             used = 0;
@@ -168,7 +170,7 @@ export function renderNotes(data, state, columns, height, now) {
         action.help += ' Recovery draft: ' + note.recoveryPath;
     state.cursor = 0;
     state.cursorId = 'notes-edit';
-    if (!notesEditorFits({ columns, height })) {
+    if (!notesEditorFits({ columns, height, tabOrder: state.tabOrder })) {
         const small = renderLayout(data, state, [{ id: 'notes', title: 'Notes · enlarge panel', rows: [{ ...action, action: undefined, selectable: false }] }], columns, height, now);
         if (height >= 2) {
             small.spans[height - 2] = fitSpans([span(editing ? 'Editing paused · enlarge panel' : 'Enlarge panel to edit', 'warning')], columns);

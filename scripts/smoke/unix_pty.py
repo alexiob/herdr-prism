@@ -74,7 +74,7 @@ try:
     wait_for(lambda: b'\x1b[?1049h' in output and b'[Overview]' in output, 'interactive alternate-screen Overview')
     quiet()
     at = len(output)
-    os.write(master, b'\t')
+    os.write(master, b'\t\t\t\t')
     wait_for(lambda: b'[Agents]' in output[at:], 'Tab changing the active Agents view')
     quiet()
     at = len(output)

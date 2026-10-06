@@ -66,6 +66,12 @@ export async function main(argv = process.argv.slice(2)) {
         }
         return { path: path.join(context.configDir, 'settings.json'), settings: value };
     }
+    if (args.command === 'reload-settings') {
+        const owner = await existingController(context);
+        if (!owner)
+            return { reloaded: true, active: false, tabOrder: settings.ui?.tabOrder };
+        return owner.client.request('reload-settings', { tabOrder: settings.ui?.tabOrder, nativeGrouping: settings.ui?.nativeGrouping });
+    }
     if (args.command === 'refresh' || args.command === 'native')
         return finiteRefresh(args.options);
     const rpc = new HerdrClient(context.endpoint);

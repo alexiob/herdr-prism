@@ -72,6 +72,8 @@ export class CollectorHost {
             await this.collector.refresh();
             return { sessions: this.collector.data.sessions.length, stale: this.collector.data.stale, diagnostics: this.collector.data.diagnostics };
         }
+        if (op === 'reload-settings')
+            return this.collector.setTabOrder(p.tabOrder, p.nativeGrouping);
         if (op === 'set-goal') {
             await this.collector.setGoal(p.session, p.objective, p.status);
             return { saved: true };

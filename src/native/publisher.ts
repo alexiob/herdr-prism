@@ -1,15 +1,19 @@
 import type { Rpc } from '../model/types.ts';
 import type { SessionView } from '../tui/types.ts';
 import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { serverIdPattern } from '../runtime/server.ts';
-import { sanitize, truncate, number, bytes } from '../tui/text.ts';
+import { sanitize, truncate, number } from '../tui/text.ts';
 export const pluginId = 'iob.herdr-prism';
 export const source = `plugin:${pluginId}`;
-const keys = ['hat_line', 'hat_goal', 'hat_load', 'hat_counts', 'hat_branch', 'hat_add', 'hat_del', 'hat_div', 'hat_conflict', 'hat_last', 'hat_rank', 'hat_index', 'hat_fresh', 'hat_group'];
+const keys = ['hat_line', 'hat_goal', 'hat_load', 'hat_counts', 'hat_branch', 'hat_add', 'hat_del', 'hat_div', 'hat_conflict', 'hat_last', 'hat_rank', 'hat_index', 'hat_fresh', 'hat_group','hat_attention'];
+import type {NativeGrouping} from '../config/native-grouping.ts';
+export function compactBytes(value?:string):string {if(value===undefined)return '—';try{let amount=Number(BigInt(value));if(!Number.isFinite(amount)||amount<0)return '—';const units=['B','kB','MB','GB','TB','PB','EB'];let unit=0;while(amount>=1000&&unit<units.length-1){amount/=1000;unit++;}return `${Number(amount.toFixed(1))}${units[unit]}`;}catch{return '—';}}
 export interface Publication {
     paneId: string;
     terminalId: string;
     hashes: Record<string, string>;
+    displayAgentHash?:string;
 }
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 export async function clearPublication(rpc: Rpc, records: Publication[]) { for (const record of records) {
@@ -28,8 +32,9 @@ export async function clearPublication(rpc: Rpc, records: Publication[]) { for (
     if (pane.terminal_id !== record.terminalId)
         continue;
     const tokens = Object.fromEntries(keys.filter(key => typeof pane.tokens?.[key] === 'string' && hash(pane.tokens[key]) === record.hashes[key]).map(key => [key, null]));
-    if (Object.keys(tokens).length)
-        await rpc.call('pane.report_metadata', { pane_id: record.paneId, source, tokens, seq: Date.now() * 1000 + 999 });
+    const clearDisplay=typeof pane.display_agent==='string'&&hash(pane.display_agent)===record.displayAgentHash;
+    if (Object.keys(tokens).length||clearDisplay)
+        await rpc.call('pane.report_metadata', { pane_id: record.paneId, source, tokens,...(clearDisplay?{clear_display_agent:true}:{}),seq: Date.now() * 1000 + 999 });
 } }
 export class NativePublisher {
     diagnostics: string[] = [];
@@ -48,15 +53,21 @@ export class NativePublisher {
         if (this.sent.size && id !== this.serverId) throw new Error('Cannot replace an active publication server identity');
         this.serverId = id;
     }
-    ownership(): Publication[] { return [...this.sent].map(([paneId, record]) => ({ paneId, terminalId: record.terminal, hashes: Object.fromEntries(Object.entries(JSON.parse(record.text) as Record<string, string>).map(([key, value]) => [key, hash(value)])) })); }
-    async publish(sessions: SessionView[], now = Date.now(), graph: SessionView[] = sessions): Promise<void> {
+    ownsDisplay(pane:{pane_id:string;terminal_id:string;display_agent?:string|null}):boolean {const old=this.sent.get(pane.pane_id);return !!old&&old.terminal===pane.terminal_id&&JSON.parse(old.text).hat_line===pane.display_agent;}
+    ownership(): Publication[] { return [...this.sent].map(([paneId, record]) => ({ paneId, terminalId: record.terminal,displayAgentHash:hash(JSON.parse(record.text).hat_line), hashes: Object.fromEntries(Object.entries(JSON.parse(record.text) as Record<string, string>).map(([key, value]) => [key, hash(value)])) })); }
+    async publish(sessions: SessionView[], now = Date.now(), graph: SessionView[] = sessions,options:{grouping?:NativeGrouping;tabs?:Record<string,unknown>[]}={}): Promise<void> {
         this.diagnostics = [];
         let rank = 0;
         const active = new Set(sessions.flatMap(s => s.attachment ? [s.attachment.pane_id] : []));
         for (const [id, record] of this.sent)
             if (!active.has(id) && now - record.at >= 15000)
                 this.sent.delete(id);
-        for (const session of sessions) {
+        const tabName=(session:SessionView)=>{const id=session.attachment?.tab_id;const tab=options.tabs?.find(t=>(t.tab_id??t.id)===id);return String(tab?.label??tab?.name??id??'');};
+        const project=(session:SessionView)=>session.git?.commonDir?.replace(/[\\/]\.git$/,'')??session.git?.root??session.attachment?.foreground_cwd??session.attachment?.cwd??session.evidence.cwd??'Unknown project';
+        const group=(session:SessionView)=>options.grouping==='tab'?session.attachment?.tab_id??'':options.grouping==='project'?project(session):'';
+        const ordered=[...sessions];if(options.grouping&&options.grouping!=='none')ordered.sort((a,b)=>group(a).localeCompare(group(b)));
+        let previousGroup:string|undefined;
+        for (const session of ordered) {
             const pane = session.attachment;
             if (!pane)
                 continue;
@@ -67,15 +78,17 @@ export class NativePublisher {
                 continue;
             }
             const resource = session.resource, git = session.git;
+            const groupKey=group(session),groupLabel=groupKey&&groupKey!==previousGroup?(options.grouping==='tab'?`Tab: ${tabName(session)}`:`Project: ${path.basename(groupKey.replace(/\\/g,'/'))}`):'';previousGroup=groupKey;
+            const state=typeof pane.agent_status==='string'?pane.agent_status:pane.agent_status?.state??pane.agent_status?.status??session.evidence.state;
             const tokens: Record<string, string> = {
-                hat_line: truncate(`${' '.repeat(Math.min(session.depth, 5) * 2)}${session.depth ? '↳ ' : ''}${session.evidence.title ?? session.evidence.id}`, 80),
+                hat_line: truncate(String(pane.name??pane.terminal_title_stripped??pane.title_stripped??session.evidence.title??session.evidence.provider).split('|')[0].trim(),16),
                 hat_goal: truncate(session.evidence.goals.at(-1)?.objective?`Goal: ${session.evidence.goals.at(-1)!.objective}`:session.evidence.task?`Task: ${session.evidence.task}`:'',100),
-                hat_load: `CPU ${number(resource?.cpuPercent)}% ${resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS'} ${bytes(resource?.memoryBytes)} · ${this.descendants(session, graph)} agent${this.descendants(session, graph)===1?'':'s'}`,
+                hat_load: `${resource?.availability==='stale'?'~ ':''}CPU ${number(resource?.cpuPercent)}%  ${resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS'} ${compactBytes(resource?.memoryBytes)}`,
                 hat_counts: `p${resource?.processes.length ?? '—'} a${this.descendants(session, graph)} m${session.evidence.reason === 'metadata only; transcript body not loaded' || session.evidence.availability === 'unavailable' && !session.evidence.messages.length ? '—' : session.evidence.messages.filter(m => m.role !== 'tool').length} r${session.refCoverage==='unavailable'?'—':session.refs?.length??'—'}${session.refCoverage==='partial'||session.refCoverage==='retained'?'+':''}`,
-                hat_branch: git?.branch ?? git?.branchState ?? 'Git —', hat_add: git?.added === undefined ? '' : `+${git.added}`, hat_del: git?.deleted === undefined ? '' : `-${git.deleted}`,
+                hat_branch: truncate(git?.branch ?? git?.branchState ?? 'Git —',12), hat_add: git?.added === undefined ? '' : `+${number(git.added)}`, hat_del: git?.deleted === undefined ? '' : `-${number(git.deleted)}`,
                 hat_div: `↑${number(git?.ahead)} ↓${number(git?.behind)}`, hat_conflict: git?.conflicts ? `conflicts ${git.conflicts}` : '',
                 hat_last: truncate(session.evidence.messages.filter(m => m.kind !== 'inter-agent' && m.role === 'assistant').at(-1)?.text ?? '', 100),
-                hat_rank: `${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability==='stale'?'cached':resource?.availability ?? 'unavailable', hat_group: ''
+                hat_rank: `${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability==='stale'?'cached':resource?.availability ?? 'unavailable', hat_group: truncate(groupLabel,28),hat_attention:state==='blocked'?'! INPUT REQUIRED':state==='done'?'✓ READY TO REVIEW':state==='idle'?'○ WAITING FOR YOU':''
             };
             for (const key of keys)
                 tokens[key] = sanitize(tokens[key]).replace(/[\r\n\t]/g, ' ');
@@ -90,7 +103,7 @@ export class NativePublisher {
                 const liveForeign = Object.keys(live.tokens ?? {}).filter(k => !keys.includes(k)).length;
                 if (liveForeign + keys.length > 32)
                     throw new Error('Shared token budget changed before publication');
-                await this.rpc.call('pane.report_metadata', { pane_id: pane.pane_id, source, tokens, ttl_ms: 15000, seq: ++this.seq });
+                await this.rpc.call('pane.report_metadata', { pane_id: pane.pane_id, source, tokens,display_agent:tokens.hat_line, ttl_ms: 15000, seq: ++this.seq });
                 this.sent.set(pane.pane_id, { text, at: now, terminal: pane.terminal_id });
             }
             catch (error) {

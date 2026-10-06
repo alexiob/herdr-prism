@@ -37,8 +37,8 @@ test('native ancestor summary counts grandchildren through transcript-only child
  const child:any={...root,key:'child',children:['grandchild'],attachment:undefined};const grandchild:any={...root,key:'grandchild',children:[],attachment:undefined};
  await publisher.publish([root],1000,[root,child,grandchild]);assert.match(calls.find(c=>c.method==='pane.report_metadata').params.tokens.hat_counts,/a2/);
 });
-test('compact native resources state readable agent counts and omit unreported goal',async()=>{
+test('compact native resources leave descendant counts in the count token and omit unreported goal',async()=>{
  let tokens:any;const publisher=new native.NativePublisher({call:async(method:string,params:any)=>{if(method==='pane.get')return{pane:{terminal_id:'t',tokens:{}}};if(method==='pane.report_metadata')tokens=params.tokens;return{};}});
  const root:any={key:'x',depth:0,children:['child'],evidence:{id:'x',provider:'pi',messages:[],tools:[],usage:[],goals:[]},attachment:{pane_id:'p',terminal_id:'t'},resource:{availability:'stale',processes:[],memoryBytes:'1048576',cpuPercent:12,memoryLabel:'RSS sum'}};
- await publisher.publish([root],1000,[root,{...root,key:'child',children:[],attachment:undefined}]);assert.equal(tokens.hat_goal,'');assert.match(tokens.hat_load,/1 agent/);assert.match(tokens.hat_fresh,/cached/);root.evidence.task='Review sampler';await publisher.publish([root],7000);assert.match(tokens.hat_goal,/Task: Review sampler/);
+ await publisher.publish([root],1000,[root,{...root,key:'child',children:[],attachment:undefined}]);assert.equal(tokens.hat_goal,'');assert.match(tokens.hat_counts,/a1/);assert.equal(tokens.hat_load,'~ CPU 12%  RSS 1MB');assert.match(tokens.hat_fresh,/cached/);root.evidence.task='Review sampler';await publisher.publish([root],7000);assert.match(tokens.hat_goal,/Task: Review sampler/);
 });
