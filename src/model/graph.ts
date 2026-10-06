@@ -1,7 +1,7 @@
 import type { DashboardSession, Forest, SessionEvidence } from './types.ts';
 
 export function sessionKey(provider: string, id: string, host = ''): string { return `${host ? host + ':' : ''}${provider}:${id}`; }
-export function buildForest(sessions: SessionEvidence[]): Forest {
+export function buildForest(sessions: SessionEvidence[], nativeOrder?: ReadonlyMap<string,number>): Forest {
   const nodes = new Map<string,DashboardSession>();
   const diagnostics: string[] = [];
   for (const evidence of sessions) {
@@ -36,5 +36,18 @@ export function buildForest(sessions: SessionEvidence[]): Forest {
   const order: DashboardSession[] = [];
   const stack=[...nodes.values()].filter(node=>!node.parentKey).reverse().map(node=>({node,depth:0}));
   while(stack.length){const{node,depth}=stack.pop()!;node.depth=depth;order.push(node);for(let i=node.children.length-1;i>=0;i--)stack.push({node:nodes.get(node.children[i])!,depth:depth+1});}
-  return { nodes, order, diagnostics };
+  let ordered=order;
+  if(nativeOrder?.size){
+    // Move whole root subtrees; explicit parentage and sibling discovery stay intact.
+    // A transcript-only root follows its earliest attached descendant. Historical
+    // trees without live attachments remain in stable discovery order at the end.
+    const groups:{nodes:DashboardSession[];rank:number;rootAttached:boolean}[]=[];
+    for(const node of order){
+      if(node.depth===0)groups.push({nodes:[],rank:nativeOrder.get(node.key)??Number.MAX_SAFE_INTEGER,rootAttached:nativeOrder.has(node.key)});
+      const group=groups.at(-1)!;group.nodes.push(node);
+      if(!group.rootAttached)group.rank=Math.min(group.rank,nativeOrder.get(node.key)??Number.MAX_SAFE_INTEGER);
+    }
+    groups.sort((a,b)=>a.rank-b.rank);ordered=groups.flatMap(group=>group.nodes);
+  }
+  return { nodes, order:ordered, diagnostics };
 }

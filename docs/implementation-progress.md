@@ -300,6 +300,38 @@ Windows update and do not certify its Windows behavior. One incoming Windows
 documentation heading's legacy-encoded dash was normalized to UTF-8 with its
 text preserved.
 
+## Native root ordering correction — 2026-10-06
+
+The collector previously let provider inventory insertion order determine root
+presentation. It now records the native snapshot order independently, and the
+forest moves entire root subtrees according to each root's first attachment.
+The pinned Herdr 0.9.3 snapshot implementation supplies workspace/tab/pane order.
+Descendant discovery order and explicit relationships are preserved. A root
+without its own pane uses its earliest attached descendant; historical trees
+without attachments remain stable after the live trees.
+
+The regression reproduced B/A roots from B/A provider inventory despite an A/B
+host snapshot. It now asserts A/B native publication ranks, changes only the
+snapshot order to B/A, and verifies changed ranks with the same selected key,
+terminal and explicit local goal. Publication uses the production publisher
+against controlled RPC, rather than claiming native client pixels. Graph tests
+also cover child order, roots represented only by an attached child, historical
+roots and a 10,000-node chain under native ordering.
+
+Typecheck/build passed. Strict macOS tests passed with 265 total, 256 passed,
+nine platform skips and zero failures. Strict Linux arm64 Node 24 Podman tests
+passed with 265 total, 255 passed, ten platform skips and zero failures, using
+the checksummed Linux helper and `--init`. Logs:
+`/private/tmp/prism-native-order-strict-macos.log` and
+`/private/tmp/prism-native-order-strict-linux-arm64.log`.
+The rebuilt macOS package at `artifacts/release-prism-native-order-macos/` passed
+all ten existing live interaction and ownership gates. Its proof is
+`artifacts/prism-native-order-live-macos/features.json`. Those gates use actual
+isolated Herdr but do not exercise native host rearrangement or client pixels;
+the direct collector/publisher regression establishes this ordering correction.
+The disposable Linux test container was removed. Windows-specific implementation
+and validation remain with the other agent.
+
 ## Performance evidence
 
 `scripts/profile-host.mjs` now profiles 50 declared fixture sessions, 500 real

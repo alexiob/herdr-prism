@@ -5,8 +5,8 @@ Original read-only audit: 2026-10-06 at source `47e7a43`, against `docs/design/h
 Subsequent remote amendment: the user chose per-server Prism installation and
 kept exact client visibility as an upstream Herdr API dependency. See
 [remote support](remote.md) and [the host contract](remote-visibility-api.md).
-Host-prefixed native ranks prevent cross-machine ordinal interleaving; they do
-not resolve the per-server root-order finding below. Zoom-hidden panes now have
+Host-prefixed native ranks prevent cross-machine ordinal interleaving. The
+per-server root-order correction is recorded below. Zoom-hidden panes now have
 a targeted pause regression check. The findings below remain anchored to the
 audited revision rather than certify later source changes.
 
@@ -20,12 +20,6 @@ Already demonstrated by that advanced gate: native metadata readback, right plac
 
 The following are source-backed findings, not failures reproduced on a native client during this audit. Priority indicates acceptance impact rather than security severity.
 
-### P2 — Native root ordering does not implement the specified host order
-
-The design requires lineage roots ordered by existing workspace/tab/pane order (design line 137). `src/runtime/collector.ts:167` seeds `known` from provider inventory, then lines 170–184 update existing keys in snapshot order. Updating a `Map` entry does not move it. `src/model/graph.ts:35`–38 preserves that insertion order in roots and children; `src/native/publisher.ts:71` publishes sequential ranks from the resulting presentation. Consequently, already indexed roots follow provider discovery order, even when the native host order differs or is rearranged. This is not a claim that every scan randomly shuffles roots.
-
-Acceptance proof needed: initialize provider inventory in B/A order and a native snapshot in A/B order, assert native ranks A/B; change only host workspace/tab/pane order, then confirm ranks reconcile without changing selection identity. The current native tests cover publication safety, TTL and counts, not this disagreement case.
-
 ### P2 — Native numerical badges are never implemented
 
 `src/native/publisher.ts:71` always writes `hat_index: ''`. The safe omission for ambiguous multi-machine/competing projections is correct, but it also omits indices in the single-server configuration for which design lines 327–329 promise reconciled badges. Right-dashboard numeric navigation is implemented separately and does not satisfy this native badge requirement.
@@ -37,6 +31,26 @@ Acceptance proof needed: either explicitly narrow the approved native requiremen
 `src/providers/index.ts:26` defaults to 200 retained messages; merged sessions are bounded at line 90. `src/runtime/collector.ts:252` rebuilds all references from that retained array on content change. Unlike To-do recovery immediately above it, there is no historical reference reducer/replay. A reference that falls outside the hot window therefore disappears even though its transcript/source remains available through message paging. Earlier edit/source evidence can disappear as well. `src/tui/screen.ts` renders the Refs list without identifying that coverage restriction; native `rN` also looks like a full count.
 
 The design's latest-mention grouping and retained earlier provenance (line 155) are correctly implemented inside the supplied window, but session-wide coverage is not. Acceptance proof needed: a reference and explicit edit in the first messages followed by more than 200 unrelated messages; verify retained reference/source semantics, or an explicit limited-history label and recovery behavior. Existing extraction tests do not establish this case.
+
+## Resolved native root ordering finding — 2026-10-06
+
+The collector records canonical native attachment order separately from provider
+discovery. Herdr 0.9.3's
+[agent snapshot implementation](https://github.com/herdrdev/herdr/blob/v0.9.3/src/app/agents.rs)
+enumerates workspaces, tabs and layout panes in that order. `buildForest` now
+orders whole root subtrees by the root's first attachment, keeping explicit
+parent edges and descendant discovery order intact. A root without its own pane
+uses its earliest attached descendant; trees with no live attachments remain
+stable after the live trees.
+
+The collector regression supplies B/A provider inventory and A/B host order,
+asserts A/B production-publisher ranks through controlled RPC, then reverses
+only the native order. Ranks change to B/A while the selected session, terminal
+identity and explicit local goal remain unchanged. Graph regressions cover
+cross-order descendants, transcript-only/historical roots, and a 10,000-node
+chain with and without native ordering. These tests reproduced the former B/A
+misordering before the correction. Native client rendering and real host
+rearrangement remain part of the broader live acceptance scenario.
 
 ## Resolved mouse disclosure finding — 2026-10-06
 
