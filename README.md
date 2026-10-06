@@ -313,6 +313,11 @@ Numeric Agents selection preserves the target that was displayed when typing
 began. Selecting an agent stays inside Prism. `f` focuses a live pane; transcript-only
 descendants remain inspectable. Prism numbers are separate from Herdr focus indices.
 
+An unpinned panel opens on an agent in its own tab. Follow watches that tab's
+last focused agent, including session changes while keyboard focus is inside
+Prism. Explicit child/history inspection stays selected until the native focus
+or binding changes. Pinning and Notes editing hold the selected conversation.
+
 Full transcript, refs, To-do, Git and frequent resource updates follow only the
 selected inspector session. Closing the pane or changing its server's active
 workspace/tab pauses that work; other agents retain lightweight inventory and

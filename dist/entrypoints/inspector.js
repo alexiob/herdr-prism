@@ -197,10 +197,7 @@ export async function main(argv = process.argv.slice(2)) {
                     const snapshot = cache.snapshot;
                     if (!snapshot || state.pin || state.processConfirmation || state.notes?.editing || !context.settings.follow)
                         return;
-                    const focused = snapshot.agents.find(a => a.pane_id === snapshot.focused_pane_id);
-                    if (!focused || focused.tab_id !== tabId)
-                        return;
-                    const selectedKey = followSelection.observe(snapshot, data, state.pin);
+                    const selectedKey = followSelection.observeLocal(snapshot, data, tabId, state.pin);
                     if (selectedKey) {
                         await notes?.end();
                         state.selectedKey = selectedKey;

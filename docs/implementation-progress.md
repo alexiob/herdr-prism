@@ -748,3 +748,29 @@ conflict/recovery passed on both systems. Proofs are locally retained under
 appearance and unavailable upstream viewer/disconnect provenance are not certified;
 Windows platform-specific work remains owned by the other machine, with shared
 changes checked by publication CI.
+
+
+## 2026-10-06 — inspector-focus follow and publication checks
+
+A later shared-daemon SessionStart overwrote the explicit LocAI repair again.
+The cross-project guard refused the new binding; however, with keyboard focus
+inside the inspector, follow did not notice that its previous conversation had
+become detached history. Local follow now remembers the last focused native
+terminal in its own tab and observes its binding while the inspector has focus.
+A changed host reference or quarantine key follows once; unchanged polls preserve
+explicit child/history inspection. Pinning, process confirmation and Notes editing
+continue to hold selection. This does not reattach the previous thread as current:
+unchanged TUI PID/terminal identity cannot prove a thread after `/resume` or `/new`.
+
+Publication CI exposed inherited Windows ACLs in two new test directories and an
+immediate Linux process-exit assertion after the collector's receipt disappeared.
+Fixtures now use the existing private-directory helper and wait for actual process
+exit with a bounded timeout. Production ACL checks are unchanged. The isolated
+Linux arm64 Node22 independent-panel/install/remove/server-loss test passes, with
+local proof in `artifacts/prism-linux22-panels/panels.json`.
+
+Final follow review reproduced an asynchronous focus/data race and confirmed its
+regression fails before the fix. The helper remembers native focus before waiting
+for its exact attachment, but advances the selection identity only after data
+resolves. macOS full suite passes 389 tests (366 passed, 23 skipped), plus the
+subsequent final focused binding/cancellation/follow suite passes 13/13.

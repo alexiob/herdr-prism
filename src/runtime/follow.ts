@@ -9,7 +9,21 @@ export function localSelection(data:DashboardData,tabId:unknown,snapshot?:HerdrS
 /** Follow genuine native focus/occupant changes; leave an inspected child alone on refresh. */
 export class FollowSelection {
     private identity?: string;
-    reset() { this.identity = undefined; }
+    private followedTerminal?: string;
+    reset() { this.identity = undefined; this.followedTerminal=undefined; }
+    /** Inspector focus must not hide a change to its last focused native occupant. */
+    observeLocal(snapshot:HerdrSnapshot,data:DashboardData,tabId:unknown,pinned=false):string|undefined {
+        if(pinned||snapshot.focused_tab_id&&snapshot.focused_tab_id!==tabId)return;
+        const focused=snapshot.agents.find(a=>a.pane_id===snapshot.focused_pane_id);
+        if(focused&&focused.tab_id!==tabId)return;
+        if(focused)this.followedTerminal=focused.terminal_id;
+        const localKey=localSelection(data,tabId,snapshot);
+        const local=data.sessions.find(s=>s.key===localKey);
+        const target=focused??snapshot.agents.find(a=>a.terminal_id===this.followedTerminal&&a.tab_id===tabId)
+            ??snapshot.agents.find(a=>a.tab_id===tabId&&(local?.attachments??(local?.attachment?[local.attachment]:[])).some(attachment=>attachment.terminal_id===a.terminal_id));
+        if(!target)return;
+        return this.observe({...snapshot,focused_pane_id:target.pane_id},data,pinned);
+    }
     observe(snapshot: HerdrSnapshot, data: DashboardData, pinned = false): string | undefined {
         if (pinned)
             return;
@@ -22,6 +36,7 @@ export class FollowSelection {
         const identity = JSON.stringify([focused.terminal_id, focused.agent, focused.agent_session?.kind, focused.agent_session?.value,selected.key]);
         if(identity===this.identity)return;
         this.identity = identity;
+        this.followedTerminal=focused.terminal_id;
         return selected.key;
     }
 }

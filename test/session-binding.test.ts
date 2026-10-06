@@ -1,13 +1,14 @@
+import {freshPrivateDirectory} from './helpers/private-dir.ts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,rm,symlink} from 'node:fs/promises';
+import {mkdir,writeFile,rm,symlink} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {Collector} from '../src/runtime/collector.ts';
 import {ProviderIndex} from '../src/providers/index.ts';
 
 test('Codex cross-project hook reports never hydrate or attach the other transcript',async t=>{
- const dir=await mkdtemp(path.join(os.tmpdir(),'prism-binding-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'prism-binding-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const left=path.join(dir,'locai'),right=path.join(dir,'prism'),home=path.join(dir,'codex');
  await mkdir(left);await mkdir(right);await mkdir(path.join(home,'sessions'),{recursive:true});
  await writeFile(path.join(home,'sessions','wrong.jsonl'),JSON.stringify({type:'session_meta',payload:{id:'wrong',cwd:right}})+'\n'+JSON.stringify({type:'response_item',payload:{type:'message',role:'assistant',content:[{type:'output_text',text:'Wrong project private message'}]}})+'\n');

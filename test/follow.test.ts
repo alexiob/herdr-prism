@@ -34,3 +34,29 @@ test('detail collection pauses for a closed pane or another displayed tab/worksp
  assert.equal(inspectorVisible(zoomed,'owner'),false,'a panel hidden by zoom is not displayed');
  assert.equal(inspectorVisible({...zoomed,layouts:[{tab_id:'tab',zoomed:true,focused_pane_id:'panel'}]},'owner'),true);
 });
+
+test('local follow watches the agent binding while keyboard focus is inside its inspector',()=>{
+ const tracker=new FollowSelection(),agent:any={pane_id:'agent',terminal_id:'terminal',tab_id:'local',agent:'codex',agent_session:{kind:'id',value:'original'}},other:any={pane_id:'other',terminal_id:'elsewhere',tab_id:'other-tab',agent:'codex',agent_session:{kind:'id',value:'foreign'}};
+ const snapshot:any={agents:[other,agent],focused_pane_id:'panel',focused_tab_id:'local'},data:any={sessions:[{key:'codex:foreign',attachment:other},{key:'codex:original',attachment:agent}]};
+ assert.equal(tracker.observeLocal(snapshot,data,'local'),'codex:original');
+ assert.equal(tracker.observeLocal(snapshot,data,'local'),undefined,'unchanged polling preserves explicit child/history inspection');
+ agent.agent_session.value='misreported';data.sessions[1].key='codex:pane-terminal';
+ assert.equal(tracker.observeLocal(snapshot,data,'local'),'codex:pane-terminal','quarantined current binding replaces detached historical selection even with panel focus');
+ assert.equal(tracker.observeLocal(snapshot,data,'local'),undefined);
+ snapshot.focused_tab_id='other-tab';snapshot.focused_pane_id='other';
+ assert.equal(tracker.observeLocal(snapshot,data,'local'),undefined,'another tab never controls this panel');
+});
+test('local follow retains the last focused agent when a tab contains multiple agents',()=>{
+ const tracker=new FollowSelection(),a:any={pane_id:'a',terminal_id:'a',tab_id:'tab',agent:'codex'},b:any={pane_id:'b',terminal_id:'b',tab_id:'tab',agent:'claude'},snapshot:any={agents:[a,b],focused_pane_id:'b',focused_tab_id:'tab'},data:any={sessions:[{key:'a',attachment:a},{key:'b',attachment:b}]};
+ assert.equal(tracker.observeLocal(snapshot,data,'tab'),'b');snapshot.focused_pane_id='panel';assert.equal(tracker.observeLocal(snapshot,data,'tab'),undefined);
+ data.sessions[1].key='new-b';assert.equal(tracker.observeLocal(snapshot,data,'tab'),'new-b');assert.equal(tracker.observeLocal(snapshot,data,'tab',true),undefined);
+});
+
+test('local follow remembers native focus even before the new binding reaches collector data',()=>{
+ const tracker=new FollowSelection(),a:any={pane_id:'a',terminal_id:'a',tab_id:'tab',agent:'codex'},b:any={pane_id:'b',terminal_id:'b',tab_id:'tab',agent:'codex',agent_session:{kind:'id',value:'old-b'}};
+ const snapshot:any={agents:[a,b],focused_pane_id:'a',focused_tab_id:'tab'},data:any={sessions:[{key:'a',attachment:a},{key:'old-b',attachment:structuredClone(b)}]};
+ assert.equal(tracker.observeLocal(snapshot,data,'tab'),'a');snapshot.focused_pane_id='b';b.agent_session.value='new-b';
+ assert.equal(tracker.observeLocal(snapshot,data,'tab'),undefined);
+ snapshot.focused_pane_id='panel';data.sessions[1]={key:'new-b',attachment:structuredClone(b)};
+ assert.equal(tracker.observeLocal(snapshot,data,'tab'),'new-b');assert.equal(tracker.observeLocal(snapshot,data,'tab'),undefined);
+});
