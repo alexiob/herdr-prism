@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "platform": "win32",
+  "arch": "x64",
+  "filename": "hat-sampler.exe",
+  "sha256": "606d61f8aa935e633638ccde01e8fa90ddc14350774ca2798e84ae6eeb0bd82c",
+  "target": "x86_64-pc-windows-msvc",
+  "distribution": {
+    "signature": "unsigned-development",
+    "crt": "static-msvc",
+    "systemDependenciesVerified": true
+  }
+}

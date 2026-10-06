@@ -34,6 +34,9 @@ export async function verifyHelperArtifact(path, platform = process.platform, ar
         throw new Error('Sampler checksum mismatch');
 }
 export class NativeSampler {
+    // Windows Rust SystemTime and Node Date.now can have different wall-clock
+    // precision. Record receipt on Node's timeline so history cannot discard a
+    // fresh sample as future-dated; helper monotonic/CPU/identity counters stay exact.
     child;
     buffer = '';
     closed = false;
@@ -69,7 +72,8 @@ export class NativeSampler {
             const line = this.buffer.slice(0, pos);
             this.buffer = this.buffer.slice(pos + 1);
             try {
-                const batch = validateBatch(JSON.parse(line));
+                const wireBatch = validateBatch(JSON.parse(line));
+                const batch = process.platform === 'win32' ? { ...wireBatch, sampledAt: Date.now() } : wireBatch;
                 if (!this.pending) {
                     this.fail(new Error('Unsolicited sampler response'));
                     child.kill();

@@ -1,6 +1,7 @@
 # Resume Windows validation
 
-Status: **Windows work is deferred to a Windows machine at the user's request.**
+Status: **Windows work resumed locally; see [current Windows evidence](windows-validation.md).**
+The recorded runner failures below are the historical handoff baseline.
 The final macOS/Linux pass is complete; no further Windows fixes or runner retries
 were attempted after the final failing run on 2026-10-06.
 

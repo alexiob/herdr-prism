@@ -88,10 +88,9 @@ jobs:
       - name: Actual isolated live Herdr install, restart and complete removal
         run: node scripts/live-herdr-test.mjs --release artifacts/release --proof artifacts/live-herdr-proof
       - name: Actual isolated live interaction and ownership acceptance
-        if: matrix.target.platform != 'win32'
         run: node scripts/live-features-test.mjs --release artifacts/release --proof artifacts/live-features-proof
-      - name: Pinned ordinary GitHub install and lifecycle on Linux
-        if: github.event_name == 'push' && matrix.target.platform == 'linux' && matrix.node == '24'
+      - name: Pinned ordinary GitHub install and lifecycle on Linux and Windows
+        if: github.event_name == 'push' && (matrix.target.platform == 'linux' || matrix.target.platform == 'win32') && matrix.node == '24'
         run: node scripts/github-herdr-test.mjs --repo "${{ github.repository }}" --ref "${{ github.sha }}" --expected-commit "${{ github.sha }}" --proof artifacts/github-herdr-proof
       - name: Check install without development dependencies
         run: node artifacts/release/scripts/check-install.mjs --root artifacts/release

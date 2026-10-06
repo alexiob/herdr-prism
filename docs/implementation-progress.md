@@ -256,3 +256,33 @@ Full-access local testing and remote CI are available. No sandbox restriction is
 an outstanding blocker. The original implementation goal remains active for
 remaining acceptance; Windows work is explicitly deferred until user-requested
 resumption on a Windows machine.
+
+## Windows local resumption and merged delivery — 2026-10-06
+
+Windows fixes `077736a` were merged with remote-support `f07281f` as `9c100f6`
+and pushed. The other machine's shared implementation and evidence were preserved.
+See [Windows validation](windows-validation.md) for the reproduced failures,
+regressions, exact artifact and execution boundaries.
+
+Actual Windows 11 x64 Node 22.23.3/24.21.0 passed live Herdr 0.9.3 installation,
+authenticated readiness, right placement/native focus preservation, collector
+restart and complete managed removal. Both also passed advanced follow/pin,
+hidden pause/resume, actual production-publisher TTL, stale occupant guards,
+source-safe coexistence and conflict-preserving removal/recovery. Five consecutive
+Node 22 lifecycle repetitions passed after the empty-admission-lease correction.
+
+Before the final native clock correction, the merged Node 24 strict suite passed
+258 tests, zero failed and two Linux-only skips. A merged Node 22 run passed 257
+but exposed an intermittent ConPTY quit hang; subsequent independent reproductions
+confirmed it. Native Win32/Rust-to-Node wall-clock skew was also exposed in both
+Windows CI jobs in run 37458785002. The new receiving-clock regression reproduced
+the issue, passed after correction, and the real Node 22 sampler/protocol acceptance
+passed all six tests. CPU counters, exact identities and working-set values were
+not changed. Final ConPTY investigation and standard GitHub installation remain
+separate acceptance work, rather than being inferred from these passing checks.
+
+The executed Rust 1.90.0 static-MSVCRT x64 helper is now included under
+`bin/win32-x64`, with exact SHA-256 and matching toolchain copyright/license texts.
+Herdr 0.9.3 exists as an official Windows x64 release and was checksum-verified
+locally. This machine's globally installed 0.9.2 does not meet Prism's declared
+minimum; validation uses the isolated pinned 0.9.3 executable.

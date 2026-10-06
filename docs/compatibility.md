@@ -2,9 +2,9 @@
 
 Updated 2026-10-06. The first complete release requires actual macOS, Linux and
 Windows execution plus live Herdr acceptance. Those gates are **not yet complete**.
-The latest actual-platform CI run passed all eight macOS/Linux jobs. Windows
-Node 22/24 still failed the strict suite, and further Windows work is deferred
-to a Windows machine at the user's request. See the [handoff](windows-handoff.md)
+The original eight macOS/Linux CI jobs passed. Windows x64 work has now resumed
+on an actual Windows machine with Node 22/24 live and strict evidence; see
+[Windows validation](windows-validation.md) and the [handoff](windows-handoff.md)
 and [progress ledger](implementation-progress.md).
 
 ## Platform matrix
@@ -15,7 +15,7 @@ and [progress ledger](implementation-progress.md).
 | macOS x64 | Rust libproc/sysctl helper | `bin/darwin-x64/hat-sampler` | Physical Intel CI passed on Node 22/24, including strict native/socket tests, PTY, distribution and live lifecycle. |
 | Linux x64 | TypeScript procfs | Not required | Actual CI passed on Node 22/24 with strict procfs/socket tests, PTY, distribution and live lifecycle. Node 24 also passed ordinary GitHub installation. |
 | Linux arm64 | TypeScript procfs | Not required | Actual CI passed on Node 22/24 with strict procfs/socket tests, PTY, distribution and live lifecycle. Node 24 also passed ordinary GitHub installation; earlier Podman acceptance passed. |
-| Windows x64 | Rust Win32 working-set/process helper | Pending inclusion after acceptance | Final Node 22/24 CI passed native build/unit tests and typecheck, then failed 8/7 strict tests. Existing-directory protection, mailbox/launch behavior and one CPU-history observation remain unresolved; work deferred to a Windows machine. |
+| Windows x64 | Rust Win32 working-set/process helper | `bin/win32-x64/hat-sampler.exe` plus checksum and Rust 1.90.0 notices | Actual Windows 11 x64 Node 22.23.3/24.21.0 native/socket/ConPTY, live install/restart/complete removal and advanced interactions passed locally. See the Windows evidence ledger for exact revisions and remaining gates. |
 
 Windows arm64 and other platforms are not release targets; the installation
 checker rejects them rather than selecting a mismatched helper. Host platform
@@ -76,7 +76,8 @@ script or unsupported terminal cannot silently pass the gate. CI artifacts are
 archived with executable permissions retained. There is no automatic publishing.
 Unix jobs additionally require advanced live follow/pin, hidden pause/resume,
 metadata TTL, stale occupant guards, close/restart and ownership-conflict checks.
-The Windows equivalent still needs its separate portable TTL fixture.
+Windows now runs the advanced gate too, using a portable production-publisher
+TTL fixture with actual host-clock expiry and explicit restart.
 
 Action pins were checked against the official repositories' tag references on
 2026-10-06: [checkout v5.0.0](https://github.com/actions/checkout/releases/tag/v5.0.0),

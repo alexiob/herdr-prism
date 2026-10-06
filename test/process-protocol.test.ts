@@ -8,6 +8,13 @@ import {once} from 'node:events';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createSampler} from '../src/process/sampler.ts';
 const helper=resolve(process.env.HAT_NATIVE_HELPER??'native/sampler/target/debug/hat-sampler');const hasHelper=await access(helper).then(()=>true,()=>false);
+
+test('Windows native sample history uses the receiving Node wall clock while preserving measured monotonic and CPU counters',{skip:process.platform!=='win32'},async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'hat-helper-clock-'));t.after(()=>rm(dir,{recursive:true,force:true}));const file=join(dir,'helper.cjs');
+ await writeFile(file,"require('node:readline').createInterface({input:process.stdin}).on('line',()=>process.stdout.write(JSON.stringify({version:1,platform:'windows',bootId:'clock-fixture',sampledAt:Date.now()+1000,monotonicNs:'9007199254740993123',processes:[{pid:12,name:'worker',cpuNs:'123456789',rssBytes:'12288',startTime:'9007199254740993124'}]})+'\\n'));\n");
+ const sampler=createSampler({platform:'win32',helperPath:process.execPath,helperArgs:[file]});
+ try{const before=Date.now(),batch=await sampler.sample();assert.ok(batch.sampledAt>=before&&batch.sampledAt<=Date.now(),'helper clock precision must not place a received measurement in Node history future');assert.equal(batch.monotonicNs,'9007199254740993123');assert.equal(batch.processes[0]?.cpuNs,'123456789');}finally{await sampler.close();}
+});
 test('JSONL helper sample requests are coalesced and fragmented wide data validates',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'hat-helper-'));const file=join(dir,'helper with spaces.cjs');
  try {await writeFile(file,`#!${process.execPath}\nconst rl=require('node:readline').createInterface({input:process.stdin});let count=0;rl.on('line',()=>{const b={version:1,platform:'darwin',bootId:'real-fixture',monotonicNs:'1',sampledAt:1,processes:[{pid:12,name:'worker',cpuNs:'9007199254740993123',rssBytes:'12288',startTime:'9007199254740993124'}]};const text=JSON.stringify(b)+'\\n';process.stdout.write(text.slice(0,30));setTimeout(()=>process.stdout.write(text.slice(30)),10);});rl.on('close',()=>process.exit(0));\n`);await chmod(file,0o700);
