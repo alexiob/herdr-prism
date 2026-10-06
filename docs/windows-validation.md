@@ -37,6 +37,47 @@ from the merged source.
   history now dates receipt on Node's own timeline. Exact helper monotonic,
   process identity, memory and CPU counters are unchanged. A future-clock
   boundary regression fails before this correction and passes afterward.
+- ConPTY quit could restore the screen but leave a paused Windows TTY read
+  alive. The interactive pane now restores raw mode, pauses and closes its owned
+  Windows input stream. Unix input handling is unchanged. Thirty consecutive
+  real ConPTY smoke runs passed; the regression also requires clean exit,
+  restored raw mode/screen and output EOF within the original deadlines.
+- A cold CI ACL worker timed out during ordinary GitHub activation. Requests
+  now wait for a fixed readiness marker after PowerShell initializes its UTF-8
+  reader. A controlled delayed-reader regression failed before the handshake
+  and passes afterward. Startup remains inside the original 15-second deadline;
+  paths remain literal JSON data and failures still close the owned worker.
+  The handshake alone did not resolve the Node 24 CI activation timeout in
+  [run 37465418338](https://github.com/alexiob/herdr-prism/actions/runs/37465418338):
+  nine jobs passed, including Windows Node 22 and all eight Unix jobs; Windows
+  Node 24 passed strict/ConPTY/live/advanced gates before this failure. The
+  follow-up uses explicit UTF-8 readers/writers on redirected standard pipes,
+  avoiding process-wide console encoding changes. Timeout diagnostics distinguish
+  reader startup from response wait. Final runner evidence is recorded below;
+  the historical failure is not treated as a passing run.
+  Receipt diagnostics in run 37469353206 proved the request reached the worker
+  and stalled inside inspection. Production now uses direct .NET Framework
+  filesystem-security and typed JSON APIs, eliminating cmdlet/module pipelines.
+  All strict policy fields and Node validation remain unchanged. Both Windows
+  jobs subsequently passed in run 37472767803, including Node 24 ordinary
+  GitHub install/reinstall/restart/disable/uninstall acceptance.
+- CI also exposed a temporary Windows delete-sharing lock during lifecycle
+  acknowledgement replacement. A real `FileShare.Read` fixture reproduced the
+  same `EPERM`. Windows replacement now makes at most five attempts with
+  375 ms total backoff, preserving the original file and rechecking the caller's
+  authorization before every attempt. Other errors and Unix behavior are
+  unchanged. The actual-lock regression passes with strict final ACLs.
+- Windows lifecycle acceptance now captures each owned collector's exact native
+  birth identity before restart/removal. A different readable birth can prove a
+  numeric PID was recycled. Missing sampler records still require `ESRCH`;
+  unreadable identities cannot certify cleanup. PID recycling is a possible
+  cause of the earlier numeric-PID assertion, not an established diagnosis.
+- A local Windows Node 22 run also reproduced `ENOENT` when an owner released
+  the admission file between `EEXIST` and inspection. Windows admission retries
+  only the exact missing lease path through guarded `create:false` acquisition
+  inside the original deadline. Missing state directories still fail immediately;
+  Unix code paths are unchanged. The same release race appeared in a macOS
+  arm64 Node 22 CI job; its implementation remains with the other machine.
 
 ## Executed evidence
 
@@ -46,6 +87,13 @@ source added remote regressions: Node 24 passed 258 with zero failures and two
 skips. One merged Node 22 run exposed an intermittent ConPTY quit hang, which
 was also reproduced independently; retain that failure when evaluating later
 successful runs. Final results are recorded in the progress ledger.
+
+After both corrections, Node 22 and 24 each passed 260 tests, zero failures and
+two Linux-only skips, with native sampler, named pipes and ConPTY required.
+Both also passed staged live lifecycle and advanced feature acceptance. Actual
+host-clock metadata expiry was 15,063 ms and 15,010 ms respectively. These runs
+preceded merging the other machine's mouse-disclosure and pane-order commits;
+the final delivery evidence records the subsequent merged verification.
 
 The merged staged release passed actual isolated live installation, authenticated
 readiness, right placement and preserved native focus, explicit collector
@@ -81,11 +129,42 @@ delayed imports, compiled release integrity and system-only dependencies:
 `KERNEL32.dll`, `ntdll.dll`, `api-ms-win-core-synch-l1-2-0.dll` and
 `bcryptprimitives.dll`. The binary is an unsigned development artifact.
 
-Ordinary GitHub installation results are recorded separately after the packaged
-commit is pushed and tested. Herdr 0.9.3 requires explicit activation, safe
+Final implementation `5e9f4b1a568b444f1b99654aa26b8540103665f1` merges the
+other machine's `7fc637e` reference-history work, including the earlier pane-order
+and mouse-disclosure changes. Its implementation is preserved; three test path
+expectations were made portable. Both Node majors passed the merged 275-test
+suite: 273 passed, zero failed, two Linux-only skips.
+Typecheck/build and the staged distribution checks passed. Both Node majors
+also passed final staged live lifecycle and all advanced feature checks after
+the explicit pipe-reader change.
+
+Ordinary GitHub installation of that exact pushed commit passed on both Node
+22.23.3 and 24.21.0: normal clone and committed-helper preflight, authenticated
+activation, deactivation/reinstall/reactivation, explicit restart with old pane
+cleanup, disable/enable, and ordinary uninstall. Disposable harness cleanup
+completed on both majors. Capability-only durable evidence is
+[windows-2026-10-06.json](evidence/windows-2026-10-06.json); detailed local
+proofs are in `artifacts/windows-delivery-*`, `artifacts/windows-pipe-*` and
+`artifacts/windows-replacement-*`, `artifacts/windows-reference-merged-*` and
+`artifacts/windows-complete-*`.
+
+Herdr 0.9.3 requires explicit activation, safe
 deactivation before reinstall/disable/uninstall, and retains private config/state
 on ordinary uninstall. The authenticated wrapper supplies complete removal.
 
 The isolated harnesses use disposable servers, configurations and synthetic
 provider homes. They do not certify paid provider versions, native sidebar
 pixels/themes, exact multi-client visibility, performance budgets or long soaks.
+
+## Final CI
+
+[Run 37474269213](https://github.com/alexiob/herdr-prism/actions/runs/37474269213)
+passed all ten jobs on implementation `5e9f4b1`: both Windows Node 22/24 jobs
+and all eight macOS/Linux jobs. Windows jobs exercised strict native/socket
+tests, required real ConPTY, helper distribution, live install/restart/complete
+removal and advanced interactions. Windows Node 24 also passed the pinned
+ordinary GitHub lifecycle gate; both majors passed that flow locally.
+
+Historical failures above remain part of the evidence. The final Windows
+admission retry is platform-scoped; macOS/Linux and general feature
+implementation remain with the other machine.

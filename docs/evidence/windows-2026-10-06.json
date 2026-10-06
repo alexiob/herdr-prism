@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "date": "2026-10-06",
+  "platform": "win32-x64",
+  "os": "Windows 11, NT 10.0.26200",
+  "implementationCommit": "5e9f4b1a568b444f1b99654aa26b8540103665f1",
+  "mergedRemoteCommit": "7fc637e",
+  "herdr": {
+    "version": "0.9.3",
+    "protocol": 22,
+    "source": "https://github.com/herdrdev/herdr/releases/download/v0.9.3/herdr-windows-x86_64.zip",
+    "archiveSha256": "c75b1fa49f7a3ba4b8b11789912a6147e4214a3b6fd3556d0f80076c8887d795",
+    "globalInstalledVersionChanged": false
+  },
+  "helper": {
+    "path": "bin/win32-x64/hat-sampler.exe",
+    "sha256": "606d61f8aa935e633638ccde01e8fa90ddc14350774ca2798e84ae6eeb0bd82c",
+    "toolchain": "Rust 1.90.0 x86_64-pc-windows-msvc",
+    "staticMsvcCrt": true,
+    "nativeRustTestsPassed": 6,
+    "matchingRustNoticesPackaged": true,
+    "signed": false,
+    "systemImports": ["KERNEL32.dll", "ntdll.dll", "api-ms-win-core-synch-l1-2-0.dll", "bcryptprimitives.dll"]
+  },
+  "strictSuites": [
+    {"node": "22.23.3", "tests": 275, "passed": 273, "failed": 0, "linuxOnlySkipped": 2},
+    {"node": "24.21.0", "tests": 275, "passed": 273, "failed": 0, "linuxOnlySkipped": 2}
+  ],
+  "requiredCapabilities": ["strict Windows owner and DACL", "named pipes", "native exact identity and CPU", "working set", "helper EOF and parent death", "actual ConPTY keyboard and resize", "raw and screen restoration", "clean process exit and output EOF"],
+  "conptyRepeatedRunsPassed": 30,
+  "stagedLifecycle": {
+    "node22And24PassedAfterWindowsFixes": true,
+    "finalMergedNode22And24Passed": true,
+    "authenticatedReadiness": true,
+    "nativeFocusPreserved": true,
+    "restartClosedOldOwnedPane": true,
+    "collectorsStopped": true,
+    "completeManagedRemoval": true,
+    "configExactlyRestored": true,
+    "originalPanePreserved": true
+  },
+  "advancedFeatures": {
+    "node22And24PassedAfterWindowsFixes": true,
+    "finalMergedNode22And24Passed": true,
+    "followPinHiddenPause": true,
+    "realHostClockMetadataExpiry": true,
+    "foreignMetadataPreserved": true,
+    "staleOccupantAndProjectionSourceGuards": true,
+    "configurationConflictRefusalAndRecovery": true
+  },
+  "ordinaryGithubInstallation": {
+    "commit": "5e9f4b1a568b444f1b99654aa26b8540103665f1",
+    "node22And24Passed": true,
+    "normalCloneAndCommittedHelperPreflight": true,
+    "activateReady": true,
+    "deactivateReinstallReactivateRestart": true,
+    "disableEnable": true,
+    "ordinaryUninstall": true,
+    "configAndStateRetainedByHerdr": true,
+    "disposableHarnessCleanupComplete": true
+  },
+  "ci": {
+    "run": "https://github.com/alexiob/herdr-prism/actions/runs/37474269213",
+    "commit": "5e9f4b1a568b444f1b99654aa26b8540103665f1",
+    "conclusion": "success",
+    "windowsNode22": "success",
+    "windowsNode24": "success",
+    "unixJobsPassed": 8,
+    "historicalSeparateUnixFailure": "Run37472767803 darwin-arm64 Node22: admission.lock disappeared between EEXIST and lstat; Windows retry is deliberately platform-scoped; no Unix implementation changes were made"
+  },
+  "limits": ["Synthetic provider fixtures; no paid provider compatibility claim", "No native sidebar pixel, multi-client visibility, performance budget or long-soak certification", "Ordinary Herdr uninstall retains private config/state; managed removal separately verifies full owned purge"]
+}

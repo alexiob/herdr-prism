@@ -1,9 +1,11 @@
 # Resume Windows validation
 
-Status: **Windows work resumed locally; see [current Windows evidence](windows-validation.md).**
+Status: **Windows fixes and helper are pushed; Node 22/24 local acceptance and
+all ten final CI jobs pass.
+See [current Windows evidence](windows-validation.md).**
 The recorded runner failures below are the historical handoff baseline.
-The final macOS/Linux pass is complete; no further Windows fixes or runner retries
-were attempted after the final failing run on 2026-10-06.
+The paragraphs below describe the original handoff, before the resumed Windows
+fixes, local validation and runner retries on 2026-10-06.
 
 Repository: [alexiob/herdr-prism](https://github.com/alexiob/herdr-prism).
 Last Windows-tested implementation commit: `376d3a6b1453275485c6f52f34111d791612b6e9`.

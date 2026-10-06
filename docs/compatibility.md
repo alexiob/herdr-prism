@@ -1,9 +1,12 @@
 # Compatibility and validation status
 
-Updated 2026-10-06. The first complete release requires actual macOS, Linux and
-Windows execution plus live Herdr acceptance. Those gates are **not yet complete**.
-The original eight macOS/Linux CI jobs passed. Windows x64 work has now resumed
-on an actual Windows machine with Node 22/24 live and strict evidence; see
+Updated 2026-10-06. Automated platform and isolated live Herdr gates pass.
+Broader native-pixel, multi-client, provider and performance acceptance remains
+in progress; these results do not certify the entire design.
+All ten CI jobs passed on Windows delivery implementation `5e9f4b1`, including
+both Windows Node majors and all eight macOS/Linux jobs.
+Windows x64 now has actual Node 22/24 sampler, strict ACL/named-pipe, ConPTY,
+live lifecycle and advanced feature evidence; see
 [Windows validation](windows-validation.md) and the [handoff](windows-handoff.md)
 and [progress ledger](implementation-progress.md).
 
@@ -28,12 +31,12 @@ release provenance. Linux does not require a native runtime helper.
 
 | Component | Supported/tested contract | Limits |
 | --- | --- | --- |
-| Node.js | Minimum 22.13.0; actual CI matrix 22 and 24 | Final eight Unix jobs passed; two Windows jobs failed. Local arm64 development used Node 26.10.0. Release code is compiled ESM, with no runtime npm install. |
+| Node.js | Minimum 22.13.0; actual CI matrix 22 and 24 | Local Windows delivery revision passed 273 tests on each major with zero failures and two Linux-only skips. All ten CI jobs passed on `5e9f4b1`; historical failures remain in the Windows ledger. Release code is compiled ESM, with no runtime npm install. |
 | Herdr | Installed 0.9.3, protocol 22 | Actual ordinary RPC/subscription and macOS live install/restart/remove exercised. Ordinary calls use separate connections; event subscriptions have dedicated streams. Complete native renderer and cross-platform lifecycle acceptance remain required. |
 | Native sidebar | Real agent rows, ≤16 rows/tokens per row; ≤14 `hat_` keys in default template | No synthetic native nodes or per-field click handlers. Metadata shares the pane's retained-key budget. |
 | Native projection | One source-guarded owner | Radar/Pi-tree cannot concurrently own the same layout/projection; inspector-only mode is the fallback. |
 | Git | Explicit argv, porcelain-v2 NUL status and HEAD numstat | No network/fetch. Unborn line totals unavailable; binary/untracked files separate. Inaccessible/timed-out snapshots remain labeled. |
-| Remote sessions | Prism installed on each selected Herdr server; server-local socket, sampler, provider homes and Git | Server/session header, host-scoped ranks and client machine labels. No local PID/path fallback. Exact client-visible heavy-work gating needs a host API; see [remote support](remote.md). Windows hosts remain deferred. |
+| Remote sessions | Prism installed on each selected Herdr server; server-local socket, sampler, provider homes and Git | Server/session header, host-scoped ranks and client machine labels. No local PID/path fallback. Exact client-visible heavy-work gating needs a host API; see [remote support](remote.md). Windows local server lifecycle is validated; Windows SSH-host acceptance remains deferred. |
 
 Native overview dark/light/monochrome layouts have configuration fixtures and
 fallback built-in labels. Native rendering on each actual client/theme still
@@ -94,8 +97,9 @@ with its matching `rust-docs` notices. None of these build tools is installed by
 The platform evidence above applies to source commit
 `376d3a6b1453275485c6f52f34111d791612b6e9` in
 [run 37450329250](https://github.com/alexiob/herdr-prism/actions/runs/37450329250).
-It does not certify later changes. Complete Windows validation and ordinary repository
-installation on every platform before advertising complete platform support. Live
+It does not certify later changes; current Windows evidence is recorded separately
+in [the Windows ledger](windows-validation.md). Ordinary repository installation
+must be validated on every platform before advertising complete platform support. Live
 Herdr acceptance must still verify right placement/follow/pin, multi-client local
 rows, metadata TTL/readback, source-safe coexistence, pane/PID replacement,
 upgrade lifetime, disconnect recovery and reversible unconfigure. The full
@@ -108,5 +112,6 @@ automated suite uses disposable repositories/config/provider homes. A separate,
 user-authorized current-session macOS lifecycle test temporarily installed and
 removed the plugin; it verified exact original configuration restoration and
 preservation of all original panes and the other plugin. It left this plugin
-uninstalled. Windows validation now uses actual GitHub Actions runners, as
-requested; the current failed run is evidence of remaining work.
+uninstalled. Windows validation uses both an actual local Windows x64 machine
+and GitHub Actions runners. Historical runner failures and their corrections
+remain recorded in the Windows ledger.

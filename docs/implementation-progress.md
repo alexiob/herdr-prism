@@ -455,3 +455,54 @@ The executed Rust 1.90.0 static-MSVCRT x64 helper is now included under
 Herdr 0.9.3 exists as an official Windows x64 release and was checksum-verified
 locally. This machine's globally installed 0.9.2 does not meet Prism's declared
 minimum; validation uses the isolated pinned 0.9.3 executable.
+
+## Windows final local delivery — 2026-10-06
+
+Implementation `5e9f4b1a568b444f1b99654aa26b8540103665f1` is pushed and
+merges remote main through `7fc637e`, preserving the other machine's general
+features. ConPTY now closes its owned Windows input after restoring raw mode;
+30 consecutive real smoke runs passed. ACL requests wait for PowerShell reader
+readiness inside the original deadline; the delayed-reader regression failed
+before the correction and passed afterward. Explicit UTF-8 pipe readers/writers
+also replace console-wide encoding changes. Both complete local suites and
+ordinary GitHub lifecycles passed again after this change. Strict ACL ownership and refusal
+checks remain unchanged.
+
+Final merged Node 22.23.3 and 24.21.0 suites each passed 273/275 tests with zero
+failures and two Linux-only skips, requiring native sampler, named pipes and
+actual ConPTY. Typecheck/build, helper SHA/PE/system-import checks and staged
+release checks passed. Post-fix live lifecycle and advanced interaction checks
+passed on both majors; both repeated successfully on the final pipe-reader
+implementation.
+
+Windows atomic replacement also handles temporary delete-sharing reader locks
+with five attempts and 375 ms total backoff, rerunning caller authorization each
+time. The real file-lock regression reproduced CI's EPERM before the correction
+and passes after it. Windows lifecycle evidence captures exact native process
+births; a missing sampler record still requires ESRCH, and unreadable identities
+cannot certify cleanup. Unix behavior is unchanged. These corrections preserve
+the original historical CI failures rather than relabeling them as passes.
+
+Production Windows ACL inspection now uses direct .NET Framework security and
+typed JSON APIs, with the original strict fields, validator and deadlines.
+Both Windows CI jobs passed in run 37472767803, including Node 24 ordinary
+GitHub lifecycle. That run had seven passing Unix jobs; macOS arm64 Node 22
+exposed the exact admission-file release race. A subsequent Windows-only guard
+retries only ENOENT for the exact lease path through create:false acquisition;
+removed state is never recreated. Unix implementation remains with the other
+machine. The remote reference-history implementation is preserved; only three
+Unix-specific test path expectations were made portable.
+
+Ordinary GitHub installation of the exact pushed implementation passed on both
+majors, including authenticated activation, safe reinstall, explicit restart,
+disable/enable and uninstall. Managed removal separately restored exact original
+configuration and purged only owned directories. Herdr's ordinary uninstall
+retains private config/state as documented. Global Herdr 0.9.2 was not replaced;
+tests used the checksum-verified official Windows 0.9.3 release.
+
+See [Windows validation](windows-validation.md) and the capability-only
+[durable evidence](evidence/windows-2026-10-06.json). Cross-platform CI results
+are now complete: [run 37474269213](https://github.com/alexiob/herdr-prism/actions/runs/37474269213)
+passed all ten jobs at `5e9f4b1`, including both Windows majors and all eight
+macOS/Linux jobs. Broader native-pixel, multi-client,
+paid-provider and soak acceptance remains outside this Windows delivery.
