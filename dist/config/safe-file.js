@@ -34,14 +34,22 @@ export function assertWindowsAcl(acl, { strict = false, allowTokenOwner = false 
         throw new Error('Unsafe null DACL');
     if (strict && !acl.protected)
         throw new Error('DACL inheritance is not protected');
-    if (strict && acl.allowSids.some(sid => sid !== acl.userSid))
-        throw new Error('Foreign allow ACL');
+    const foreign = [...new Set(acl.allowSids.filter(sid => sid !== acl.userSid))];
+    if (strict && foreign.length)
+        throw new Error('Foreign allow ACL (residual SIDs: ' + foreign.join(', ') + ')');
 }
-export function windowsAclCommands(path, sid, directory) {
-    if (!validSid(sid))
-        throw new Error('Invalid current user SID');
+export function windowsAclCommands(path, sid, directory, allowSids = []) {
+    if (!validSid(sid) || !Array.isArray(allowSids) || allowSids.some(value => !validSid(value)))
+        throw new Error('Invalid current user or ACL grant SID');
     // /setowner and DACL modification are separate documented icacls modes.
-    return [[path, '/setowner', '*' + sid], [path, '/inheritance:r', '/grant:r', `*${sid}:${directory ? '(OI)(CI)' : ''}F`]];
+    const commands = [[path, '/setowner', '*' + sid], [path, '/inheritance:r', '/grant:r', `*${sid}:${directory ? '(OI)(CI)' : ''}F`]];
+    // Inheritance removal affects only inherited ACEs; /grant:r replaces grants for
+    // this user alone. Fresh objects may also receive foreign explicit default ACEs.
+    // Remove those granted rights only after the caller authorized this exact path.
+    const foreign = [...new Set(allowSids.filter(value => value !== sid))];
+    if (foreign.length)
+        commands.push([path, '/remove:g', ...foreign.map(value => '*' + value)]);
+    return commands;
 }
 export async function readWindowsAcl(path) { const result = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(aclInspection, 'utf16le').toString('base64')], { windowsHide: true, timeout: 15000, maxBuffer: 65536, encoding: 'utf8', env: { ...process.env, HAT_PRIVATE_PATH: path } }); return parseWindowsAcl(result.stdout); }
 async function ownedPath(path, allowTokenOwner = false) { const info = await lstat(path); if (info.isSymbolicLink())
@@ -67,8 +75,8 @@ export async function restrict(path, created = true) {
         const acl = await readWindowsAcl(path);
         assertWindowsAcl(acl, { allowTokenOwner: created });
         if (created) {
-            for (const args of windowsAclCommands(path, acl.userSid, info.isDirectory())) {
-                stage = args[1] === '/setowner' ? 'owner normalization' : 'DACL restriction';
+            for (const args of windowsAclCommands(path, acl.userSid, info.isDirectory(), acl.allowSids)) {
+                stage = args[1] === '/setowner' ? 'owner normalization' : args[1] === '/remove:g' ? 'foreign grant removal' : 'DACL restriction';
                 await exec('icacls.exe', args, { windowsHide: true, timeout: 5000, maxBuffer: 65536 });
             }
         }

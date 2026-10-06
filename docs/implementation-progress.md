@@ -85,9 +85,9 @@ that every later edit has been executed on every platform.
 - Source commit `2655fa4f3000e623e31a044e6f1149b54185e982` is published on `main`.
   Its local strict macOS suite had 237 tests: 236 passed, zero failed and one
   Linux-only skip (`/private/tmp/prism-pre-push-strict-suite.log`).
-- The corrected candidate's fresh strict macOS suite passed 242 of 247 tests,
-  zero failed, with three Windows-only, one Linux-only and one opt-in PTY skip
-  (`/private/tmp/prism-reviewed-strict-suite.log`). Explicit macOS PTY smoke also
+- The last-pass candidate's fresh strict macOS suite passed 245 of 251 tests,
+  zero failed, with four Windows-only, one Linux-only and one opt-in PTY skip
+  (`/private/tmp/prism-last-pass-strict-suite.log`). Explicit macOS PTY smoke also
   passed. Typecheck, compiled build and repository install preflight passed.
   Astra's narrow ACL review findings have regression fixes and were re-reviewed.
 - Actual ten-job GitHub [run 37445486188](https://github.com/alexiob/herdr-prism/actions/runs/37445486188)
@@ -101,6 +101,22 @@ that every later edit has been executed on every platform.
   handles and nonportable fixture paths/stat timestamps. macOS exposed an old
   pane exiting between snapshot and close during restart. Targeted corrections
   and local regressions are implemented; an actual-platform rerun is required.
+- Actual [run 37448167784](https://github.com/alexiob/herdr-prism/actions/runs/37448167784)
+  passed all four macOS jobs and both Linux Node 22 jobs, including the new
+  advanced live gate. Linux Node 24 failed synthetic process detection; Node 24
+  names its main thread `MainThread`. Explicitly naming only the synthetic fixture
+  `pi` passed all ten stages in actual Linux arm64 Node 24 Podman acceptance:
+  `artifacts/linux-node24-fixture-proof/advanced/features.json`.
+- Windows Node 22/24 in that run still failed private ACL verification and a
+  ConPTY passthrough assertion. Focused actual [diagnostics 37449369685](https://github.com/alexiob/herdr-prism/actions/runs/37449369685)
+  showed explicit SYSTEM/Administrators grants surviving inheritance removal.
+  The candidate removes validated foreign grant SIDs only on authorized fresh
+  paths/exact namespaces. Actual console diagnostics passed real TTY/raw mode,
+  keyboard/resize/restoration/EOF/reaping with initialized standard slots.
+  ConPTY can consume alternate-buffer escape bytes; the smoke candidate now
+  checks real saved-screen restoration and measured raw-mode cleanup instead.
+  One final candidate run remains; unresolved Windows work after it is deferred
+  to a Windows machine as requested.
 - The ordinary default-branch macOS GitHub installation passed against exact
   commit `2655fa4f3000e623e31a044e6f1149b54185e982` using Herdr 0.9.3:
   `artifacts/prism-github-install-macos/github.json`. It verified build-hook

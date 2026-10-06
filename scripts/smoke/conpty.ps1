@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -47,9 +48,11 @@ public static class HatConPtySmoke {
  static void Send(IntPtr input,string text){byte[] bytes=Encoding.UTF8.GetBytes(text);uint written;Check(WriteFile(input,bytes,(uint)bytes.Length,out written,IntPtr.Zero),"ConPTY input");if(written!=bytes.Length)throw new Exception("ConPTY partial input write");}
  static void Expect(Capture capture,Func<string,bool> predicate,string label,int timeout=3000){var timer=Stopwatch.StartNew();while(timer.ElapsedMilliseconds<timeout){string text=capture.Text();if(predicate(text))return;lock(capture.Gate){if(capture.Error!=null)throw new Exception(capture.Error);if(capture.Eof)throw new Exception("interactive ConPTY ended before "+label);}Thread.Sleep(20);}throw new Exception("ConPTY timeout waiting for "+label);}
  static void Close(ref IntPtr handle){if(handle!=IntPtr.Zero){CloseHandle(handle);handle=IntPtr.Zero;}}
- public static string Run(string node,string entry){
+ static bool Capability(string report,string name){if(!File.Exists(report))return false;string json=File.ReadAllText(report);if(json.Length>4096)throw new Exception("ConPTY capability report exceeded bound");return json.Contains("\""+name+"\":true");}
+ public static string Run(string node,string entry,string bootstrap){
   IntPtr inputRead=IntPtr.Zero,inputWrite=IntPtr.Zero,outputRead=IntPtr.Zero,outputWrite=IntPtr.Zero,console=IntPtr.Zero,attributes=IntPtr.Zero,job=IntPtr.Zero;
   var process=new ProcessInfo();Thread reader=null;var capture=new Capture();bool attrInitialized=false;
+  string reportDirectory=Path.Combine(Path.GetTempPath(),"prism-conpty-smoke-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(reportDirectory);string report=Path.Combine(reportDirectory,"capabilities.json");
   try{
    if(IntPtr.Size!=8)throw new Exception("ConPTY smoke requires the supported Windows x64 host");
    Check(CreatePipe(out inputRead,out inputWrite,IntPtr.Zero,0),"ConPTY input pipe");Check(CreatePipe(out outputRead,out outputWrite,IntPtr.Zero,0),"ConPTY output pipe");
@@ -65,7 +68,7 @@ public static class HatConPtySmoke {
    // This is the Microsoft/node-pty ConPTY launch pattern; transport pipes are NOT child stdio.
    startup.startup.flags=0x100; // STARTF_USESTDHANDLES
    startup.startup.input=IntPtr.Zero;startup.startup.output=IntPtr.Zero;startup.startup.error=IntPtr.Zero;
-   var command=new StringBuilder(Quote(node)+" "+Quote(entry)+" --demo --ascii --monochrome");
+   var command=new StringBuilder(Quote(node)+" "+Quote(bootstrap)+" "+Quote(report)+" "+Quote(entry)+" --demo --ascii --monochrome");
    // Start suspended so teardown ownership is installed before any child code can execute.
    Check(CreateProcessW(node,command,IntPtr.Zero,IntPtr.Zero,false,0x80004,IntPtr.Zero,null,ref startup,out process),"CreateProcessW attached to ConPTY");
    Check(AssignProcessToJobObject(job,process.process),"Assign owned ConPTY process job");
@@ -73,29 +76,35 @@ public static class HatConPtySmoke {
    IntPtr readHandle=outputRead;
    reader=new Thread(delegate(){try{var bytes=new byte[8192];for(;;){uint count;bool ok=ReadFile(readHandle,bytes,(uint)bytes.Length,out count,IntPtr.Zero);if(!ok){int code=Marshal.GetLastWin32Error();if(code!=109&&code!=232)throw new Win32Exception(code,"ConPTY read");break;}if(count==0)break;lock(capture.Gate){for(int i=0;i<count;i++)capture.Bytes.Add(bytes[i]);if(capture.Bytes.Count>1048576)throw new Exception("ConPTY output exceeded bounded capture");}}lock(capture.Gate){capture.Eof=true;}}catch(Exception error){lock(capture.Gate){capture.Error=error.Message;capture.Eof=true;}}});reader.IsBackground=true;reader.Start();
    if(ResumeThread(process.thread)==UInt32.MaxValue)throw new Win32Exception(Marshal.GetLastWin32Error(),"Resume ConPTY child");
-   Expect(capture,s=>s.Contains("\x1b[?1049h")&&s.Contains("[Overview]"),"interactive alternate-screen Overview");Thread.Sleep(150);
+   // System ConPTY may consume 1049 h/l and emit reconstructed screen content.
+   // Entry/exit are verified through actual buffer restoration below, not passthrough.
+   Expect(capture,s=>s.Contains("[Overview]"),"interactive ConPTY Overview");Thread.Sleep(150);
+   foreach(string name in new[]{"stdinTTY","stdoutTTY","stderrTTY","rawEnabled"})if(!Capability(report,name))throw new Exception("ConPTY missing measured capability "+name);
    int at=capture.Text().Length;Send(inputWrite,"\t");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("[Agents]"),"Tab changing Agents view");Thread.Sleep(150);
    at=capture.Text().Length;Send(inputWrite,"\x1b[B");Expect(capture,s=>s.Length>at,"Down arrow changing selection");Thread.Sleep(150);
    at=capture.Text().Length;Send(inputWrite,"\x1b[A");Expect(capture,s=>s.Length>at,"Up arrow changing selection");Thread.Sleep(150);
    at=capture.Text().Length;HResult(ResizePseudoConsole(console,new Coord(26,12)),"ResizePseudoConsole narrow");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("< Agents >"),"80x24 to 26x12 resize repaint");Thread.Sleep(150);
    at=capture.Text().Length;HResult(ResizePseudoConsole(console,new Coord(80,24)),"ResizePseudoConsole wide");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("[Agents]"),"26x12 to 80x24 resize repaint");Thread.Sleep(150);
-   Send(inputWrite,"q");Expect(capture,s=>s.Contains("\x1b[?1049l"),"alternate-screen cleanup");
+   at=capture.Text().Length;Send(inputWrite,"q");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("PRISM_SAVED_SCREEN"),"saved original-screen restoration on quit");
    if(WaitForSingleObject(process.process,3000)!=0)throw new Exception("ConPTY child did not terminate on quit");uint exit;Check(GetExitCodeProcess(process.process,out exit),"ConPTY exit status");if(exit!=0)throw new Exception("ConPTY child exit "+exit);
+   if(!Capability(report,"rawRestored"))throw new Exception("ConPTY raw mode was not restored on clean exit");
    Close(ref inputWrite);ClosePseudoConsole(console);console=IntPtr.Zero;
    if(!reader.Join(3000))throw new Exception("ConPTY output did not reach EOF after owned console closed");lock(capture.Gate){if(!capture.Eof||capture.Error!=null)throw new Exception(capture.Error??"ConPTY EOF missing");}
-   return "{\"ok\":true,\"transport\":\"ConPTY\",\"keyboard\":true,\"resize\":true,\"exitCode\":0,\"eof\":true,\"sizes\":[[80,24],[26,12],[80,24]],\"capturedBytes\":"+capture.Count()+"}";
+   return "{\"ok\":true,\"transport\":\"ConPTY\",\"keyboard\":true,\"resize\":true,\"exitCode\":0,\"eof\":true,\"screenRestored\":true,\"rawRestored\":true,\"alternateEnterForwarded\":"+capture.Text().Contains("\x1b[?1049h").ToString().ToLower()+",\"alternateExitForwarded\":"+capture.Text().Contains("\x1b[?1049l").ToString().ToLower()+",\"sizes\":[[80,24],[26,12],[80,24]],\"capturedBytes\":"+capture.Count()+"}";
   }catch(Exception error){
    // Only expose the fixture's capability marker, never arbitrary captured terminal content.
    var diagnostic=System.Text.RegularExpressions.Regex.Match(capture.Text(),@"SMOKE_CONSOLE [^\r\n\x1b]{1,200}");
-   throw new Exception(error.Message+(diagnostic.Success?" "+diagnostic.Value:"")+" childPid="+process.pid);
+   string facts=" capturedBytes="+capture.Count()+" overviewSeen="+capture.Text().Contains("[Overview]").ToString().ToLower()+" alternateEnterForwarded="+capture.Text().Contains("\x1b[?1049h").ToString().ToLower();
+   throw new Exception(error.Message+(diagnostic.Success?" "+diagnostic.Value:"")+facts+" childPid="+process.pid);
   }finally{
    if(process.process!=IntPtr.Zero&&WaitForSingleObject(process.process,0)!=0){TerminateProcess(process.process,1);WaitForSingleObject(process.process,3000);}
    Close(ref inputWrite);Close(ref inputRead);Close(ref outputWrite);
    if(console!=IntPtr.Zero){ClosePseudoConsole(console);console=IntPtr.Zero;}
    if(reader!=null)reader.Join(3000);Close(ref outputRead);Close(ref process.thread);Close(ref process.process);Close(ref job);
    if(attrInitialized)DeleteProcThreadAttributeList(attributes);if(attributes!=IntPtr.Zero)Marshal.FreeHGlobal(attributes);
+   Directory.Delete(reportDirectory,true);
   }
  }
 }
 '@
-try { [HatConPtySmoke]::Run($NodePath,$EntryPath) } catch { [Console]::Error.WriteLine('ConPTY smoke unavailable or failed: ' + $_.Exception.Message); exit 1 }
+try { [HatConPtySmoke]::Run($NodePath,$EntryPath,(Join-Path $PSScriptRoot 'conpty-bootstrap.mjs')) } catch { [Console]::Error.WriteLine('ConPTY smoke unavailable or failed: ' + $_.Exception.Message); exit 1 }

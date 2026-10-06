@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 const api=security as unknown as {
  parseWindowsAcl:(value:string)=>any;
  assertWindowsAcl:(value:any,options?:{strict?:boolean;allowTokenOwner?:boolean})=>void;
- windowsAclCommands:(path:string,sid:string,directory:boolean)=>string[][];
+ windowsAclCommands:(path:string,sid:string,directory:boolean,allowSids?:string[])=>string[][];
 };
 const user='S-1-5-21-100-200-300-1001',admin='S-1-5-32-544',system='S-1-5-18';
 const snapshot=(patch={})=>({userSid:user,ownerSid:user,tokenOwnerSid:admin,reparse:false,allowSids:[user],nullDacl:false,protected:true,...patch});
@@ -41,6 +41,14 @@ test('icacls owner and DACL modes use separate literal argv with numeric SID pre
  assert.deepEqual(api.windowsAclCommands(unc,user,false),[[unc,'/setowner','*'+user],[unc,'/inheritance:r','/grant:r','*'+user+':F']]);
  assert.throws(()=>api.windowsAclCommands(directory,user+' /T',true),/SID/);
 });
+test('fresh-artifact ACL plan removes every foreign grant SID after securing user access, excluding and deduplicating the user SID',()=>{
+ const directory='C:\\own private\\$(literal) & unchanged';
+ assert.deepEqual(api.windowsAclCommands(directory,user,true,[admin,user,system,admin,user]),[[directory,'/setowner','*'+user],[directory,'/inheritance:r','/grant:r','*'+user+':(OI)(CI)F'],[directory,'/remove:g','*'+admin,'*'+system]]);
+ assert.throws(()=>api.windowsAclCommands(directory,user,true,[system+' /T']),/SID/);
+});
+test('strict foreign grant refusal identifies the residual SID without changing policy',()=>{
+ assert.throws(()=>api.assertWindowsAcl(snapshot({allowSids:[user,system]}),{strict:true}),error=>error instanceof Error&&error.message.includes('Foreign allow ACL')&&error.message.includes(system));
+});
 test('actual Windows private directory has user SID owner, protected ACL and rejects a deliberately foreign grant without changing it',{skip:process.platform!=='win32'?'Requires actual Windows ACL APIs':false},async t=>{
  const root=await mkdtemp(join(tmpdir(),'prism-acl-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const privatePath=join(root,'private child $(literal) & spaces');
@@ -73,4 +81,15 @@ test('actual Windows junction in trusted namespace spelling is refused when call
  const beforeConfig=await security.readWindowsAcl(config),beforeState=await security.readWindowsAcl(state);
  await assert.rejects(security.securePluginNamespace(config,state),/symlink|reparse/i);
  assert.deepEqual(await security.readWindowsAcl(config),beforeConfig);assert.deepEqual(await security.readWindowsAcl(state),beforeState);
+});
+test('actual Windows explicit foreign allow grants survive inheritance removal but fresh-path authorization removes them',{skip:process.platform!=='win32'?'Requires actual Windows ACL APIs':false},async t=>{
+ const root=await mkdtemp(join(tmpdir(),'prism-explicit-acl-'));t.after(()=>rm(root,{recursive:true,force:true}));const fresh=join(root,'owned fresh directory');await mkdir(fresh);
+ const {execFile}=await import('node:child_process');const {promisify}=await import('node:util');const run=promisify(execFile);
+ const original=await security.readWindowsAcl(fresh);security.assertWindowsAcl(original,{allowTokenOwner:true});
+ await run('icacls.exe',[fresh,'/grant','*S-1-1-0:F'],{windowsHide:true,timeout:5000});
+ // The old owner + inheritance/grant steps alone leave this explicit grant.
+ for(const args of security.windowsAclCommands(fresh,original.userSid,true))await run('icacls.exe',args,{windowsHide:true,timeout:5000});
+ const residual=await security.readWindowsAcl(fresh);assert.equal(residual.protected,true);assert.ok(residual.allowSids.includes('S-1-1-0'));await assert.rejects(security.restrict(fresh,false),/Foreign allow ACL/);
+ assert.deepEqual(await security.readWindowsAcl(fresh),residual,'Generic existing admission must remain immutable');
+ await security.restrict(fresh,true);const restricted=await security.readWindowsAcl(fresh);assert.equal(restricted.ownerSid,restricted.userSid);assert.equal(restricted.protected,true);assert.deepEqual([...new Set(restricted.allowSids)],[restricted.userSid]);
 });

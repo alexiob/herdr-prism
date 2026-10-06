@@ -93,7 +93,7 @@ try{
   try{const {stdout}=await exec('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',script,'-NodePath',process.execPath,'-ProbePath',probe,'-ReportPath',report,'-Variant',variant],{timeout:18000,maxBuffer:1024*1024,windowsHide:true});result=JSON.parse(stdout.trim());}catch(error){result.launcherError=String(error.code??'unknown');result.compilerCodes=[...new Set(String(error.stderr??'').match(/\bCS\d{4}\b/g)??[])];}
   try{result.console=JSON.parse(await readFile(report,'utf8'));}catch(error){result.consoleReportMissing=error.code??'invalid-report';}
   for(const [label,pid]of [['launcherChildReaped',result.childPid],['consoleChildReaped',result.console?.pid]])if(Number.isInteger(pid)&&pid>0){try{process.kill(pid,0);result[label]=false;}catch(error){result[label]=error.code==='ESRCH';}}
-  result.interactive=result.exitCode===0&&result.exitObserved===true&&result.eof===true&&result.console?.rawEnabled===true&&result.console?.rawRestored===true&&result.console?.down===true&&result.console?.resizes?.some(size=>size[0]===26&&size[1]===12)&&result.console?.resizes?.some(size=>size[0]===80&&size[1]===24);
+  result.interactive=result.exitCode===0&&result.exitObserved===true&&result.eof===true&&result.readError===0&&result.launcherChildReaped===true&&result.consoleChildReaped===true&&result.console?.rawEnabled===true&&result.console?.rawRestored===true&&result.console?.down===true&&result.console?.resizes?.some(size=>size[0]===26&&size[1]===12)&&result.console?.resizes?.some(size=>size[0]===80&&size[1]===24);
   evidence.variants.push(result);
  }
 }finally{await rm(directory,{recursive:true,force:true});await writeFile(path.join(output,'conpty.json'),JSON.stringify(evidence,null,2)+'\n');}
