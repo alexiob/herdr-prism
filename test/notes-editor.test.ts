@@ -1,0 +1,20 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {NotesStore} from '../src/state/notes.ts';import {freshPrivateDirectory} from './helpers/private-dir.ts';import {join} from 'node:path';import {tmpdir} from 'node:os';import {rm,readFile,writeFile} from 'node:fs/promises';
+import {InputDecoder} from '../src/tui/input.ts';
+const editor=await import('../src/tui/notes.ts').catch(()=>({})) as any;
+test('Notes editor inserts navigation letters, handles multiline Unicode edits and flushes original identity',async t=>{
+ assert.equal(typeof editor.NotesController,'function');const dir=await freshPrivateDirectory(join(tmpdir(),'prism-editor-'));t.after(()=>rm(dir,{recursive:true,force:true}));const store=new NotesStore(dir),controller=new editor.NotesController(store,10);await controller.open('codex:one','One');controller.begin();for(const key of ['q','p','space','😀','enter','A','B','left','delete','home','Z','end'])controller.key(key);assert.equal(controller.value.text,'qp 😀\nZA');await controller.end();assert.equal((await store.load('codex:one')).text,'qp 😀\nZA');await controller.open('codex:two','Two');assert.equal(controller.value.text,'');
+});
+test('autosave and edits during a save retain newest draft and recover an external conflict',async t=>{
+ assert.equal(typeof editor.NotesController,'function');const dir=await freshPrivateDirectory(join(tmpdir(),'prism-editor-'));t.after(()=>rm(dir,{recursive:true,force:true}));const store=new NotesStore(dir),controller=new editor.NotesController(store,10);await controller.open('codex:one','One');controller.begin();controller.paste('# Notes\n日本語\n');await new Promise(r=>setTimeout(r,70));assert.equal((await store.load('codex:one')).text,'# Notes\n日本語\n');
+ const note=await store.load('codex:one');await writeFile(note.path,'External',{mode:0o600});controller.paste('draft');await controller.flush();assert.equal(controller.value.status,'conflict');assert.equal(await readFile(note.path,'utf8'),'External');assert.ok(controller.value.recoveryPath);controller.paste(' newer');await controller.close();assert.equal(await readFile(controller.value.recoveryPath,'utf8'),'# Notes\n日本語\ndraft newer');
+});
+test('bracketed paste is one bounded event across chunks and cannot invoke navigation commands',()=>{
+ const decoder=new InputDecoder();assert.deepEqual(decoder.feed('\x1b[200~q\np'),[]);assert.deepEqual(decoder.feed('\\\x1b[201'),[]);assert.deepEqual(decoder.feed('~'),[{type:'paste',text:'q\np\\'}]);assert.deepEqual(decoder.feed('\x13\x1b[3~'),[{type:'key',key:'ctrl+s'},{type:'key',key:'delete'}]);
+});
+test('Notes source keeps Markdown spacing, styles headings and exposes only the edit action',async()=>{
+ const {createUiState,renderScreen,handleKey}=await import('../src/tui/screen.ts');const {demoData}=await import('../src/runtime/demo.ts');const {cellWidth}=await import('../src/tui/text.ts');const data=demoData(),state=createUiState();state.tab='Notes';state.selectedKey=data.sessions[0]!.key;state.notes={sessionKey:state.selectedKey,title:'Original agent',text:'# Heading\n\n    code    spaces\n'+('日本語 long line '.repeat(30)),cursor:0,editing:false,status:'saved'};
+ for(const width of [12,36,50,80,120]){const frame=renderScreen(data,state,width,34);for(const parts of frame.spans??[])assert.ok(cellWidth(parts.map(s=>s.text).join(''))<=width);assert.equal(frame.rows[0]?.action?.type,'notes-edit');assert.ok(frame.spans?.flat().some(s=>s.role==='accent'));}
+ const frame=renderScreen(data,state,80,34);assert.match(frame.lines.join('\n'),/    code    spaces/);handleKey(state,'?',data,frame);assert.match(renderScreen(data,state,80,34).lines.join('\n'),/500 ms/);
+ state.help=false;state.notes.editing=true;state.notes.cursor=state.notes.text.length;const missing={...data,sessions:[]};const edited=renderScreen(missing,state,36,18);assert.match(edited.lines[0]! ,/Original agent/);assert.ok(edited.terminalCursor);assert.ok(edited.terminalCursor!.line<=16);assert.equal(state.notes.sessionKey,'codex:demo-root');
+});

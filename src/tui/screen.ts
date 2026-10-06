@@ -1,3 +1,4 @@
+import {renderNotes} from './notes.ts';
 import {tabs} from './types.ts';
 import type {DashboardData,UiState,UiAction,ScreenRow,RenderedScreen,SessionView,DetailDocument} from './types.ts';
 import type {Message} from '../model/types.ts';
@@ -71,7 +72,7 @@ function contentRows(session:SessionView,state:UiState,columns:number,now:number
   }else if(state.tab==='Refs'){
     const coverage=session.refCoverage;const label=coverage==='session'?'Session reference history':coverage==='partial'?'Partial reference history':coverage==='unavailable'?'Reference source unavailable':'Retained message references';
     rows.push({id:'refs-coverage',text:`${label} · ${session.refs?.length??0} retained · ${age(session.refUpdatedAt,now)} ago`});
-    const references=visibleReferences(session,state),paged=state.pagedRefs.get(session.key);if(paged)rows.push({id:'refs-snapshot',text:`Older reference snapshot${paged.stale?' · stale; b reloads':''} · ${paged.refs.length} loaded · ${age(paged.observedAt,now)} ago`});
+    const references=visibleReferences(session,state),paged=state.pagedRefs.get(session.key);if(paged)rows.push({id:'refs-snapshot',text:`${paged.refs.length} loaded · older targets${paged.stale?' · stale; b reloads':''} · ${age(paged.observedAt,now)} ago`});
     let group='';for(const ref of references){if(!match(ref.target,state))continue;const sourceGroup=ref.messageId+(ref.cursor?':'+ref.cursor.hash:'');if(sourceGroup!==group){rows.push({id:`source:${sourceGroup}`,text:`Message ${ref.messageId}`,action:{type:'source',sessionKey:session.key,id:ref.messageId,referenceCursor:ref.cursor}});group=sourceGroup;}
       rows.push({id:ref.id,text:`${ref.edited?'✎ ':''}${ref.exists===false?'? ':''}${ref.target.split(/[\\/]/).at(-1)}${ref.kind==='directory'?'/':''}${ref.line?`:${ref.line}`:''} · ${ref.target.split(/[\\/]/).slice(0,-1).join('/')}`,document:referenceDocument(session,ref,now),help:'Enter opens full target details; Space loads mentions; s opens the exact source; y copies the full path.',action:{type:'message',document:referenceDocument(session,ref,now),text:ref.target,referenceCursor:ref.cursor},sourceId:ref.messageId,copy:ref.target});}
     rows.push({id:'refs-page',text:paged&&!paged.hasMore&&!paged.stale?'End of target history · B reloads':'Load older reference targets · b',action:paged&&!paged.hasMore&&!paged.stale?undefined:{type:'page-refs',sessionKey:session.key,referencePageCursor:paged?.stale?undefined:paged?.cursor,restart:paged?.stale}});
@@ -88,6 +89,7 @@ function contentRows(session:SessionView,state:UiState,columns:number,now:number
 }
 export function renderScreen(data:DashboardData,state:UiState,columns:number,height:number,now=Date.now()):RenderedScreen {
   columns=Math.max(1,Math.floor(columns));height=Math.max(1,Math.floor(height));const session=data.sessions.find(s=>s.key===state.selectedKey)??data.sessions[0];if(session&&!state.selectedKey)state.selectedKey=session.key;
+  if(state.tab==='Notes'&&!state.help&&state.detail===undefined)return renderNotes(data,state,columns,height,now);
   if(state.refSources&&state.refSources.sessionKey!==session?.key){state.detail=undefined;closeDetail(state);}if(state.refSources&&state.refSources.revision!==session?.evidence.contentRevision)state.refSources.stale=true;
   const numericTargets=new Map<number,string>();let rows:ScreenRow[]=[];
   const server=data.server?`${data.server.host}/${data.server.session} · `:'';
@@ -126,6 +128,7 @@ export function handleRowClick(state:UiState,x:number,y:number,data:DashboardDat
 }
 
 export function handleKey(state:UiState,key:string,data:DashboardData,screen:RenderedScreen):UiAction|undefined {
+  if(state.tab==='Notes'&&!state.notes?.editing&&!state.help&&state.detail===undefined){const move:Record<string,number>={up:-1,down:1,pageup:-screen.bodyHeight,pagedown:screen.bodyHeight};if(key in move){state.notesScroll=Math.max(0,(state.notesScroll??0)+move[key]!);return;}if(key==='home'||key==='end'){state.notesScroll=key==='home'?0:Number.MAX_SAFE_INTEGER;return;}}
   if(state.editingFilter){if(key==='enter'||key==='escape'){state.editingFilter=false;state.cursor=0;state.cursorId=undefined;}else if(key==='backspace')state.filter=[...state.filter].slice(0,-1).join('');else if(key.length===1)state.filter+=key;return;}
   if(key==='escape'){if(state.help)closeHelp(state);else closeDetail(state);state.numberPrefix='';state.notice=undefined;return;}
   if(key==='?'||key==='help'){if(state.help)closeHelp(state);else{state.helpReader={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};state.helpText=screen.rows[state.cursor]?.help??'Scroll to read recorded content; Escape returns to the previous entry.';state.help=true;state.cursor=0;state.cursorId=undefined;state.scroll=0;}return;}

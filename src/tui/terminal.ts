@@ -20,7 +20,7 @@ export class TerminalUi extends EventEmitter {
     get columns() { return process.stdout.columns || 80; }
     get rows() { return process.stdout.rows || 24; }
     start() { if (this.closed || !this.interactive)
-        return; process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.on('data', this.onData); process.stdout.on('resize', this.onResize); process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h'); }
+        return; this.frame=undefined;this.pending=undefined;clearTimeout(this.paintTimer);this.paintTimer=undefined;this.lastPaint=0;process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.on('data', this.onData); process.stdout.on('resize', this.onResize); process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[?2004h'); }
     private onResize = () => { this.frame = undefined; this.emit('resize'); };
     private dispatch = (event: InputEvent) => this.emit('input', event);
     private onData = (data: Buffer) => { clearTimeout(this.escapeTimer); for (const event of this.decoder.feed(data))
@@ -67,6 +67,6 @@ export class TerminalUi extends EventEmitter {
         // The pane owns this input stream. Finish pending Windows console reads
         // after restoring its mode, rather than leaving a paused TTY handle alive.
         if(process.platform==='win32')process.stdin.destroy();
-        process.stdout.write('\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l');
+        process.stdout.write('\x1b[?2004l\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l');
     } }
 }

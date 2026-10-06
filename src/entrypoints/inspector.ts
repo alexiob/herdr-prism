@@ -1,6 +1,10 @@
+import {NotesController} from '../tui/notes.ts';
+import {NotesStore} from '../state/notes.ts';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { parseArguments, openPanel, windowsPaneEnvironment } from '../runtime/actions.ts';
+import { parseArguments } from '../runtime/actions.ts';
 import { serviceContext } from '../runtime/service.ts';
 import { acquireAdmission } from '../runtime/admission.ts';
 import { FollowSelection, inspectorVisible } from '../runtime/follow.ts';
@@ -32,7 +36,20 @@ export async function main(argv = process.argv.slice(2)) {
     let closing = false;
     let finished = false;
     let stopping: Promise<void> | undefined;
-    let syncVisibility = () => {};
+    let syncVisibility = () => {};let panelVisible=()=>true;
+    let notes:NotesController|undefined;
+    let inputQueue=Promise.resolve();
+    const ensureNotes=async(reload=false)=>{if(state.tab!=='Notes'||!state.selectedKey||notes?.value?.editing||!panelVisible())return;const session=data.sessions.find(s=>s.key===state.selectedKey);if(!session||!notes)return;const changed=notes.value?.sessionKey!==session.key;await notes.open(session.key,session.evidence.title??session.evidence.id,reload);if(changed)state.notesScroll=0;state.notes=notes.value;};
+    const connectNotes=(dir:string)=>{notes=new NotesController(new NotesStore(dir));notes.on('change',()=>{state.notes=notes!.value;if(!closing)paint();});};
+    const editorInput=async(event:any)=>{
+        if(!notes?.value?.editing)return false;
+        if(event.type==='paste'){if(event.overflow)state.notice='Paste exceeds 1 MiB; nothing inserted';else notes.paste(event.text);return true;}
+        if(event.type==='mouse'){if(event.release)return true;const tab=frame.tabRegions?.find(r=>r.y===event.y&&event.x>=r.x&&event.x<r.x+r.width);if(!tab)return true;await notes.end();return false;}
+        if(event.key==='ctrl+s'){await notes.flush();return true;}
+        if(event.key==='escape'){await notes.end();return true;}
+        if(['tab','shift+tab','ctrl+c'].includes(event.key)){await notes.end();return false;}
+        return notes.key(event.key);
+    };
     const paint = () => { syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
     if (args.options.demo) {
         data = demoData();
@@ -43,6 +60,7 @@ export async function main(argv = process.argv.slice(2)) {
             paint();
             return;
         }
+        const demoDir=await mkdtemp(path.join(tmpdir(),'prism-demo-notes-'));connectNotes(demoDir);cleanup=async()=>{await notes!.close();ui.close();await rm(demoDir,{recursive:true,force:true});};await ensureNotes();
         ui.on('resize', paint);
         ui.start();
         paint();
@@ -81,8 +99,9 @@ export async function main(argv = process.argv.slice(2)) {
             const preferences=await store.read<any>('preferences');
             collector = new RemoteCollector(context,paneId,terminalId);
             const followSelection = new FollowSelection();
+            panelVisible=()=>!closing&&!cache.stale&&inspectorVisible(cache.snapshot,terminalId,paneId);
             syncVisibility = () => {
-                const visible=!closing&&!cache.stale&&inspectorVisible(cache.snapshot,terminalId,paneId);
+                const visible=panelVisible();
                 collector!.setVisibleSession(state.selectedKey,visible);
                 collector!.setProcessesExpanded(visible&&state.tab==='Processes');
             };
@@ -97,7 +116,7 @@ export async function main(argv = process.argv.slice(2)) {
                 if(tabs.includes(preferences.tab))state.tab=preferences.tab;
             }
             const save=async()=>{await store.write('preferences',{selectedKey:state.selectedKey,pin:state.pin,tab:state.tab,collapsed:[...state.collapsed].slice(0,512),expanded:[...state.expanded].slice(0,512),readers:[...state.readers].slice(-64)});};
-            cleanup=async()=>{ui.close();cache.close();try{await collector!.close();await save();}finally{rpc.close();await lease!.release();await admission.release();}};
+            cleanup=async()=>{await notes?.close();ui.close();cache.close();try{await collector!.close();await save();}finally{rpc.close();await lease!.release();await admission.release();}};
             // The service owns its own admission check; do not hold a UI's gate
             // while waiting for its detached owner to start.
             await admission.release();
@@ -108,21 +127,22 @@ export async function main(argv = process.argv.slice(2)) {
                 syncVisibility();await collector.refresh();data=collector.data;
                 if(closing){await stop();return;}
                 if(args.options.once||!process.stdin.isTTY){paint();await cleanup();return;}
-                ui.start();
+                connectNotes(context.serverStateDir);await ensureNotes();ui.start();
                 const follow = async () => {
                     const snapshot=cache.snapshot;
-                    if(!snapshot||state.pin||!context.settings.follow)return;
+                    if(!snapshot||state.pin||state.notes?.editing||!context.settings.follow)return;
                     const focused=snapshot.agents.find(a=>a.pane_id===snapshot.focused_pane_id);
                     if(!focused||focused.tab_id!==tabId)return;
                     const selectedKey=followSelection.observe(snapshot,data,state.pin);
-                    if(selectedKey){state.selectedKey=selectedKey;paint();}
+                    if(selectedKey){await notes?.end();state.selectedKey=selectedKey;await ensureNotes();paint();}
                 };
-                cache.on('snapshot', () => { syncVisibility(); collector!.invalidate(); void follow(); });
+                const queueFollow=()=>{inputQueue=inputQueue.then(async()=>{if(!closing){await ensureNotes();await follow();paint();}}).catch(error=>{state.notice=(error as Error).message;if(!closing)paint();});};
+                cache.on('snapshot', () => { syncVisibility(); collector!.invalidate(); queueFollow(); });
                 cache.on('stale', () => { collector!.setVisibleSession(state.selectedKey,false); data.stale = true; paint(); });
-                collector.on('data', (next: DashboardData) => { data = next; if (!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey))
-                    state.selectedKey = localSelection() ?? data.sessions[0]?.key; paint(); void follow(); });
+                collector.on('data', (next: DashboardData) => { data = next; if (!state.notes?.editing&&(!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey)))
+                    state.selectedKey = localSelection() ?? data.sessions[0]?.key; paint(); queueFollow(); });
                 collector.on('diagnostic', (message: string) => { state.notice = message; paint(); });
-                collector.once('disconnected',()=>void stop());
+                collector.once('disconnected',()=>{inputQueue=inputQueue.then(()=>stop());});
                 ui.on('resize',paint);
                 let referenceRequest=false;let contentRequest=0;
                 const perform = async (action: UiAction) => {
@@ -184,10 +204,11 @@ export async function main(argv = process.argv.slice(2)) {
                             }
                         }finally{referenceRequest=false;}return;
                     }
-                    if(action.type==='tab'){contentRequest++;return;}
-                    if(action.type==='notes-edit'){state.notice='Notes editor is loading';return;}
-                    if(action.type==='select'){contentRequest++;const selected=data.sessions.find(session=>session.key===action.sessionKey);if(selected){state.selectedKey=selected.key;state.tab='Overview';state.cursor=0;state.cursorId=undefined;state.scroll=0;syncVisibility();collector!.invalidate();}return;}
+                    if(action.type==='tab'){contentRequest++;await notes?.end();await ensureNotes();return;}
+                    if(action.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin();state.notice=undefined;return;}
+                    if(action.type==='select'){await notes?.end();contentRequest++;const selected=data.sessions.find(session=>session.key===action.sessionKey);if(selected){state.selectedKey=selected.key;state.tab='Overview';state.cursor=0;state.cursorId=undefined;state.scroll=0;syncVisibility();collector!.invalidate();}return;}
                     if (action.type === 'focus') {
+                        await notes?.end();
                         const selected = data.sessions.find(s => s.key === action.sessionKey);
                         if (!selected)
                             return;
@@ -218,7 +239,8 @@ export async function main(argv = process.argv.slice(2)) {
                         return;
                     }
                 };
-                ui.on('input', async (event: any) => { try {
+                const processInput=async (event:any)=>{try{
+                    if(await editorInput(event)){paint();if(!state.notes?.editing)await follow();return;}
                     if (event.type === 'mouse') {
                         if (event.release)
                             return;
@@ -232,7 +254,7 @@ export async function main(argv = process.argv.slice(2)) {
                                 await perform(action);
                         }
                     }
-                    else {
+                    else if(event.type==='key'){
                         const action = handleKey(state, event.key, data, frame);
                         if (action)
                             await perform(action);
@@ -244,7 +266,8 @@ export async function main(argv = process.argv.slice(2)) {
                     state.notice = (error as Error).message;
                     if (!closing)
                         paint();
-                } });
+                }};
+                ui.on('input',(event:any)=>{if(!closing)inputQueue=inputQueue.then(()=>processInput(event));});
                 paint();
                 await follow();
             }
@@ -259,13 +282,15 @@ export async function main(argv = process.argv.slice(2)) {
         }
     }
     async function stop() { if (stopping)
-        return stopping; closing = true; collector?.setVisibleSession(state.selectedKey,false); stopping = cleanup().finally(() => { finished = true; }); return stopping; }
-    if (args.options.demo)
-        ui.on('input', async (event: any) => { if (event.type !== 'key')
+        return stopping; closing = true; collector?.setVisibleSession(state.selectedKey,false); stopping=cleanup().then(()=>{finished=true;}).catch(error=>{closing=false;stopping=undefined;state.notice='Cannot close until notes are saved: '+(error as Error).message;paint();}); return stopping; }
+    if (args.options.demo){
+        const demoInput=async(event:any)=>{try{if(await editorInput(event)){paint();return;}if (event.type !== 'key')
             return; const action = handleKey(state, event.key, data, frame); if (action?.type === 'quit')
             await stop();
         else if (action?.type === 'focus'||action?.type==='select')
             {state.selectedKey = action.sessionKey;if(action.type==='select')state.tab='Overview';}
+        else if(action?.type==='tab')await ensureNotes();
+        else if(action?.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin();}
         else if (action?.type === 'message')
             showDetail(state, action.text ?? '',action.document);
         else if(action?.type==='ref-sources'){
@@ -283,10 +308,12 @@ export async function main(argv = process.argv.slice(2)) {
             if (todo)
                 todo.checked = !todo.checked;
         } if (!closing)
-            paint(); });
-    process.once('SIGINT', () => void stop());
-    process.once('SIGTERM', () => void stop());
-    process.stdin.once('end', () => void stop());
+            paint();}catch(error){state.notice=(error as Error).message;paint();}};
+        ui.on('input',(event:any)=>{if(!closing)inputQueue=inputQueue.then(()=>demoInput(event));});
+    }
+    process.once('SIGINT', () => {inputQueue=inputQueue.then(()=>stop());});
+    process.once('SIGTERM', () => {inputQueue=inputQueue.then(()=>stop());});
+    process.stdin.once('end', () => {inputQueue=inputQueue.then(()=>stop());});
     await new Promise<void>(resolve => { const check = setInterval(() => { if (finished) {
         clearInterval(check);
         resolve();

@@ -1,3 +1,4 @@
+import {tabs} from '../src/tui/types.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
@@ -43,9 +44,9 @@ test('combined native ranks keep server trees contiguous despite colliding pane 
 test('every dashboard view identifies its server while diagnostics redact the hostname and identity', () => {
   const state = createUiState();
   const data: any = { sessions: [], updatedAt: 0, stale: false, diagnostics: [], server: { id: 'private-id', host: 'remote-builder', session: 'work' } };
-  for (const tab of ['Overview', 'Agents', 'Processes', 'Messages', 'Refs', 'To-do'] as const) {
+  for (const tab of tabs) {
     state.tab = tab;
-    assert.match(renderScreen(data, state, 80, 24).lines[0]!, /remote-builder\/work/);
+    const frame=renderScreen(data,state,80,24);assert.match(frame.lines.slice(0,frame.bodyStart).join('\n'), /remote-builder\/work/);
   }
   assert.ok(!diagnosticExport(data).includes('remote-builder'));
   assert.ok(!diagnosticExport(data).includes('private-id'));
