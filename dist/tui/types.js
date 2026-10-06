@@ -1,1 +1,1 @@
-export const tabs = ['Overview', 'Agents', 'Processes', 'Messages', 'Refs', 'To-do'];
+export const tabs = ['Overview', 'Agents', 'Processes', 'Messages', 'Refs', 'To-do', 'Git', 'Notes'];

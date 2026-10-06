@@ -26,7 +26,14 @@ export function addReferencePage(state, key, page, revision) {
 export function showReferenceSources(state, key, reference, page, revision, append = false) {
     const previous = state.refSources;
     if (!previous) {
-        state.detailReader = { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll };
+        const position = { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll };
+        if (state.detail !== undefined) {
+            state.refParent = { text: state.detail, document: state.detailDocument, position };
+            state.detail = undefined;
+            state.detailDocument = undefined;
+        }
+        else
+            state.detailReader = position;
     }
     const old = append && previous?.sessionKey === key && previous.reference.id === reference.id && !previous.stale && previous.revision === revision ? previous.sources : [];
     const sources = [...new Map([...old, ...page.sources].map(source => [sourceId(source), source])).values()].slice(-500);

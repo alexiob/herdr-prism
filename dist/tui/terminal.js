@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { InputDecoder } from "./input.js";
+import { styleSpans } from "./theme.js";
 export class TerminalUi extends EventEmitter {
     decoder = new InputDecoder();
     frame;
@@ -17,11 +18,16 @@ export class TerminalUi extends EventEmitter {
     start() {
         if (this.closed || !this.interactive)
             return;
+        this.frame = undefined;
+        this.pending = undefined;
+        clearTimeout(this.paintTimer);
+        this.paintTimer = undefined;
+        this.lastPaint = 0;
         process.stdin.setRawMode(true);
         process.stdin.resume();
         process.stdin.on('data', this.onData);
         process.stdout.on('resize', this.onResize);
-        process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h');
+        process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[?2004h');
     }
     onResize = () => { this.frame = undefined; this.emit('resize'); };
     dispatch = (event) => this.emit('input', event);
@@ -66,12 +72,13 @@ export class TerminalUi extends EventEmitter {
             const selected = i === frame.selectedLine;
             const previous = this.frame?.lines[i];
             const wasSelected = i === this.frame?.selectedLine;
-            if (previous === frame.lines[i] && selected === wasSelected)
+            if (previous === frame.lines[i] && selected === wasSelected && JSON.stringify(this.frame?.spans?.[i]) === JSON.stringify(frame.spans?.[i]))
                 continue;
             const line = frame.lines[i];
-            const style = selected ? '\x1b[7m' : this.mono ? '' : i < 3 ? '\x1b[1;36m' : line.includes('conflicts') ? '\x1b[33m' : '';
-            output += `\x1b[${i + 1};1H\x1b[2K${style}${line}\x1b[0m`;
+            const rendered = frame.spans?.[i] ? styleSpans(frame.spans[i], { theme: this.mono ? 'mono' : frame.theme ?? 'dark', depth: /^(truecolor|24bit)$/.test(process.env.COLORTERM ?? '') ? 24 : process.env.TERM?.includes('256color') ? 8 : 4 }) : line;
+            output += `\x1b[${i + 1};1H\x1b[2K${rendered}\x1b[0m`;
         }
+        output += frame.terminalCursor ? `\x1b[${frame.terminalCursor.line};${frame.terminalCursor.column}H\x1b[?25h` : '\x1b[?25l';
         if (output)
             process.stdout.write(output);
         this.frame = frame;
@@ -91,7 +98,7 @@ export class TerminalUi extends EventEmitter {
             // after restoring its mode, rather than leaving a paused TTY handle alive.
             if (process.platform === 'win32')
                 process.stdin.destroy();
-            process.stdout.write('\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l');
+            process.stdout.write('\x1b[?2004l\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l');
         }
     }
 }

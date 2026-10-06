@@ -60,13 +60,13 @@ export class NativePublisher {
             const resource = session.resource, git = session.git;
             const tokens = {
                 hat_line: truncate(`${' '.repeat(Math.min(session.depth, 5) * 2)}${session.depth ? '↳ ' : ''}${session.evidence.title ?? session.evidence.id}`, 80),
-                hat_goal: truncate(`Goal: ${session.evidence.goals.at(-1)?.objective ?? 'not reported'}`, 100),
-                hat_load: `CPU ${number(resource?.cpuPercent)}% ${resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS'} ${bytes(resource?.memoryBytes)}`,
+                hat_goal: truncate(session.evidence.goals.at(-1)?.objective ? `Goal: ${session.evidence.goals.at(-1).objective}` : session.evidence.task ? `Task: ${session.evidence.task}` : '', 100),
+                hat_load: `CPU ${number(resource?.cpuPercent)}% ${resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS'} ${bytes(resource?.memoryBytes)} · ${this.descendants(session, graph)} agent${this.descendants(session, graph) === 1 ? '' : 's'}`,
                 hat_counts: `p${resource?.processes.length ?? '—'} a${this.descendants(session, graph)} m${session.evidence.reason === 'metadata only; transcript body not loaded' || session.evidence.availability === 'unavailable' && !session.evidence.messages.length ? '—' : session.evidence.messages.filter(m => m.role !== 'tool').length} r${session.refCoverage === 'unavailable' ? '—' : session.refs?.length ?? '—'}${session.refCoverage === 'partial' || session.refCoverage === 'retained' ? '+' : ''}`,
                 hat_branch: git?.branch ?? git?.branchState ?? 'Git —', hat_add: git?.added === undefined ? '' : `+${git.added}`, hat_del: git?.deleted === undefined ? '' : `-${git.deleted}`,
                 hat_div: `↑${number(git?.ahead)} ↓${number(git?.behind)}`, hat_conflict: git?.conflicts ? `conflicts ${git.conflicts}` : '',
                 hat_last: truncate(session.evidence.messages.filter(m => m.kind !== 'inter-agent' && m.role === 'assistant').at(-1)?.text ?? '', 100),
-                hat_rank: `${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability ?? 'unavailable', hat_group: ''
+                hat_rank: `${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability === 'stale' ? 'cached' : resource?.availability ?? 'unavailable', hat_group: ''
             };
             for (const key of keys)
                 tokens[key] = sanitize(tokens[key]).replace(/[\r\n\t]/g, ' ');

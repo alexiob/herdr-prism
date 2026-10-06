@@ -2,7 +2,7 @@
 
 A six-view terminal dashboard for Codex, Claude and Pi sessions in Herdr.
 It follows agent lineage, process ownership, messages, references, explicit goals,
-local To-do checkboxes and Git checkout state. An optional native overview adds
+local To-do checkboxes, Git checkout state and private Markdown notes. An optional native overview adds
 compact summaries to Herdr's existing Agents panel.
 
 **Release status:** implementation candidate. Actual macOS and Linux CI and
@@ -97,6 +97,8 @@ for the lifecycle and configuration details.
 | Messages | Visible user/assistant text, inline expansion and full detail |
 | Refs | Assistant links/files, explicit edit markers, exact source history and deliberate open/copy |
 | To-do | Complete ACTION lists enabled by default, with local checked state and source provenance |
+| Git | Exact checkout, colored line changes, tracking and snapshot facts |
+| Notes | Persistent per-agent Markdown, autosave and recovered conflict drafts |
 
 Refs are recovered from the selected session's transcript history independently
 of the 200-message hot window. The coverage row shows when history is partial
@@ -104,7 +106,7 @@ or unavailable and when local existence was last checked. Native `rN+` means a
 bounded or partial count; `r—` means the source is unavailable. The current
 index keeps at most 2,000 targets and 100 source mentions per target. In Refs,
 `b` loads older targets; `Space` opens a target's mention history, where `b`
-loads older sources. `Enter` opens the exact recorded source. `Escape` returns
+loads older sources. `Enter` on a target opens its complete styled details; `s` opens the exact recorded source. The detail view also offers Open target and Mention history. `Escape` returns
 to the prior reader position; `B` reloads history from its newest page. Changed
 transcripts invalidate page cursors and label retained pages as stale.
 
@@ -117,22 +119,45 @@ transcripts invalidate page cursors and label retained pages as stale.
 | `Tab` / `Shift+Tab` | Next / previous view |
 | Arrows or `j` / `k` | Move selection |
 | `Home` / `End`, `PageUp` / `PageDown` | Navigate the current reader |
-| `Enter` | Focus/open the selected item |
+| `Enter` | Open the selected detail or corresponding tab; inspect an agent inside Prism |
+| `f` in Agents | Explicitly focus the selected live Herdr pane |
 | `Space` | Fold/expand; open a reference's source history |
 | `Escape` | Return from details or close help/filter |
 | `b` / `B` | Load older messages/refs / reload reference history |
 | `p` / `u` / `w` | Pin session / subtree scope / Agents worktree grouping |
 | `s` / `y` / `x` | Jump to source / copy / check or reopen To-do |
-| `/` / `?` / `,` / `e` | Filter / help / settings / diagnostic export |
-| Agent number, then `Enter` | Select that displayed agent target |
+| `?` | Explain the selected entry; `Escape` returns to its saved position |
+| `/` / `,` / `e` | Filter / settings / diagnostic export |
+| Agent number, then `Enter` | Inspect that displayed Prism agent target |
+| `Enter` in Notes | Start editing Markdown |
+| `Ctrl+S` while editing | Save immediately; otherwise autosave after 500 ms |
+| `Escape` while editing | Save and return to reading |
+| `Ctrl+C` while editing | Save and close this panel |
+
+Entries that open another view carry a right arrow. Overview Processes, Git,
+Agents, Messages, Refs, To-do and Notes entries open their matching tabs. At wide
+widths, Overview uses two columns; left/right moves between visible columns.
+Fact details align quiet labels with colored quantities, identities, paths,
+durations and Git changes. Long rows show a concise summary; Enter retains full
+wrapped content. Dark, light and monochrome themes are supported through
+`inspector --theme dark|light|mono` or the persisted `theme` setting.
+
+In Notes edit mode, `q`, `p`, `/`, `?`, numbers and spaces are literal text.
+Arrows, Home/End, Backspace/Delete and bracketed paste edit the source. Tab saves
+and leaves Notes. Follow pauses during editing, even if the agent disappears;
+its draft stays attached to that agent. Notes live on the collecting server,
+shared by its panels and retained across restarts/upgrades. A newer external edit
+is preserved; Prism saves the stale draft separately and reports its recovery
+path through `?` after leaving edit mode. Complete Prism removal deletes notes
+and recovery drafts along with owned state. Demo Notes use disposable files.
 
 An existing `prefix+i` assignment is preserved. The installer reports the
 conflict; Prism remains available through its Herdr action menu. The Unix
 installer removes its owned shortcut during complete removal.
 
 Numeric Agents selection preserves the target that was displayed when typing
-began. Selecting transcript-only descendants inspects them without inventing a
-native pane.
+began. Selecting an agent stays inside Prism. `f` focuses a live pane; transcript-only
+descendants remain inspectable. Prism numbers are separate from Herdr focus indices.
 
 Full transcript, refs, To-do, Git and frequent resource updates follow only the
 selected inspector session. Closing the pane or changing its server's active
@@ -154,6 +179,11 @@ have no invented line totals. Provider counters retain their documented cache
 and cumulative semantics; absent cost rates produce unavailable/partial costs.
 
 ## Native overview and privacy
+
+The compact four-row native preset shows identity, explicit Goal/Task when
+reported, CPU/resident memory/descendant count and cached status, then machine,
+workspace, branch and colored Git changes. Upgrades migrate only unchanged
+Prism-owned values; user-edited rows and shortcuts are preserved.
 
 Native rows format existing agent entries and retain provider/workspace/tab
 labels when plugin tokens expire. Herdr's current API cannot create arbitrary

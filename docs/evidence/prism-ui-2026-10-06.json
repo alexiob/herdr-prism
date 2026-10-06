@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "date": "2026-10-06",
+  "scope": "Approved production UI and persistent Notes; synthetic provider fixtures, actual isolated Herdr terminal readback",
+  "macos": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v26.10.0",
+    "herdr": "0.9.3",
+    "fullSuite": {
+      "tests": 338,
+      "passed": 316,
+      "skipped": 22,
+      "failed": 0
+    },
+    "live": {
+      "ok": true,
+      "checks": {
+        "nativeMetadataReadback": {
+          "tokenPrefix": "hat",
+          "nonemptyKeys": [
+            "hat_div",
+            "hat_branch",
+            "hat_line",
+            "hat_load",
+            "hat_counts",
+            "hat_rank",
+            "hat_fresh",
+            "hat_last"
+          ],
+          "emptyTokensOmittedByHerdr": true,
+          "budgetAtMost14": true,
+          "focusedFixturePreserved": true
+        },
+        "independentPanelsAndPin": {
+          "rightPlacement": true,
+          "independentTabPanels": true,
+          "pinRetainsBetaReader": true,
+          "otherPanelPreserved": true
+        },
+        "hiddenPauseAndResume": {
+          "newBodyNotHydratedWhileHidden": true,
+          "resourcesLabeledStale": true,
+          "bodyHydratedAfterVisible": true
+        },
+        "referenceHistoryNavigation": {
+          "targetsInFixture": 2106,
+          "hotTargets": 2000,
+          "olderTargetsRecovered": 106,
+          "mentionsRecovered": 150,
+          "exactFirstSourceOpened": true,
+          "sourceAndTargetAnchorsRestored": true,
+          "actualInspectorKeyboardAndHerdrPTY": true,
+          "explicitSuccessfulEditFixture": true
+        },
+        "persistentNotesAndEditHold": {
+          "autosave": true,
+          "literalNavigationLetters": true,
+          "bracketedPaste": true,
+          "originalAgentHeldDuringSameTabFocusChange": true,
+          "followResumed": true,
+          "externalEditPreserved": true,
+          "recoveryDraftSaved": true,
+          "closeFlush": true,
+          "restartPersistence": true,
+          "sharedCollectorUnchanged": true
+        },
+        "nativeMetadataExpiry": {
+          "expiredAfterMs": 13288,
+          "allPublishedNativeTokensExpired": true,
+          "builtinAgentWorkspaceTabFactsRetained": true,
+          "foreignMetadataRetained": true,
+          "resumed": true
+        },
+        "staleOccupantGuards": {
+          "focusRejectedChangedSession": true,
+          "focusPreserved": true,
+          "publicationRejectedBeforeWrite": true
+        },
+        "closedViewPreservesCollector": {
+          "closedOnlyCurrentView": true,
+          "otherViewPreserved": true,
+          "singleSharedCollectorPreserved": true,
+          "reopenedForRemainingAcceptance": true
+        },
+        "projectionSourceGuardAndCoexistence": {
+          "wrongSourceCannotClearPluginView": true,
+          "pluginClearPreservesForeignFixtureView": true,
+          "fixtureIsNotRadarOrPiTreeCompatibility": true
+        },
+        "configConflictAndRecovery": {
+          "conflictRefusedPurge": true,
+          "registrationAndOwnedDirectoriesRetained": true,
+          "userEditPreserved": true,
+          "explicitFixtureRecoveryUninstalled": true,
+          "originalConfigAndUnrelatedEditRestored": true,
+          "foreignProjectionSurvivedUninstall": true
+        }
+      }
+    }
+  },
+  "limits": [
+    "Headless server and actual terminal readback; native sidebar pixels and multi-client renderer differences are not certified.",
+    "Hidden transcript/body pause and stale resource publication are observed; zero internal Git/process reads are not directly instrumented.",
+    "New Windows-specific acceptance remains with the owning Windows machine and GitHub Actions.",
+    "Background-machine and last-viewer visibility, authoritative native focus indices, paid-provider, native-pixel and soak acceptance retain their existing upstream or validation gates."
+  ]
+}

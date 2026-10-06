@@ -11,7 +11,8 @@ export async function loadSettings(configDir) { const text = await readOptional(
     throw new Error('Settings must be an object'); const data = value; const result = { ...defaults, ...data }; if (!['overview', 'inspector-only', 'native'].includes(result.nativeMode))
     throw new Error('Invalid nativeMode'); for (const key of ['todosEnabled', 'follow', 'ascii', 'monochrome'])
     if (typeof result[key] !== 'boolean')
-        throw new Error('Invalid setting ' + key); if (result.autostart !== undefined && typeof result.autostart !== 'boolean')
+        throw new Error('Invalid setting ' + key); if (result.theme !== undefined && !['dark', 'light', 'mono'].includes(result.theme))
+    throw new Error('Invalid theme'); if (result.autostart !== undefined && typeof result.autostart !== 'boolean')
     throw new Error('Invalid autostart'); if (!Number.isInteger(result.sampleIntervalMs) || result.sampleIntervalMs < 250 || result.sampleIntervalMs > 60000)
     throw new Error('Invalid sampleIntervalMs'); if (!result.providerHomes || typeof result.providerHomes !== 'object' || Array.isArray(result.providerHomes))
     throw new Error('Invalid providerHomes'); for (const [provider, path] of Object.entries(result.providerHomes))
@@ -29,7 +30,7 @@ export async function loadSettings(configDir) { const text = await readOptional(
                 throw new Error('Invalid cost rate');
     }
 } return result; }
-export function nativeRows(theme = 'dark') { const add = theme === 'light' ? '#17784C' : '#42B883', del = theme === 'light' ? '#B42335' : '#E06C75'; return [['$hat_group'], ['state_icon', 'agent', '$hat_line'], ['machine', 'workspace', 'tab'], ['$hat_goal'], ['$hat_load', '$hat_counts'], ['$hat_branch', theme === 'mono' ? '$hat_add' : { token: '$hat_add', fg: add }, theme === 'mono' ? '$hat_del' : { token: '$hat_del', fg: del }], ['$hat_div', '$hat_conflict', '$hat_fresh'], ['$hat_last']]; }
+export function nativeRows(theme = 'dark') { const add = theme === 'light' ? '#17784C' : '#42B883', del = theme === 'light' ? '#B42335' : '#E06C75'; return [['state_icon', 'agent', '$hat_line', 'tab'], ['$hat_goal'], ['$hat_load', '$hat_fresh'], ['machine', 'workspace', '$hat_branch', theme === 'mono' ? '$hat_add' : { token: '$hat_add', fg: add }, theme === 'mono' ? '$hat_del' : { token: '$hat_del', fg: del }, '$hat_conflict']]; }
 function rowsToml(theme) { return '[\n' + nativeRows(theme).map(row => '  [' + row.map(token => typeof token === 'string' ? JSON.stringify(token) : `{ token = ${JSON.stringify(token.token)}, fg = ${JSON.stringify(token.fg)} }`).join(', ') + ']').join(',\n') + '\n]'; }
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 async function withLock(stateDir, operation) { await privateDir(stateDir); const path = join(stateDir, 'configuration.lock'); let handle; try {
@@ -66,6 +67,9 @@ export async function configure(configPath, stateDir, options = {}) {
         const path = resolve(configPath), before = await readOptional(path), doc = scanToml(before), old = await readManifest(stateDir);
         if (old && old.configPath !== path)
             throw new Error('State belongs to a different configuration path');
+        if (options.migrateOwnedNative && !old)
+            return { changed: false, conflicts: [] };
+        const conflicts = [];
         const desired = new Map();
         if (options.mode !== 'inspector-only') {
             desired.set('ui.sidebar.agents.rows', rowsToml(options.theme));
@@ -82,6 +86,14 @@ export async function configure(configPath, stateDir, options = {}) {
         let after = before;
         for (const [target, written] of desired) {
             const current = doc.entries.find(e => e.path === target)?.value, previous = old?.values.find(v => v.path === target);
+            const native = target.startsWith('ui.sidebar.agents.');
+            if (native && (options.migrateOwnedNative && (!previous || current !== previous.written) || options.preserveNativeEdits && previous && current !== previous.written)) {
+                if (previous) {
+                    conflicts.push(target);
+                    values.push(previous);
+                }
+                continue;
+            }
             if (current !== undefined && current !== written && (!previous || current !== previous.written) && !options.ownNative)
                 throw new Error('Native sidebar/keybinding has existing ownership; choose ownNative explicitly or inspector-only');
             if (previous && current !== previous.written && current !== written)
@@ -124,11 +136,11 @@ export async function configure(configPath, stateDir, options = {}) {
             }
         }
         if (after === before)
-            return { changed: false, conflicts: [], ...(old ? { backupPath: old.backupPath } : {}), ...(shortcut ? { shortcut } : {}) };
+            return { changed: false, conflicts, ...(old ? { backupPath: old.backupPath } : {}), ...(shortcut ? { shortcut } : {}) };
         const backupPath = old?.backupPath ?? join(stateDir, 'configuration-original.toml');
         if (!old)
             await atomicWrite(backupPath, before);
-        const manifest = { version: 1, configPath: path, original: old?.original ?? before, originalHash: old?.originalHash ?? hash(before), writtenHash: hash(after), backupPath, values, blocks };
+        const manifest = { version: 1, configPath: path, original: old?.original ?? before, originalHash: old?.originalHash ?? hash(before), writtenHash: hash(after), backupPath, values, blocks, partial: old?.partial === true || !!old && hash(before) !== old.writtenHash || conflicts.length > 0 };
         await atomicWrite(manifestPath(stateDir), JSON.stringify(manifest, null, 2) + '\n');
         try {
             await writeConfig(path, before, after, options.beforeCommit);
@@ -140,12 +152,12 @@ export async function configure(configPath, stateDir, options = {}) {
                 await unlink(manifestPath(stateDir)).catch(() => { });
             throw error;
         }
-        return { changed: true, conflicts: [], backupPath, ...(shortcut ? { shortcut } : {}) };
+        return { changed: true, conflicts, backupPath, ...(shortcut ? { shortcut } : {}) };
     });
 }
 export async function unconfigure(configPath, stateDir) { return withLock(stateDir, async () => { const managed = await readManifest(stateDir); if (!managed)
     return { changed: false, conflicts: [] }; const path = resolve(configPath); if (path !== managed.configPath)
-    throw new Error('State belongs to a different configuration path'); const before = await readOptional(path); let after = before; const conflicts = []; if (hash(before) === managed.writtenHash)
+    throw new Error('State belongs to a different configuration path'); const before = await readOptional(path); let after = before; const conflicts = []; if (!managed.partial && hash(before) === managed.writtenHash)
     after = managed.original;
 else {
     const doc = scanToml(before);
@@ -182,3 +194,5 @@ else {
     const remaining = { ...managed, values: managed.values.filter(v => conflicts.includes(v.path)), blocks: conflicts.includes('keys.command.plugin_action') ? managed.blocks : [] };
     await atomicWrite(manifestPath(stateDir), JSON.stringify(remaining, null, 2) + '\n');
 } return { changed: after !== before, conflicts, backupPath: managed.backupPath }; }); }
+/** Upgrade only native values proven to still be ours; retain original backups. */
+export function migrateNativeLayout(configPath, stateDir, theme) { return configure(configPath, stateDir, { migrateOwnedNative: true, theme }); }

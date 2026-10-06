@@ -587,3 +587,41 @@ independent-panel/GitHub-install checks passed. The current Claude and Codex
 views were upgraded and checked without restarting either agent. Detailed
 counts and evidence are in docs/windows-validation.md; fresh CI remains a
 separate cross-platform verification result.
+
+
+## Approved production UI and Notes — 2026-10-06
+
+The approved gallery is now implemented in the production inspector: eight tabs,
+responsive sections, aligned typed fact fields, semantic dark/light/mono colors,
+full wrapped details, measured tab/body mouse targets, right-arrow destinations,
+and selected-entry help only on `?`. Overview activity summaries open their
+matching tab. Agents and numeric targets inspect inside Prism; `f` explicitly
+focuses a live pane. Exact message/reference cursors and reader anchors survive
+nested details and source paging. Native defaults use four compact rows, omit
+unreported Goal/Task text, show readable descendant counts and cached state,
+and migrate only unchanged owned rows. Original backups and user edits survive
+upgrades and removal.
+
+Notes are private Markdown per canonical provider/session identity on the
+collecting server, shared across its panels. Autosave, Ctrl+S, bracketed paste,
+Unicode/multiline navigation and close/tab flushing are implemented. Editing
+holds Follow and session identity, including disappearance from inventory.
+Serialized revision checks preserve external or competing panel edits; stale
+drafts are recovered separately. Notes stay outside provider transcripts,
+exports, native tokens and telemetry. Demo notes are disposable; complete owned
+removal purges real notes and recovery drafts.
+
+macOS arm64 source typecheck/build and the full suite pass: 338 tests, 316 passed,
+22 platform/opt-in skips, zero failures. Actual isolated Herdr 0.9.3 package
+acceptance passes reference target/source history, Notes autosave/restart/focus
+hold/conflict/close flushing, per-tab shared-collector preservation, metadata
+TTL, occupant guards and conflict-aware uninstall. A separate real local Herdr
+pane verified the actual editor rendering and terminal restoration. These are
+synthetic provider and actual terminal proofs, not paid-provider or native
+sidebar pixel claims. See [durable UI evidence](evidence/prism-ui-2026-10-06.json).
+
+The initial macOS baseline reproduced a missing exact admission-lease race.
+A deterministic regression now passes after extending the existing retry to
+Unix; a missing state directory is still refused without recreation. Windows
+lease behavior remains unchanged. Windows-specific implementation/testing stays
+with the owning machine; the merged shared-collector architecture is preserved.

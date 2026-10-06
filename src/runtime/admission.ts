@@ -13,11 +13,11 @@ export async function acquireAdmission(stateDir: string, options: {
             lease = await store.acquire({ name: 'admission', create: false });
         }
         catch (error) {
-            // A Windows owner can release the exact lease after EEXIST but
+            // An owner can release the exact lease after EEXIST but
             // before inspection. Retry through the same guarded acquisition;
             // absence of the state directory itself must still fail immediately.
-            const missingWindowsLease=process.platform==='win32'&&(error as NodeJS.ErrnoException).code==='ENOENT'&&(error as NodeJS.ErrnoException).path===path.join(stateDir,'admission.lock');
-            if (missingWindowsLease||/owner is live|recovery in progress|lease initialization in progress|now owns/.test((error as Error).message)) {
+            const missingLease=(error as NodeJS.ErrnoException).code==='ENOENT'&&(error as NodeJS.ErrnoException).path===path.join(stateDir,'admission.lock');
+            if (missingLease||/owner is live|recovery in progress|lease initialization in progress|now owns/.test((error as Error).message)) {
                 await sleep(25);
                 continue;
             }

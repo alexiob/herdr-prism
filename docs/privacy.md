@@ -29,6 +29,10 @@ state can contain:
 - UI/settings preferences and exact provider-home paths.
 - Local To-do item text, checkbox state, source message IDs and first-seen times.
 - Explicit user-entered goal records.
+- Agent Markdown notes and conflict recovery drafts in
+  `servers/<endpoint hash>/notes/<provider-session hash>/note.md` and
+  `recovery-<UUID>.md`. These files never enter provider transcripts, native
+  tokens, diagnostic exports or telemetry.
 - Validated launch associations containing session/process identity facts.
 - Ownership/authentication records and transient request/response mailbox files.
   Message-detail IPC contains exact provider/reference/message locators; the detail
@@ -57,16 +61,18 @@ plugin directories/files get current-SID-only ACLs through explicit argv; existi
 directories are verified and fail clearly if foreign allow entries remain. The
 plugin does not silently strip foreign ACLs from an existing user directory.
 
-The foreground inspector owns its collector/helper. Helpers use stdin/parent
+All per-tab inspectors share one collector/helper on their collecting server. Helpers use stdin/parent
 lifetime supervision; there is no detached analytics daemon. Private mailbox
 requests use a random ownership token, bounded JSON and per-operation cleanup.
 Unconfigure requests owner-checked shutdown and restores still-owned config
 without killing unrelated processes. Dynamic native tokens expire after a crash.
 
-Closing/disabling does not purge preferences, To-do state, goals, launch ledger,
+Closing/disabling does not purge notes, preferences, To-do state, goals, launch ledger,
 configuration backups or other user data. Unconfigure before unlinking/uninstalling
 and retain the returned backup/conflict report. Remove retained private data only
-as a separate deliberate purge after owned collection has stopped.
+through complete owned removal after collection and inspector saves have stopped.
+Notes autosave privately, and revision checks serialize cooperating panels. A
+newer external edit stays intact; a conflicting draft is saved separately.
 
 ## Metric limits
 

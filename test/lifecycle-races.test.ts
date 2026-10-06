@@ -68,3 +68,9 @@ test('owned pane cleanup preserves recovery marker and fails on other close erro
     await assert.rejects(deactivate(context, rpc), error => error === failure);
     assert.deepEqual(await store.read('pane'), marker);
 });
+test('admission retries an exact disappeared lease on every host without recreating removed state',async t=>{
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'prism-admission-release-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const original=StateStore.prototype.acquire;let first=true;
+ StateStore.prototype.acquire=async function(options){if(this.dir===dir&&first){first=false;throw Object.assign(new Error('Lease released after EEXIST'),{code:'ENOENT',path:path.join(dir,'admission.lock')});}return original.call(this,options);};
+ try{const lease=await acquireAdmission(dir,{timeoutMs:1000});await lease.release();await rm(dir,{recursive:true,force:true});await assert.rejects(acquireAdmission(dir),{code:'ENOENT'});}finally{StateStore.prototype.acquire=original;}
+});
