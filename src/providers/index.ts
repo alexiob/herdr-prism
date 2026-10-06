@@ -11,6 +11,8 @@ import {JsonlTail} from './tail.ts';
 import {metadata} from './metadata.ts';
 import {TodoList} from '../content/todo.ts';
 import type {TodoState} from '../content/todo.ts';
+import {ReferenceHistory} from './reference-history.ts';
+import type {ReferenceState} from './reference-history.ts';
 export interface ProviderIndexOptions {codexHome?:string;claudeHome?:string;piHome?:string;maxRecordBytes?:number;maxMessages?:number;maxSessions?:number;directoryScanMs?:number;}
 export interface ActiveSessionRef {provider:string;kind:'id'|'path';value:string;}
 type Entry={provider:string;path:string;tail:JsonlTail;adapter:EvidenceBuilder;missing?:string;metadata?:EvidenceBuilder;detailed?:boolean;snapshot?:SessionEvidence;snapshotAdapter?:EvidenceBuilder;snapshotKey?:string;snapshotVersion?:number;knownChildren?:ChildLink[];knownParent?:string;};
@@ -21,6 +23,7 @@ export class ProviderIndex {
  private maxRecord:number;private maxMessages:number;private maxSessions:number;private queue:Promise<unknown>=Promise.resolve();
  private scanMs:number;private lastScan?:number;private inventory=new Map<string,string>();
  private activeRefs?:ActiveSessionRef[];private detailedRefs?:ActiveSessionRef[];
+ private referenceHistory?:{key:string;reader:ReferenceHistory};
  private metadataIndex=new Map<string,{provider:string;builder:EvidenceBuilder}>();private scanRound=0;private metadataCache=new Map<string,{stamp:string;builder:EvidenceBuilder}>();private pathAliases=new Map<string,string>();
  diagnostics:string[]=[];
  constructor(options:ProviderIndexOptions={}) {this.maxRecord=Math.max(256,Math.min(options.maxRecordBytes??1024*1024,16*1024*1024));this.maxMessages=Math.max(1,Math.min(options.maxMessages??200,10000));this.maxSessions=Math.max(1,Math.min(options.maxSessions??2048,20000));this.scanMs=Math.max(0,options.directoryScanMs??5000);
@@ -120,5 +123,11 @@ export class ProviderIndex {
  for(const file of files){const adapter=this.adapter(provider,file.path);adapter.max=2;const tail=new JsonlTail(this.maxRecord);try{await tail.read(file.path,record=>{if(adapter instanceof CodexAdapter)adapter.consume(record);else if(adapter instanceof ClaudeAdapter)adapter.consume(record);else (adapter as PiAdapter).consume(record);todo.update([...adapter.messages.values()]);},()=>{},message=>{todo.diagnostics.push(message);todo.diagnostics=todo.diagnostics.slice(-64);});available=true;}catch{/* All files unavailable yields undefined rather than an inferred empty list. */}}
  return available?todo.toJSON():undefined;
  }
- close():void {this.closed=true;this.entries.clear();this.sessions.clear();this.inventory.clear();this.metadataIndex.clear();this.metadataCache.clear();this.pathAliases.clear();this.snapshots=Object.freeze([]);this.assemblyKey=undefined;}
+ async readReferences(provider:string,ref:{kind:'id'|'path';value:string},isCurrent:()=>boolean=()=>true):Promise<ReferenceState|undefined>{
+  if(this.closed||!isCurrent())return;const evidence=this.resolveSnapshotCached(provider,ref);if(!evidence?.path||evidence.availability==='unavailable')return;
+  const key=`${provider}:${evidence.id}`;if(this.referenceHistory?.key!==key){this.referenceHistory?.reader.close();this.referenceHistory={key,reader:new ReferenceHistory(provider,this.maxRecord)};}
+  const files=[...this.entries.values()].filter(entry=>entry.provider===provider&&entry.adapter.evidence.id===evidence.id).sort((a,b)=>(a.adapter.evidence.startedAt??0)-(b.adapter.evidence.startedAt??0)||a.path.localeCompare(b.path)).map(entry=>entry.path);
+  return this.referenceHistory.reader.read(files,()=>!this.closed&&isCurrent());
+ }
+ close():void {this.closed=true;this.referenceHistory?.reader.close();this.referenceHistory=undefined;this.entries.clear();this.sessions.clear();this.inventory.clear();this.metadataIndex.clear();this.metadataCache.clear();this.pathAliases.clear();this.snapshots=Object.freeze([]);this.assemblyKey=undefined;}
 }

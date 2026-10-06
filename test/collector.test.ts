@@ -7,6 +7,26 @@ import os from 'node:os';
 import { ProviderIndex } from '../src/providers/index.ts';
 const runtime = await import('../src/runtime/collector.ts').catch(() => ({})) as any;
 const settings = { nativeMode: 'inspector-only', providerHomes: {}, todosEnabled: true, sampleIntervalMs: 2000, follow: true, ascii: false, monochrome: true };
+test('visible collector references retain exact early source outside the hot message window',async t=>{
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'prism-ref-history-'));t.after(()=>rm(dir,{recursive:true,force:true}));const file=path.join(dir,'codex','sessions','r.jsonl');await mkdir(path.dirname(file),{recursive:true});
+ const rows=[{type:'session_meta',payload:{id:'r',cwd:dir}},...Array.from({length:251},(_,i)=>({type:'response_item',payload:{type:'message',id:i?'plain'+i:'early-ref',role:'assistant',channel:'final',content:[{type:'output_text',text:i?'No reference here':'See `src/early.ts`'}]}}))];await writeFile(file,rows.map(row=>JSON.stringify(row)+'\n').join(''));
+ const agent={pane_id:'p',terminal_id:'t',workspace_id:'w',tab_id:'tab',agent:'codex',agent_status:'working',agent_session:{kind:'id',value:'r'},focused:true,revision:1};
+ const index=new ProviderIndex({codexHome:path.join(dir,'codex'),claudeHome:path.join(dir,'claude'),piHome:path.join(dir,'pi')});
+ const collector=new runtime.Collector({rpc:{call:async()=>({snapshot:{protocol:22,agents:[agent],panes:[],workspaces:[],tabs:[],layouts:[]}})},index,paneOpen:true,settings:{...settings,todosEnabled:false},stateDir:path.join(dir,'state'),git:{get:async()=>({availability:'unavailable'}),close(){}},sampler:{sample:async()=>{throw Error('fixture sampler unavailable');},close(){}}});t.after(()=>collector.close());
+ await collector.init();await collector.refresh();const view=collector.data.sessions.find((s:any)=>s.key==='codex:r');assert.equal(view.evidence.messages.length,200);assert.equal(view.refs.length,1);assert.equal(view.refs[0].messageId,'early-ref');assert.equal(view.refCoverage,'session');
+});
+test('selected reference history retries temporary unavailability on a bounded cadence without hidden reads',async t=>{
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'prism-ref-retry-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const evidence={id:'r',provider:'codex',contentRevision:'unchanged',messages:[],tools:[],usage:[],goals:[],availability:'known'};
+ const agent={pane_id:'p',terminal_id:'t',workspace_id:'w',tab_id:'tab',agent:'codex',agent_status:'working',agent_session:{kind:'id',value:'r'},focused:true,revision:1};let calls=0,now=Date.now();
+ const index={setActiveRefs(){},setDetailedRefs(){},refreshSnapshots:async()=>[evidence],resolveSnapshotCached:()=>evidence,diagnostics:[],close(){},readReferences:async()=>++calls===1?undefined:{refs:[],limited:false,observedAt:now}};
+ const collector=new runtime.Collector({rpc:{call:async()=>({snapshot:{protocol:22,agents:[agent],panes:[],workspaces:[],tabs:[],layouts:[]}})},index,paneOpen:true,settings:{...settings,todosEnabled:false},stateDir:dir,git:{close(){}},sampler:{sample:async()=>{throw Error('fixture sampler unavailable');},close(){}}});t.after(()=>collector.close());
+ await collector.init();t.mock.method(Date,'now',()=>now);await collector.refresh();assert.equal(calls,1);assert.equal(collector.data.sessions[0].refCoverage,'unavailable');
+ await collector.refresh();assert.equal(calls,1,'unchanged unavailable history must not retry every inventory refresh');
+ now+=5000;await collector.refresh();assert.equal(calls,2);assert.equal(collector.data.sessions[0].refCoverage,'session');assert.equal(collector.data.sessions[0].refUpdatedAt,now);
+ collector.setVisibleSession('codex:r',false);now+=5000;await collector.refresh();assert.equal(calls,2,'closed panes cannot refresh reference existence evidence');
+ collector.setVisibleSession('codex:r',true);await collector.refresh();assert.equal(calls,3);assert.equal(collector.data.sessions[0].refUpdatedAt,now);
+});
 test('native root ranks follow snapshot order despite reversed provider inventory and preserve selected identity on reorder',async t=>{
  const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'prism-root-order-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const evidence=(id:string)=>({id,provider:'pi',messages:[],tools:[],usage:[],goals:[],availability:'known'});

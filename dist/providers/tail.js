@@ -13,10 +13,17 @@ export class JsonlTail {
     anchor = Buffer.alloc(0);
     max;
     constructor(maxRecordBytes) { this.max = maxRecordBytes; }
-    async read(path, consume, reset, diagnostic) {
+    async read(path, consume, reset, diagnostic, isCurrent) {
+        const check = () => { if (isCurrent && !isCurrent()) {
+            const error = new Error('JSONL read cancelled');
+            error.name = 'AbortError';
+            throw error;
+        } };
+        check();
         const file = await open(path, 'r');
         try {
             const stat = await file.stat();
+            check();
             if (!stat.isFile())
                 throw new Error('transcript is not a regular file');
             const id = `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
@@ -40,7 +47,9 @@ export class JsonlTail {
             const block = this.offset < stat.size ? Buffer.alloc(Math.min(65536, this.max + 1)) : Buffer.alloc(0);
             // A refresh reads a finite snapshot of the file, even if the writer is busy.
             while (this.offset < stat.size) {
+                check();
                 const { bytesRead } = await file.read(block, 0, Math.min(block.length, stat.size - this.offset), this.offset);
+                check();
                 if (!bytesRead)
                     break;
                 const chunk = block.subarray(0, bytesRead);
@@ -48,6 +57,7 @@ export class JsonlTail {
                 for (let i = 0; i < chunk.length; i++) {
                     if (chunk[i] !== 10)
                         continue;
+                    check();
                     const piece = chunk.subarray(start, i);
                     this.accept(piece, consume, diagnostic);
                     this.offset += i - start + 1;

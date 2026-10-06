@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 const screen=await import('../src/tui/screen.ts').catch(()=>({})) as any;
 const text=await import('../src/tui/text.ts').catch(()=>({})) as any;
 const data={sessions:[{key:'codex:a',depth:0,children:['codex:b'],evidence:{id:'a',provider:'codex',title:'日本語 agent',state:'working',messages:[{id:'m1',role:'assistant',text:'Review src/auth.ts\nACTION: Review plan',timestamp:1}],tools:[],usage:[],goals:[],availability:'known'},resource:{processes:[],availability:'unavailable',memoryLabel:'RSS sum',coverage:{readable:0,total:0}},usage:{input:123,output:45,availability:'known'},todos:[{id:'t1',text:'Review plan',messageId:'m1',checked:false}],refs:[{id:'r1',target:'/repo/auth.ts',messageId:'m1',edited:true}]},{key:'codex:b',depth:1,parentKey:'codex:a',children:[],evidence:{id:'b',provider:'codex',title:'child',messages:[],tools:[],usage:[],goals:[],availability:'known'}}],updatedAt:100,stale:false,diagnostics:[]};
+test('Refs labels historical coverage and its evidence age instead of presenting a limited list as lifetime complete',()=>{
+ const state=screen.createUiState();state.tab='Refs';state.selectedKey='codex:a';
+ for(const [coverage,label]of [['session','Session reference history'],['partial','Partial reference history'],['retained','Retained message references'],['unavailable','Reference source unavailable']]){
+  const input={...data,sessions:[{...data.sessions[0],refCoverage:coverage,refUpdatedAt:1000}]};const rendered=screen.renderScreen(input,state,80,24,4000);
+  assert.match(rendered.rows[0].text,new RegExp(label));assert.match(rendered.rows[0].text,/3s ago/);
+ }
+});
 test('bounded previews stop at requested lines while preserving graphemes, tabs and explicit full wrapping',()=>{
  assert.deepEqual(text.wrap('日本語👩‍💻e\u0301TAIL',4,2),['日本','語👩‍💻']);assert.deepEqual(text.wrap('ab\tc\nxy',4,2),['ab  ','  c']);assert.deepEqual(text.wrap('ab\tc\nxy',4),['ab  ','  c','xy']);assert.equal(text.wrap('x'.repeat(100000),8,3).length,3);assert.equal(text.wrap('text',8,0).length,0);
 });

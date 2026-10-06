@@ -4,9 +4,9 @@ import type {UsageSummary} from '../metrics/usage-reducer.ts';
 import type {GitSummary} from '../git/cache.ts';
 export const tabs=['Overview','Agents','Processes','Messages','Refs','To-do'] as const;
 export type Tab=typeof tabs[number];
-export interface UiRef {id:string;target:string;messageId:string;line?:number;edited:boolean;exists?:boolean;kind?:string;}
+export interface UiRef {id:string;target:string;messageId:string;line?:number;edited:boolean;exists?:boolean;kind?:string;source?:string;sources?:import('../content/refs.ts').RefSource[];}
 export interface UiTodo {id:string;text:string;messageId:string;checked:boolean;firstSeenAt?:number;latestMessageId?:string;repeated?:boolean;source?:string;}
-export interface SessionView extends DashboardSession {resource?:ProcessView;usage?:UsageSummary;git?:GitSummary;refs?:UiRef[];todos?:UiTodo[];todoStatus?:string;todoSourceMessageId?:string;todoReportedAt?:number;history?:{cpu:(number|undefined)[];memory:(string|undefined)[];peakMemoryBytes?:string;observedFrom?:number;observedTo?:number;windowMs?:number;points?:{at:number;gap?:boolean;cpuPercent?:number;memoryBytes?:string;}[];};}
+export interface SessionView extends DashboardSession {resource?:ProcessView;usage?:UsageSummary;git?:GitSummary;refs?:UiRef[];refCoverage?:'session'|'partial'|'retained'|'unavailable';refUpdatedAt?:number;todos?:UiTodo[];todoStatus?:string;todoSourceMessageId?:string;todoReportedAt?:number;history?:{cpu:(number|undefined)[];memory:(string|undefined)[];peakMemoryBytes?:string;observedFrom?:number;observedTo?:number;windowMs?:number;points?:{at:number;gap?:boolean;cpuPercent?:number;memoryBytes?:string;}[];};}
 export interface DashboardData {sessions:SessionView[];updatedAt:number;stale:boolean;diagnostics:string[];demo?:boolean;server?:import('../runtime/server.ts').ServerIdentity;}
 export interface ReaderPosition {cursor:number;cursorId?:string;scroll:number;}
 export interface MessageReader {lastIds:string[];following:boolean;newCount:number;initialized?:boolean;anchorId?:string;}

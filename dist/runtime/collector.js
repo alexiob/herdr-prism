@@ -318,6 +318,8 @@ export class Collector extends EventEmitter {
                         this.todos.set(node.key, list);
                     }
                     let refs = previous?.refs ?? [];
+                    let refCoverage = previous?.refCoverage;
+                    let refUpdatedAt = previous?.refUpdatedAt;
                     let git = previous?.git;
                     const canDetail = () => detailed && generation === this.visibilityGeneration && this.paneOpen;
                     if (canDetail()) {
@@ -355,12 +357,35 @@ export class Collector extends EventEmitter {
                                     list.update(node.evidence.messages);
                                 if (canDetail())
                                     await this.saveTodo(node.key, list);
-                                if (canDetail())
-                                    refs = await extractRefs(node.evidence.messages, node.evidence.cwd);
-                                this.derived.set(node.key, { revision: node.evidence.contentRevision, messages: node.evidence.messages, cwd: node.evidence.cwd, refs });
                             }
                             else
                                 refs = cached.refs ?? [];
+                            if (canDetail() && (!unchanged || Date.now() - (cached?.refAttemptAt ?? 0) >= 5000)) {
+                                const refAttemptAt = Date.now();
+                                if (typeof this.index.readReferences === 'function') {
+                                    const ref = node.evidence.path ? { kind: 'path', value: node.evidence.path } : { kind: 'id', value: node.evidence.id };
+                                    const history = await this.index.readReferences(node.evidence.provider, ref, canDetail);
+                                    if (canDetail()) {
+                                        if (history) {
+                                            refs = history.refs;
+                                            refCoverage = history.limited ? 'partial' : 'session';
+                                            refUpdatedAt = history.observedAt;
+                                        }
+                                        else
+                                            refCoverage = 'unavailable';
+                                    }
+                                }
+                                else {
+                                    const extracted = await extractRefs(node.evidence.messages, node.evidence.cwd, canDetail);
+                                    if (canDetail()) {
+                                        refs = extracted;
+                                        refCoverage = 'retained';
+                                        refUpdatedAt = Date.now();
+                                    }
+                                }
+                                if (canDetail())
+                                    this.derived.set(node.key, { revision: node.evidence.contentRevision, messages: node.evidence.messages, cwd: node.evidence.cwd, refs, refAttemptAt });
+                            }
                             if (canDetail())
                                 git = node.evidence.cwd ? await this.git.get(node.evidence.cwd, { ttlMs: inactive(node.evidence.state) ? 30000 : 5000 }) : undefined;
                         }
@@ -368,7 +393,7 @@ export class Collector extends EventEmitter {
                     else if (git)
                         git = { ...git, availability: 'stale', ageMs: Math.max(0, Date.now() - git.sampledAt), reason: 'Updates paused while another session is shown' };
                     git ??= { availability: 'unavailable', branchState: 'unknown', reason: detailed ? 'Checkout path unavailable' : 'Details load when this session is shown', cwd: node.evidence.cwd ?? '', sampledAt: Date.now(), ageMs: 0 };
-                    views.push({ ...node, resource: previous?.resource, refs, todos: list.items.map(t => ({ id: t.id, text: t.text, checked: t.checked, messageId: t.firstMessageId, firstSeenAt: t.firstSeen, latestMessageId: t.latestMessageId, repeated: t.repeated, source: t.source })), todoStatus: list.status, todoSourceMessageId: list.sourceMessageId, todoReportedAt: list.reportedAt, git });
+                    views.push({ ...node, resource: previous?.resource, refs, refCoverage, refUpdatedAt, todos: list.items.map(t => ({ id: t.id, text: t.text, checked: t.checked, messageId: t.firstMessageId, firstSeenAt: t.firstSeen, latestMessageId: t.latestMessageId, repeated: t.repeated, source: t.source })), todoStatus: list.status, todoSourceMessageId: list.sourceMessageId, todoReportedAt: list.reportedAt, git });
                 }
                 this.data = { server: this.data.server, sessions: views, updatedAt: Date.now(), stale: false, diagnostics: [...forest.diagnostics, ...this.index.diagnostics, ...[...this.todos.values()].flatMap(list => list.diagnostics)] };
                 this.updateResources();

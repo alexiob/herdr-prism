@@ -101,6 +101,8 @@ function contentRows(session:SessionView,state:UiState,columns:number,now:number
       for(const tool of tools)rows.push({id:`${message.id}:tool:${tool.id}`,text:`  ${tool.status} ${tool.name}: ${tool.summary??''}`,action:{type:'message',text:`${tool.status} ${tool.name}\n${tool.summary??'No recorded result'}${tool.editedPaths?.length?`\nEdited paths: ${tool.editedPaths.join('\n')}`:''}`},copy:tool.summary??tool.name});
     }
   }else if(state.tab==='Refs'){
+    const coverage=session.refCoverage;const label=coverage==='session'?'Session reference history':coverage==='partial'?'Partial reference history':coverage==='unavailable'?'Reference source unavailable':'Retained message references';
+    rows.push({id:'refs-coverage',text:`${label} · ${session.refs?.length??0} retained · ${age(session.refUpdatedAt,now)} ago`});
     let group='';for(const ref of session.refs??[]){if(!match(ref.target,state))continue;if(ref.messageId!==group){rows.push({id:`source:${ref.messageId}`,text:`Message ${ref.messageId}`,action:{type:'source',sessionKey:session.key,id:ref.messageId}});group=ref.messageId;}
       rows.push({id:ref.id,text:`${ref.edited?'✎ ':''}${ref.exists===false?'? ':''}${ref.target}${ref.kind==='directory'?'/':''}${ref.line?`:${ref.line}`:''}`,action:{type:'open-ref',sessionKey:session.key,id:ref.id,target:ref.target,line:ref.line},sourceId:ref.messageId,copy:ref.target});}
   }else if(state.tab==='To-do'){
