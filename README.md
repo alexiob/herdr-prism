@@ -90,7 +90,7 @@ for the lifecycle and configuration details.
 | Processes | Readable process identities, exclusive ownership and resource coverage |
 | Messages | Visible user/assistant text, inline expansion and full detail |
 | Refs | Assistant links/files, explicit edit markers, exact source history and deliberate open/copy |
-| To-do | Opt-in complete ACTION lists with local checked state and source provenance |
+| To-do | Complete ACTION lists enabled by default, with local checked state and source provenance |
 
 Refs are recovered from the selected session's transcript history independently
 of the 200-message hot window. The coverage row shows when history is partial

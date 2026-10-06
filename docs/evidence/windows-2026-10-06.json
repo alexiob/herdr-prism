@@ -3,6 +3,15 @@
   "date": "2026-10-06",
   "platform": "win32-x64",
   "os": "Windows 11, NT 10.0.26200",
+  "todoDefaultChange": {
+    "platforms": ["windows", "macos", "linux"],
+    "enabledByDefault": true,
+    "explicitOptOutPreserved": true,
+    "node22RelevantTestsPassed": 42,
+    "node24RelevantTestsPassed": 42,
+    "actualWindowsSettingEnabled": true,
+    "actualPrismCollectorRestartSucceeded": true
+  },
   "windowsBootstrapLifecycle": {
     "node22InstallerTests": {"passed": 9, "failed": 0},
     "node24InstallerTests": {"passed": 9, "failed": 0},

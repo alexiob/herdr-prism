@@ -5,7 +5,7 @@ import { atomicWrite, privateDir, readOptional, restrict } from "./safe-file.js"
 import { scanToml, put, replaceValues } from "./toml.js";
 import { shortcutDecision } from "./shortcut.js";
 export { privateDir as ensurePrivateDir } from "./safe-file.js";
-const defaults = { nativeMode: 'overview', providerHomes: {}, todosEnabled: false, sampleIntervalMs: 2000, follow: true, ascii: false, monochrome: false };
+const defaults = { nativeMode: 'overview', providerHomes: {}, todosEnabled: true, sampleIntervalMs: 2000, follow: true, ascii: false, monochrome: false };
 export async function loadSettings(configDir) { const text = await readOptional(join(configDir, 'settings.json')); if (!text)
     return { ...defaults, providerHomes: {} }; const value = JSON.parse(text); if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Settings must be an object'); const data = value; const result = { ...defaults, ...data }; if (!['overview', 'inspector-only', 'native'].includes(result.nativeMode))

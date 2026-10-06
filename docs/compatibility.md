@@ -58,7 +58,7 @@ a guarantee that every historical/future provider release shares those formats.
 Counters retain cumulative/delta, epoch, cache and subtree meaning. Missing
 categories/prices/inclusion flags cannot establish a complete total. The dashboard
 shows source/coverage/freshness and separates explicit goals, delegated tasks and
-opt-in ACTION To-do lists.
+ACTION To-do lists enabled by default (with an explicit opt-out setting).
 
 ## CI gates and pins
 

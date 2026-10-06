@@ -333,12 +333,14 @@ installation and removal.
 
 `settings.json` in `HERDR_PLUGIN_CONFIG_DIR` holds validated preferences. Defaults
 include a 2000 ms sample interval, follow enabled, Unicode/color enabled, and
-ACTION To-do parsing disabled. `nativeMode` accepts `overview`, `inspector-only`
+ACTION To-do parsing enabled on Windows, macOS and Linux. `nativeMode` accepts `overview`, `inspector-only`
 or `native`; successful activation sets its selected mode plus `autostart: true`.
 Provider homes can contain exact `codex`, `claude` and `pi` paths; paths retain
 Unicode, drive letters and UNC spelling. Sampling intervals are 250–60000 ms.
 
-Enable `todosEnabled` only when wanted. Checkboxes change local state, never
+Set `todosEnabled: false` to disable parsing. Existing explicit settings are
+preserved; older installations that saved `false` must change it to `true` and
+restart Prism's collector. Checkboxes change local state, never
 transcripts or instruction files. Optional per-model `costRates` require explicit
 `currency` and nonnegative per-million-token `input`, `output`, `cacheRead` and
 `cacheWrite` prices; absent pricing remains unknown/partial.
