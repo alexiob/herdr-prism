@@ -108,7 +108,7 @@ export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH
   await stage('persistentNotesAndEditHold',async()=>{
    let panel=await ownPane(beta.tab_id);const screen=()=>text(panel.pane_id),send=value=>cli(['pane','send-text',panel.pane_id,value]);
    await send('p');await until('Notes follow enabled',async()=>(await screen()).includes('Follow'));
-   await send('\t'.repeat(7));await until('Notes selected',async()=>(await screen()).includes('[Notes]'));
+   await send('G\r');await until('Notes selected through Overview link',async()=>(await screen()).includes('[Notes]'));
    await send('\r');await until('Notes editing',async()=>(await screen()).includes('Editing'));
    const markdown='# Persistent notes\n\nq and p are literal text.\n';await send('\x1b[200~'+markdown+'\x1b[201~');
    const gamma=(await cli(['pane','split',beta.pane_id,'--direction','down','--no-focus'])).pane,gammaFile=await fixture('fixture-gamma');

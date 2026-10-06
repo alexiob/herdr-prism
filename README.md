@@ -143,7 +143,8 @@ wrapped content. Dark, light and monochrome themes are supported through
 `inspector --theme dark|light|mono` or the persisted `theme` setting.
 
 In Notes edit mode, `q`, `p`, `/`, `?`, numbers and spaces are literal text.
-Arrows, Home/End, Backspace/Delete and bracketed paste edit the source. Tab saves
+Arrows, Home/End, Backspace/Delete and bracketed paste edit the source. A pane
+too small to show content and the caret visibly pauses text editing until enlarged. Tab saves
 and leaves Notes. Follow pauses during editing, even if the agent disappears;
 its draft stays attached to that agent. Notes live on the collecting server,
 shared by its panels and retained across restarts/upgrades. A newer external edit

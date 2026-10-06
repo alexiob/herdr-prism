@@ -43,12 +43,12 @@ export async function main(argv = process.argv.slice(2)) {
     const connectNotes=(dir:string)=>{notes=new NotesController(new NotesStore(dir));notes.on('change',()=>{state.notes=notes!.value;if(!closing)paint();});};
     const editorInput=async(event:any)=>{
         if(!notes?.value?.editing)return false;
-        if(event.type==='paste'){if(event.overflow)state.notice='Paste exceeds 1 MiB; nothing inserted';else notes.paste(event.text);return true;}
+        if(event.type==='paste'){if(event.overflow)state.notice='Paste exceeds 1 MiB; nothing inserted';else notes.paste(event.text,{columns:ui.columns,height:ui.rows});return true;}
         if(event.type==='mouse'){if(event.release)return true;const tab=frame.tabRegions?.find(r=>r.y===event.y&&event.x>=r.x&&event.x<r.x+r.width);if(!tab)return true;await notes.end();return false;}
         if(event.key==='ctrl+s'){await notes.flush();return true;}
         if(event.key==='escape'){await notes.end();return true;}
         if(['tab','shift+tab','ctrl+c'].includes(event.key)){await notes.end();return false;}
-        return notes.key(event.key);
+        return notes.key(event.key,{columns:ui.columns,height:ui.rows});
     };
     const paint = () => { syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
     if (args.options.demo) {
@@ -205,7 +205,7 @@ export async function main(argv = process.argv.slice(2)) {
                         }finally{referenceRequest=false;}return;
                     }
                     if(action.type==='tab'){contentRequest++;await notes?.end();await ensureNotes();return;}
-                    if(action.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin();state.notice=undefined;return;}
+                    if(action.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows});state.notice=undefined;return;}
                     if(action.type==='select'){await notes?.end();contentRequest++;const selected=data.sessions.find(session=>session.key===action.sessionKey);if(selected){state.selectedKey=selected.key;state.tab='Overview';state.cursor=0;state.cursorId=undefined;state.scroll=0;syncVisibility();collector!.invalidate();}return;}
                     if (action.type === 'focus') {
                         await notes?.end();
@@ -290,7 +290,7 @@ export async function main(argv = process.argv.slice(2)) {
         else if (action?.type === 'focus'||action?.type==='select')
             {state.selectedKey = action.sessionKey;if(action.type==='select')state.tab='Overview';}
         else if(action?.type==='tab')await ensureNotes();
-        else if(action?.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin();}
+        else if(action?.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows});}
         else if (action?.type === 'message')
             showDetail(state, action.text ?? '',action.document);
         else if(action?.type==='ref-sources'){

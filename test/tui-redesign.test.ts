@@ -86,3 +86,10 @@ test('tiny actual styled frames stay within terminal cells and wide Overview sup
 test('compact quantities style attached binary units quietly and keep signed Git changes semantic',async()=>{
  const {valueSpans}=await import('../src/tui/widgets.ts');const memory=valueSpans('620MiB','quantity');assert.ok(memory.some(s=>s.text==='620'&&s.role==='quantity'));assert.ok(memory.some(s=>s.text==='MiB'&&s.role==='secondary'));const git=valueSpans('+128 -37','quantity');assert.ok(git.some(s=>s.text==='+128'&&s.role==='positive'));assert.ok(git.some(s=>s.text==='-37'&&s.role==='negative'));
 });
+test('Overview Notes link selects the edit entry and restores the Overview anchor after leaving',()=>{
+ const data=fixture(),state=createUiState();state.selectedKey=data.sessions[0]!.key;state.cursorId='notes';let frame=renderScreen(data,state,50,24);const anchor=state.cursorId;handleKey(state,'enter',data,frame);frame=renderScreen(data,state,50,24);assert.equal(handleKey(state,'enter',data,frame)?.type,'notes-edit');assert.equal(state.cursorId,'notes-edit');
+ handleKey(state,'tab',data,frame);frame=renderScreen(data,state,50,24);assert.equal(state.tab,'Overview');assert.equal(state.cursorId,anchor);
+});
+test('mixed reference facts and actions allow reading the entire path before selecting the action list',()=>{
+ const data=fixture(),state=createUiState();state.selectedKey=data.sessions[0]!.key;state.tab='Refs';const ref=data.sessions[0]!.refs![0]!;ref.target='/EARLY/'+('long-directory/'.repeat(30))+'ending.ts';state.cursorId=ref.id;let frame=renderScreen(data,state,36,18);const action=handleKey(state,'enter',data,frame)!;showDetail(state,action.text??'',action.document);frame=renderScreen(data,state,36,18);assert.match(frame.lines.join('\n'),/EARLY/);handleKey(state,'end',data,frame);frame=renderScreen(data,state,36,18);handleKey(state,'up',data,frame);frame=renderScreen(data,state,36,18);assert.equal(handleKey(state,'enter',data,frame)?.type,'source');handleKey(state,'home',data,frame);frame=renderScreen(data,state,36,18);assert.match(frame.lines.join('\n'),/EARLY/);assert.equal(state.scroll,0);
+});

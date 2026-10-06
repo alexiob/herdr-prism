@@ -56,7 +56,7 @@ export async function main(argv = process.argv.slice(2)) {
             if (event.overflow)
                 state.notice = 'Paste exceeds 1 MiB; nothing inserted';
             else
-                notes.paste(event.text);
+                notes.paste(event.text, { columns: ui.columns, height: ui.rows });
             return true;
         }
         if (event.type === 'mouse') {
@@ -80,7 +80,7 @@ export async function main(argv = process.argv.slice(2)) {
             await notes.end();
             return false;
         }
-        return notes.key(event.key);
+        return notes.key(event.key, { columns: ui.columns, height: ui.rows });
     };
     const paint = () => { syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
     if (args.options.demo) {
@@ -315,7 +315,7 @@ export async function main(argv = process.argv.slice(2)) {
                     if (action.type === 'notes-edit') {
                         await ensureNotes(true);
                         if (notes && notes.value?.sessionKey === state.selectedKey)
-                            notes.begin();
+                            notes.begin({ columns: ui.columns, height: ui.rows });
                         state.notice = undefined;
                         return;
                     }
@@ -448,7 +448,7 @@ export async function main(argv = process.argv.slice(2)) {
                 else if (action?.type === 'notes-edit') {
                     await ensureNotes(true);
                     if (notes && notes.value?.sessionKey === state.selectedKey)
-                        notes.begin();
+                        notes.begin({ columns: ui.columns, height: ui.rows });
                 }
                 else if (action?.type === 'message')
                     showDetail(state, action.text ?? '', action.document);

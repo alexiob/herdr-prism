@@ -611,7 +611,7 @@ drafts are recovered separately. Notes stay outside provider transcripts,
 exports, native tokens and telemetry. Demo notes are disposable; complete owned
 removal purges real notes and recovery drafts.
 
-macOS arm64 source typecheck/build and the full suite pass: 338 tests, 316 passed,
+macOS arm64 source typecheck/build and the full suite pass: 342 tests, 320 passed,
 22 platform/opt-in skips, zero failures. Actual isolated Herdr 0.9.3 package
 acceptance passes reference target/source history, Notes autosave/restart/focus
 hold/conflict/close flushing, per-tab shared-collector preservation, metadata
@@ -625,3 +625,20 @@ A deterministic regression now passes after extending the existing retry to
 Unix; a missing state directory is still refused without recreation. Windows
 lease behavior remains unchanged. Windows-specific implementation/testing stays
 with the owning machine; the merged shared-collector architecture is preserved.
+
+
+Final Astra review reproduced three navigation issues; all were corrected with
+new regressions observed RED→GREEN: Overview→Notes selection and reader restore,
+full scrolling through mixed reference facts/actions, and safe text-input pause
+in short/resized Notes panes. The affected suite passes 50/50. A final status-only
+cleanup passes 46/46 and an actual controlling Unix PTY confirms resize
+18→8→18, visible pause, rejected invisible `q`, resumed literal `p`, explicit
+save and clean close.
+
+Podman Linux arm64 Node 24 passes typecheck and 342 full tests (319 passed,
+23 platform/opt-in skips, zero failures), plus the rebuilt isolated Herdr package
+reference/Notes/lifecycle pipeline. The initial transferred test archive omitted
+the root installer/native packager and included AppleDouble metadata; those
+harness inputs were corrected. macOS's rebuilt package passes the same pipeline,
+now opening Notes through its Overview arrow rather than direct tab traversal.
+The shared collector and all incoming Windows changes remain intact.

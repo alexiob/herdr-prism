@@ -6,6 +6,10 @@ import {sanitize,cellWidth} from './text.ts';
 import {span,fitSpans,asciiText} from './widgets.ts';
 import {renderLayout} from './layout.ts';
 
+export interface EditorViewport {columns:number;height:number;}
+export function notesEditorFits(viewport:EditorViewport):boolean{
+  let lines=1,used=0;for(const name of viewport.columns<50?['Overview','Agents','Procs','Msgs','Refs','To-do','Git','[Notes]']:['Overview','Agents','Processes','Messages','Refs','To-do','Git','[Notes]']){if(used&&used+name.length>viewport.columns){lines++;used=0;}used+=name.length+1;}return viewport.columns>=12&&viewport.height>=Math.max(10,lines+6);
+}
 const segments=new Intl.Segmenter(undefined,{granularity:'grapheme'});
 function boundaries(text:string){return [...segments.segment(text)].map(s=>s.index).concat(text.length);}
 function lineStart(text:string,cursor:number){return cursor===0?0:text.lastIndexOf('\n',cursor-1)+1;}
@@ -28,12 +32,13 @@ export class NotesController extends EventEmitter {
     const note=await this.store.load(sessionKey);this.revision=note.revision;this.recovery=undefined;
     this.value={sessionKey,title,text:note.text,cursor:0,editing:false,status:'saved'};this.changed();
   }
-  begin(){if(this.value){this.value.editing=true;this.changed();}}
+  begin(viewport?:EditorViewport){if(viewport&&!notesEditorFits(viewport))return;if(this.value){this.value.editing=true;this.changed();}}
   private insert(text:string){const value=this.value!;const next=value.text.slice(0,value.cursor)+text+value.text.slice(value.cursor);if(Buffer.byteLength(next)>noteLimit){value.error='Notes exceed 1 MiB limit';this.changed();return;}value.text=next;value.cursor+=text.length;this.modified();}
   private modified(){this.dirty=true;this.value!.status=this.recovery?'conflict':'dirty';this.value!.error=undefined;clearTimeout(this.timer);this.timer=setTimeout(()=>void this.flush().catch(()=>{}),this.delay);this.changed();}
-  paste(text:string){if(this.value?.editing)this.insert(sanitize(text).replace(/\r\n?/g,'\n'));}
-  key(key:string):boolean{
+  paste(text:string,viewport?:EditorViewport){if(viewport&&!notesEditorFits(viewport))return;if(this.value?.editing)this.insert(sanitize(text).replace(/\r\n?/g,'\n'));}
+  key(key:string,viewport?:EditorViewport):boolean{
     const value=this.value;if(!value?.editing)return false;
+    if(viewport&&!notesEditorFits(viewport)){this.changed();return true;}
     if(['escape','tab','shift+tab','ctrl+c','ctrl+s'].includes(key))return false;
     const before=value.cursor,start=lineStart(value.text,before),end=lineEnd(value.text,before);
     if(key==='left')value.cursor=boundaries(value.text).filter(n=>n<before).at(-1)??0;
@@ -79,8 +84,12 @@ export class NotesController extends EventEmitter {
 export function renderNotes(data:DashboardData,state:UiState,columns:number,height:number,now:number):RenderedScreen{
   const note=state.notes,editing=note?.editing===true;
   const action:ScreenRow={id:'notes-edit',text:'Edit Markdown notes',help:'Enter edits. Text autosaves after 500 ms. Escape returns to reading; Ctrl+S flushes. Follow is held while editing. Tab leaves after saving. Complete Prism removal deletes notes.',action:{type:'notes-edit',sessionKey:state.selectedKey}};if(note?.recoveryPath)action.help+=' Recovery draft: '+note.recoveryPath;
-  if(height<10)return renderLayout(data,state,[{id:'notes',title:'Notes · enlarge to edit',rows:[action]}],columns,height,now);
-  const frame=renderLayout(data,state,[{id:'notes',title:'Markdown notes',rows:[action]}],columns,height,now);
+  state.cursor=0;state.cursorId='notes-edit';
+  if(!notesEditorFits({columns,height})){
+    const small=renderLayout(data,state,[{id:'notes',title:'Notes · enlarge panel',rows:[{...action,action:undefined,selectable:false}]}],columns,height,now);
+    if(height>=2){small.spans![height-2]=fitSpans([span(editing?'Editing paused · enlarge panel':'Enlarge panel to edit','warning')],columns);small.spans![height-1]=fitSpans([span(editing?'Esc read · Ctrl+S save · Tab leave':'? help · Tab views · q close','secondary')],columns);for(const i of [height-2,height-1])small.lines[i]=small.spans![i]!.map(p=>p.text).join('');}return small;
+  }
+  const frame=renderLayout(data,state,[{id:'notes',title:'Markdown notes',rows:[action]}],columns,height,now,new Map(),undefined,3);
   const first=frame.bodyStart+2,room=Math.max(1,columns-4),visible=Math.max(1,height-first-2),text=note?.text??'';
   const lines:{text:string;start:number;end:number}[]=[];let at=0;
   for(const raw of text.split('\n')){let current='',used=0,start=at;

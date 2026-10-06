@@ -253,8 +253,6 @@ export function renderScreen(data, state, columns, height, now = Date.now()) {
     const session = data.sessions.find(s => s.key === state.selectedKey) ?? data.sessions[0];
     if (session && !state.selectedKey)
         state.selectedKey = session.key;
-    if (state.tab === 'Notes' && !state.help && state.detail === undefined)
-        return renderNotes(data, state, columns, height, now);
     if (state.refSources && state.refSources.sessionKey !== session?.key) {
         state.detail = undefined;
         closeDetail(state);
@@ -281,6 +279,8 @@ export function renderScreen(data, state, columns, height, now = Date.now()) {
         while (state.readers.size > 96)
             state.readers.delete(state.readers.keys().next().value);
     }
+    if (state.tab === 'Notes' && !state.help && state.detail === undefined)
+        return renderNotes(data, state, columns, height, now);
     let followEnd = false;
     if (session && state.tab === 'Messages') {
         const reader = state.messageReaders.get(session.key) ?? { lastIds: [], following: state.followMessages, newCount: 0 };
@@ -328,12 +328,12 @@ export function renderScreen(data, state, columns, height, now = Date.now()) {
         state.cursorId = undefined;
     }
     const logical = document ? document.sections.flatMap(section => section.rows ?? []) : rows;
-    if (state.cursorId) {
+    if (!document && state.cursorId) {
         const at = logical.findIndex(r => r.id === state.cursorId);
         if (at >= 0)
             state.cursor = at;
     }
-    if (logical.length) {
+    if (!document && logical.length) {
         state.cursor = Math.max(0, Math.min(state.cursor, logical.length - 1));
         state.cursorId = logical[state.cursor]?.id;
     }

@@ -14,7 +14,7 @@ export function groupRows(rows, fallback) {
     }
     return result;
 }
-export function renderLayout(data, state, sections, columns, height, now, numericTargets = new Map(), document) {
+export function renderLayout(data, state, sections, columns, height, now, numericTargets = new Map(), document, minimumBodyRows = 1) {
     columns = Math.max(1, Math.floor(columns));
     height = Math.max(1, Math.floor(height));
     const session = data.sessions.find(s => s.key === state.selectedKey) ?? (!state.notes?.editing ? data.sessions[0] : undefined);
@@ -40,8 +40,8 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
     if (tabLine.length)
         header.push(tabLine);
     // Keep room for the selected entry in short terminals; tabs keep measured targets.
-    if (header.length > height - 3) {
-        header.splice(1, Math.min(2, header.length - (height - 3)));
+    if (header.length > height - 2 - minimumBodyRows) {
+        header.splice(1, Math.min(2, header.length - (height - 2 - minimumBodyRows)));
         for (const region of tabRegions)
             region.y = header.findIndex(line => line.some(part => part.text.trim() === (region.tab === state.tab ? '[' + labels[tabs.indexOf(region.tab)] + ']' : labels[tabs.indexOf(region.tab)]))) + 1;
     }
@@ -87,11 +87,36 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
         body = sectionLines(sections, columns);
     const bodyStart = header.length, bodyHeight = Math.max(1, height - bodyStart - 2);
     let selectedBody = body.findIndex(line => line.positions.some(position => position.index === state.cursor));
-    if (!rows.length) {
-        const staticRows = body.map((line, i) => ({ id: `detail:${i}`, text: line.parts.map(p => p.text).join(''), selectable: false, help: document?.help ?? 'Scroll to read all recorded content. Escape returns to the previous entry.' }));
-        rows.push(...staticRows);
+    if (document || !rows.length) {
+        const actions = rows.slice();
+        const physical = body.map((line, i) => {
+            const action = line.positions[0];
+            return action ? actions[action.index] : { id: `detail:${i}`, text: line.parts.map(p => p.text).join(''), selectable: false, help: document?.help ?? 'Scroll to read all recorded content. Escape returns to the previous entry.' };
+        });
+        rows.splice(0, rows.length, ...physical);
+        const anchor = state.cursorId ? rows.findIndex(row => row.id === state.cursorId) : -1;
+        if (anchor >= 0)
+            state.cursor = anchor;
         state.cursor = Math.max(0, Math.min(state.cursor, rows.length - 1));
         selectedBody = state.cursor;
+        for (const [i, line] of body.entries()) {
+            for (const position of line.positions)
+                position.index = i;
+            let used = 0;
+            for (const part of line.parts) {
+                part.selected = false;
+                for (const position of line.positions) {
+                    const marker = position.column - 2, selected = i === state.cursor;
+                    if (used === marker && part.text.length === 1) {
+                        part.text = selected ? '›' : ' ';
+                        part.role = selected ? 'accent' : 'text';
+                    }
+                    if (used >= marker && used < marker + position.width + 1 && part.role !== 'border')
+                        part.selected = selected;
+                }
+                used += cellWidth(part.text);
+            }
+        }
     }
     if (selectedBody < 0)
         selectedBody = 0;

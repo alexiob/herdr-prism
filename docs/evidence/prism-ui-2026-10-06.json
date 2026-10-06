@@ -8,8 +8,8 @@
     "node": "v26.10.0",
     "herdr": "0.9.3",
     "fullSuite": {
-      "tests": 338,
-      "passed": 316,
+      "tests": 342,
+      "passed": 320,
       "skipped": 22,
       "failed": 0
     },
@@ -19,14 +19,14 @@
         "nativeMetadataReadback": {
           "tokenPrefix": "hat",
           "nonemptyKeys": [
+            "hat_counts",
             "hat_div",
             "hat_branch",
-            "hat_line",
-            "hat_load",
-            "hat_counts",
-            "hat_rank",
             "hat_fresh",
-            "hat_last"
+            "hat_last",
+            "hat_load",
+            "hat_line",
+            "hat_rank"
           ],
           "emptyTokensOmittedByHerdr": true,
           "budgetAtMost14": true,
@@ -66,7 +66,7 @@
           "sharedCollectorUnchanged": true
         },
         "nativeMetadataExpiry": {
-          "expiredAfterMs": 13288,
+          "expiredAfterMs": 13434,
           "allPublishedNativeTokensExpired": true,
           "builtinAgentWorkspaceTabFactsRetained": true,
           "foreignMetadataRetained": true,
@@ -104,5 +104,142 @@
     "Hidden transcript/body pause and stale resource publication are observed; zero internal Git/process reads are not directly instrumented.",
     "New Windows-specific acceptance remains with the owning Windows machine and GitHub Actions.",
     "Background-machine and last-viewer visibility, authoritative native focus indices, paid-provider, native-pixel and soak acceptance retain their existing upstream or validation gates."
-  ]
+  ],
+  "linux": {
+    "platform": "linux",
+    "arch": "arm64",
+    "node": "v24.21.0",
+    "herdr": "0.9.3",
+    "fullSuite": {
+      "tests": 342,
+      "passed": 319,
+      "skipped": 23,
+      "failed": 0
+    },
+    "live": {
+      "ok": true,
+      "checks": {
+        "nativeMetadataReadback": {
+          "tokenPrefix": "hat",
+          "nonemptyKeys": [
+            "hat_load",
+            "hat_rank",
+            "hat_line",
+            "hat_fresh",
+            "hat_branch",
+            "hat_last",
+            "hat_counts",
+            "hat_div"
+          ],
+          "emptyTokensOmittedByHerdr": true,
+          "budgetAtMost14": true,
+          "focusedFixturePreserved": true
+        },
+        "independentPanelsAndPin": {
+          "rightPlacement": true,
+          "independentTabPanels": true,
+          "pinRetainsBetaReader": true,
+          "otherPanelPreserved": true
+        },
+        "hiddenPauseAndResume": {
+          "newBodyNotHydratedWhileHidden": true,
+          "resourcesLabeledStale": true,
+          "bodyHydratedAfterVisible": true
+        },
+        "referenceHistoryNavigation": {
+          "targetsInFixture": 2106,
+          "hotTargets": 2000,
+          "olderTargetsRecovered": 106,
+          "mentionsRecovered": 150,
+          "exactFirstSourceOpened": true,
+          "sourceAndTargetAnchorsRestored": true,
+          "actualInspectorKeyboardAndHerdrPTY": true,
+          "explicitSuccessfulEditFixture": true
+        },
+        "persistentNotesAndEditHold": {
+          "autosave": true,
+          "literalNavigationLetters": true,
+          "bracketedPaste": true,
+          "originalAgentHeldDuringSameTabFocusChange": true,
+          "followResumed": true,
+          "externalEditPreserved": true,
+          "recoveryDraftSaved": true,
+          "closeFlush": true,
+          "restartPersistence": true,
+          "sharedCollectorUnchanged": true
+        },
+        "nativeMetadataExpiry": {
+          "expiredAfterMs": 13578,
+          "allPublishedNativeTokensExpired": true,
+          "builtinAgentWorkspaceTabFactsRetained": true,
+          "foreignMetadataRetained": true,
+          "resumed": true
+        },
+        "staleOccupantGuards": {
+          "focusRejectedChangedSession": true,
+          "focusPreserved": true,
+          "publicationRejectedBeforeWrite": true
+        },
+        "closedViewPreservesCollector": {
+          "closedOnlyCurrentView": true,
+          "otherViewPreserved": true,
+          "singleSharedCollectorPreserved": true,
+          "reopenedForRemainingAcceptance": true
+        },
+        "projectionSourceGuardAndCoexistence": {
+          "wrongSourceCannotClearPluginView": true,
+          "pluginClearPreservesForeignFixtureView": true,
+          "fixtureIsNotRadarOrPiTreeCompatibility": true
+        },
+        "configConflictAndRecovery": {
+          "conflictRefusedPurge": true,
+          "registrationAndOwnedDirectoriesRetained": true,
+          "userEditPreserved": true,
+          "explicitFixtureRecoveryUninstalled": true,
+          "originalConfigAndUnrelatedEditRestored": true,
+          "foreignProjectionSurvivedUninstall": true
+        }
+      }
+    }
+  },
+  "review": {
+    "model": "gpt-6-astra",
+    "critical": 0,
+    "importantFound": 3,
+    "importantFixed": 3,
+    "newRegressions": "Notes entry/reader restore; full mixed reference fact scroll; small/resized Notes editing pause",
+    "allObservedRedThenGreen": true,
+    "targetedSuite": {
+      "tests": 50,
+      "passed": 50,
+      "failed": 0
+    },
+    "finalStatusOnlyFollowup": {
+      "tests": 46,
+      "passed": 46,
+      "failed": 0
+    },
+    "declined": [
+      "Actual Windows console/ACL acceptance belongs to the owning Windows machine.",
+      "Native client pixels and missing upstream visibility/focus APIs retain existing gates."
+    ]
+  },
+  "resizePty": {
+    "kind": "actual-controlling-Unix-PTY",
+    "ok": true,
+    "width": 36,
+    "heights": [
+      18,
+      8,
+      18
+    ],
+    "notesAutosave": true,
+    "editingVisiblyPausedWhenResized": true,
+    "invisibleQRejected": true,
+    "editingResumed": true,
+    "literalPInserted": true,
+    "ctrlSFlushed": true,
+    "ctrlCClosedCleanly": true
+  },
+  "testHarnessCorrection": "Initial Linux transfer omitted install.sh/native packager and included macOS AppleDouble metadata. Corrected archive had no plugin source changes for these failures; full and live tests then passed."
 }

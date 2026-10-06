@@ -89,12 +89,12 @@ function contentRows(session:SessionView,state:UiState,columns:number,now:number
 }
 export function renderScreen(data:DashboardData,state:UiState,columns:number,height:number,now=Date.now()):RenderedScreen {
   columns=Math.max(1,Math.floor(columns));height=Math.max(1,Math.floor(height));const session=data.sessions.find(s=>s.key===state.selectedKey)??data.sessions[0];if(session&&!state.selectedKey)state.selectedKey=session.key;
-  if(state.tab==='Notes'&&!state.help&&state.detail===undefined)return renderNotes(data,state,columns,height,now);
   if(state.refSources&&state.refSources.sessionKey!==session?.key){state.detail=undefined;closeDetail(state);}if(state.refSources&&state.refSources.revision!==session?.evidence.contentRevision)state.refSources.stale=true;
   const numericTargets=new Map<number,string>();let rows:ScreenRow[]=[];
   const server=data.server?`${data.server.host}/${data.server.session} · `:'';
   const header=server+(session?`${data.demo?'[DEMO] ':''}${session.evidence.provider} · ${session.evidence.title??session.evidence.id} · ${session.evidence.model??session.usage?.model??'model unavailable'} ${state.pin?'[pin]':''}`:'Herdr Prism · no session');
   const readerKey=`${session?.key??''}:${state.tab}:${state.view}`;if(state.detail===undefined&&!state.help&&state.readerKey!==readerKey){if(state.readerKey)state.readers.set(state.readerKey,{cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll});const saved=state.readers.get(readerKey);if(saved)Object.assign(state,saved);else if(state.readerKey){state.cursor=0;state.cursorId=undefined;state.scroll=0;}state.readerKey=readerKey;while(state.readers.size>96)state.readers.delete(state.readers.keys().next().value!);}
+  if(state.tab==='Notes'&&!state.help&&state.detail===undefined)return renderNotes(data,state,columns,height,now);
   let followEnd=false;
   if(session&&state.tab==='Messages'){
     const reader=state.messageReaders.get(session.key)??{lastIds:[],following:state.followMessages,newCount:0};const ids=session.evidence.messages.map(m=>m.id);const previous=new Set(reader.lastIds);const added=reader.initialized?ids.filter(id=>!previous.has(id)).length:0;followEnd=reader.following&&(!reader.initialized||added>0);if(reader.following)reader.newCount=0;else reader.newCount+=added;reader.lastIds=ids.slice(-1000);reader.initialized=true;state.messageReaders.set(session.key,reader);while(state.messageReaders.size>16)state.messageReaders.delete(state.messageReaders.keys().next().value!);retainMessages(state,session.key,session.evidence.messages);
@@ -109,8 +109,8 @@ export function renderScreen(data:DashboardData,state:UiState,columns:number,hei
   for(const row of rows){row.help??=row.action?.type==='source'?'Enter opens this exact source message. Historical file/offset/hash cursors are preserved.':row.action?.type==='page-refs'?'Enter or b loads older targets; B reloads the history.':row.action?.type==='message'?'Enter opens the entire recorded content. ? explains the selected entry; Escape returns.':row.action?.type==='select'?'Enter inspects inside Prism; f explicitly focuses a live Herdr pane.':'Recorded view context. ? explains this entry; selectable actions carry a right arrow.';if(!row.action&&row.selectable!==false)row.action={type:'message',text:row.copy??row.text};}
   if(followEnd&&!document){state.cursor=rows.length-1;state.cursorId=undefined;}
   const logical=document?document.sections.flatMap(section=>section.rows??[]):rows;
-  if(state.cursorId){const at=logical.findIndex(r=>r.id===state.cursorId);if(at>=0)state.cursor=at;}
-  if(logical.length){state.cursor=Math.max(0,Math.min(state.cursor,logical.length-1));state.cursorId=logical[state.cursor]?.id;}
+  if(!document&&state.cursorId){const at=logical.findIndex(r=>r.id===state.cursorId);if(at>=0)state.cursor=at;}
+  if(!document&&logical.length){state.cursor=Math.max(0,Math.min(state.cursor,logical.length-1));state.cursorId=logical[state.cursor]?.id;}
   if(session&&state.tab==='Messages'&&!document){const reader=state.messageReaders.get(session.key)!;reader.anchorId=rows[state.cursor]?.action?.id;if(reader.following&&!followEnd&&state.cursor<rows.length-1)reader.following=false;}
   const sections:LayoutSection[]=document?document.sections.map(section=>({...section,rows:section.rows??[]})):groupRows(rows,state.refSources?'Mention sources':state.tab==='Agents'?'Agent tree':state.tab);
   if(state.tab==='Processes'&&!document){const table=sections.find(section=>section.id==='Owned processes');if(table)table.description=['PID · name · CPU · RSS/WS'];}
