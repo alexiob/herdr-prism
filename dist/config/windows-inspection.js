@@ -10,7 +10,7 @@ export function windowsInspector(inspection, options = {}) {
     let queue = Promise.resolve();
     // Read the redirected pipe explicitly. Console encoding setters can interact
     // with an attached ConPTY; this worker must never consume the pane's input.
-    const script = "$ErrorActionPreference='Stop'; $encoding=[Text.UTF8Encoding]::new($false); $reader=[IO.StreamReader]::new([Console]::OpenStandardInput(),$encoding); $writer=[IO.StreamWriter]::new([Console]::OpenStandardOutput(),$encoding); $writer.AutoFlush=$true; $writer.WriteLine('PRISM_ACL_READY'); while($null -ne ($line=$reader.ReadLine())) { try { $env:HAT_PRIVATE_PATH=ConvertFrom-Json -InputObject $line; $result=& { " + inspection + " }; $writer.WriteLine([string]$result) } catch { $writer.WriteLine([string]([pscustomobject]@{inspectionError=$_.Exception.Message} | ConvertTo-Json -Compress)) } }";
+    const script = "$ErrorActionPreference='Stop'; $encoding=[Text.UTF8Encoding]::new($false); $reader=[IO.StreamReader]::new([Console]::OpenStandardInput(),$encoding); $writer=[IO.StreamWriter]::new([Console]::OpenStandardOutput(),$encoding); $writer.AutoFlush=$true; $writer.WriteLine('PRISM_ACL_READY'); while($null -ne ($line=$reader.ReadLine())) { $writer.WriteLine('PRISM_ACL_RECEIVED'); try { $env:HAT_PRIVATE_PATH=ConvertFrom-Json -InputObject $line; $result=& { " + inspection + " }; $writer.WriteLine([string]$result) } catch { $writer.WriteLine([string]([pscustomobject]@{inspectionError=$_.Exception.Message} | ConvertTo-Json -Compress)) } }";
     const send = () => { if (ready && pending && !pending.sent) {
         pending.sent = true;
         child.stdin.write(JSON.stringify(pending.path) + '\n');
@@ -59,6 +59,14 @@ export function windowsInspector(inspection, options = {}) {
                         fail(new Error('Unsolicited Windows ACL inspection'));
                         return;
                     }
+                    if (value === 'PRISM_ACL_RECEIVED') {
+                        if (task.received) {
+                            fail(new Error('Duplicate Windows ACL request receipt'));
+                            return;
+                        }
+                        task.received = true;
+                        continue;
+                    }
                     pending = undefined;
                     clearTimeout(task.timer);
                     task.resolve(value);
@@ -75,7 +83,7 @@ export function windowsInspector(inspection, options = {}) {
         child.ref();
         for (const stream of [child.stdin, child.stdout, child.stderr])
             stream.ref?.();
-        pending = { path, sent: false, resolve, reject, timer: setTimeout(() => fail(new Error('Windows ACL inspection timed out ' + (ready ? 'awaiting pipe response' : 'awaiting worker readiness'))), remaining) };
+        pending = { path, sent: false, received: false, resolve, reject, timer: setTimeout(() => fail(new Error('Windows ACL inspection timed out ' + (!ready ? 'awaiting worker readiness' : pending?.received ? 'during ACL inspection' : 'awaiting request receipt'))), remaining) };
         send();
     });
     return path => {
