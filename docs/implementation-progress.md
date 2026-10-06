@@ -25,6 +25,11 @@ Updated: 2026-10-06. Work remains active; this is not a full release certificati
 - User's live lifecycle amendment: managed release-copy installer and remover,
   authenticated readiness/completion acknowledgements, multi-server cooperative
   shutdown, own-pane cleanup, reversible config restore and marker-proven purge.
+- Remote amendment: per-server collection, persisted endpoint UUIDs, collecting
+  hostname/session header, host-prefixed native ranks and client-owned machine
+  row labels. Explicit Herdr-pane copy uses foreground-client OSC 52 forwarding.
+  Closed native path references retain their source and normalize the selected
+  key on hydration without choosing another attachment or dropping local goals.
 
 ## Review corrections
 
@@ -43,8 +48,11 @@ previous unit suite passed.
 - Only the displayed session hydrates full transcript/tool/usage content, refs,
   ACTION state and Git. Its archive mirrors are the same logical session; related
   descendants remain metadata-only until selected.
-- Hidden/closed panes and server disconnects pause heavy collection. Finite hooks
-  reconcile Herdr inventory without filesystem discovery or OS sampling.
+- Closed panes, a server's hidden workspace/tab, panes hidden by zoom, and a
+  collector's own RPC disconnect pause heavy collection. Last-viewer/SSH-client
+  disconnect and machine switching are different: Herdr 0.9.3 exposes no public
+  client visibility query, so those conditions remain an outstanding gate.
+  Finite hooks reconcile inventory without filesystem discovery or OS sampling.
 - Lightweight all-agent root proofs preserve exclusive process attribution even
   when another agent's metrics are paused. Proofs bind terminal/session, boot and
   PID birth; selected roots refresh immediately, other proofs expire in 30 seconds.
@@ -153,6 +161,55 @@ that every later edit has been executed on every platform.
   records exact inspected versions and format limits; synthetic fixtures do not
   certify every current/future provider schema.
 
+## Remote server evidence — 2026-10-06
+
+The remote amendment passed actual macOS-to-Linux arm64 SSH acceptance with
+Herdr 0.9.3 on both ends, macOS Node 26.10.0 and Linux Node 24.21.0. Local proof:
+`artifacts/remote-herdr-proof-accepted/remote.json` (`ok: true`). This is a real
+SSH connection/terminal and Linux procfs/Git readback with explicitly synthetic
+Pi-shaped records and an idle harness fixture, not a paid provider invocation.
+
+- Verified remote activation action completion, owned inspector PID/cwd, server
+  hostname/session and UUID-prefixed native rank, remote messages/refs/ACTION
+  source and pending To-do, measured zero CPU with 1/1 coverage, positive RSS and
+  remote Git branch/+1/-1. The reference file does not exist on the viewing host.
+- The probe starts closed, selects the exact native path attachment and opens
+  only that source. The regression fix preserves path identity, canonical
+  selection and explicit goals; two-session unit coverage keeps the other body
+  unloaded and prevents duplicate historical placeholder rows.
+- Explicit remote `y` copy delivered the exact reference in an OSC 52 sequence
+  captured by the host fixture PTY. The accepted run forces terminal forwarding,
+  bypassing the macOS clipboard. Earlier failed diagnostic probes used an
+  incorrect isolation flag and may have written fixture text to the native
+  clipboard; no personal clipboard contents were read or restored.
+- A controlled local client/SSH transport SIGTERM was reaped while the remote
+  inspector and synthetic job retained their PIDs, heartbeat and server UUID.
+  A transcript append made during disconnection survived a real SSH reconnect.
+  This does not certify Herdr's keyboard detach shortcut or WAN behavior.
+- Complete remote uninstall restored configuration bytes, removed registration
+  and owned files, stopped the collector and preserved the original remote job.
+  The disposable container and generated local SSH files were removed.
+
+Final shared source passed strict macOS tests: 256 total, 251 passed, five expected
+platform skips, zero failures. Typecheck/build and the staged macOS live lifecycle
+and all ten advanced checks passed after the path-reopen fix. Proof directories:
+`artifacts/prism-remote-final-live-macos/` and
+`artifacts/prism-remote-final-features-macos/`.
+
+The subsequently added strict host-keyboard stage remains failing in
+`artifacts/remote-herdr-proof-native-input/remote.json`: an actual controlling
+foreground PTY had canonical input disabled, and Ctrl+B/l/Tab bytes were written
+in full with 150 ms separation, but the expected Agents view was not acknowledged.
+Client focus/routing remains unverified; no plugin defect is asserted from this
+failure. The current harness keeps this strict gate. The earlier accepted core
+proof does not certify this added interaction.
+
+The manual Linux-only [remote workflow](../.github/workflows/remote.yml) was added
+but not executed. The user requested an immediate commit/push to coordinate with
+a separate Windows agent, so this pass stops further edits and testing. Windows
+was not resumed. Machine-background/last-viewer pause stays an upstream API
+dependency, as the user explicitly chose.
+
 ## Performance evidence
 
 `scripts/profile-host.mjs` now profiles 50 declared fixture sessions, 500 real
@@ -173,12 +230,19 @@ replace the aggregate budgets. Active CPU remains above the strict 3% target.
 
 ## Remaining completion gates
 
+- Complete the new remote-server acceptance, especially client-visible pause on
+  machine switching/last-client disconnect and multiple viewers. Those cases
+  require the [host visibility API](remote-visibility-api.md) absent from Herdr
+  0.9.3. Remote collection must stay on each agent's server.
+  The user explicitly chose to keep that API as an upstream dependency.
+
 - Resume Windows only on a Windows machine as requested, using the handoff.
   Resolve its remaining tests and validate/include the Windows helper with exact
   checksums and matching notices. Keep the eight passing Unix jobs intact.
   Then exercise ordinary GitHub installation on every packaged platform.
-- Run the renamed advanced acceptance gate on all Unix CI targets; add actual
-  Windows TTL coverage, native client/theme pixels and multiple clients.
+- The renamed advanced acceptance gate passed on all eight Unix CI jobs for
+  `376d3a6`; subsequent source changes need their own evidence. Add actual Windows
+  TTL coverage after user resumption, native client/theme pixels and multiple clients.
 - Exercise the full mixed-provider/deep-child/second-worktree/registered-detached
   scenario, launch ownership, selected-session visibility and reconnect/upgrade
   recovery in live Herdr. Complete provider audit limitations remain explicit.

@@ -1,0 +1,45 @@
+name: Remote SSH acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-ssh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Prepare disposable container tooling
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman openssh-client python3
+          mkdir -p "$RUNNER_TEMP/prism-bin"
+          cat > "$RUNNER_TEMP/prism-bin/podman" <<'SH'
+          #!/bin/sh
+          exec sudo /usr/bin/podman "$@"
+          SH
+          chmod 700 "$RUNNER_TEMP/prism-bin/podman"
+          echo "$RUNNER_TEMP/prism-bin" >> "$GITHUB_PATH"
+      - name: Check and compile source
+        run: |
+          npm ci
+          npm run check
+          npm run build
+      - name: Download checksummed Herdr test client
+        run: node scripts/herdr-test-bin.mjs --output artifacts/remote-host-herdr
+      - name: Actual SSH attachment, remote collection, reconnect and removal
+        run: node scripts/remote-herdr-test.mjs --herdr "$HERDR_BIN_PATH" --proof artifacts/remote-ssh-ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: remote-ssh-linux-x64-node24
+          path: artifacts/remote-ssh-ci/remote.json
+          if-no-files-found: warn

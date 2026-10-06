@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { serverIdPattern } from "../runtime/server.js";
 import { sanitize, truncate, number, bytes } from "../tui/text.js";
 export const pluginId = 'iob.herdr-prism';
 export const source = `plugin:${pluginId}`;
@@ -29,7 +30,15 @@ export class NativePublisher {
     sent = new Map();
     seq = Date.now() * 1000;
     view = false;
+    serverId = randomUUID();
     constructor(rpc) { this.rpc = rpc; }
+    setServerIdentity(id) {
+        if (!serverIdPattern.test(id))
+            throw new Error('Invalid server identity');
+        if (this.sent.size && id !== this.serverId)
+            throw new Error('Cannot replace an active publication server identity');
+        this.serverId = id;
+    }
     ownership() { return [...this.sent].map(([paneId, record]) => ({ paneId, terminalId: record.terminal, hashes: Object.fromEntries(Object.entries(JSON.parse(record.text)).map(([key, value]) => [key, hash(value)])) })); }
     async publish(sessions, now = Date.now(), graph = sessions) {
         this.diagnostics = [];
@@ -57,7 +66,7 @@ export class NativePublisher {
                 hat_branch: git?.branch ?? git?.branchState ?? 'Git —', hat_add: git?.added === undefined ? '' : `+${git.added}`, hat_del: git?.deleted === undefined ? '' : `-${git.deleted}`,
                 hat_div: `↑${number(git?.ahead)} ↓${number(git?.behind)}`, hat_conflict: git?.conflicts ? `conflicts ${git.conflicts}` : '',
                 hat_last: truncate(session.evidence.messages.filter(m => m.kind !== 'inter-agent' && m.role === 'assistant').at(-1)?.text ?? '', 100),
-                hat_rank: String(rank).padStart(10, '0'), hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability ?? 'unavailable', hat_group: ''
+                hat_rank: `${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability ?? 'unavailable', hat_group: ''
             };
             for (const key of keys)
                 tokens[key] = sanitize(tokens[key]).replace(/[\r\n\t]/g, ' ');

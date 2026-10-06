@@ -267,7 +267,7 @@ row_gap = 0
 rows = [
   ["$hat_group"],
   ["state_icon", "agent", "$hat_line"],
-  ["workspace", "tab"],
+  ["machine", "workspace", "tab"],
   ["$hat_goal"],
   ["$hat_load", "$hat_counts"],
   ["$hat_branch", { token = "$hat_add", fg = "#42B883" }, { token = "$hat_del", fg = "#E06C75" }],
@@ -429,7 +429,7 @@ The final acceptance scenario starts a Codex root, a pane-backed Claude child, a
 
 ## Remaining decisions and explicit limits
 
-The design is implementation-ready at the architecture level, but does not claim that live Herdr behavior or provider formats have been integration-tested. Phase 0 certifies the exact compatible release and renderer. Default first-release choices are macOS/Linux/Windows, Node 22+, supported native overview plus right dashboard with six views, stable ordering, local-only data, no process termination, no automatic provider instructions, and no hidden daemon. Native synthetic rows, exact combined-machine numeric badges, and complete attribution of uncooperative preexisting detached jobs remain outside the verified plugin surface. They stay visibly unavailable or use the documented inspector/bridge paths.
+The design is implementation-ready at the architecture level, but does not claim that live Herdr behavior or provider formats have been integration-tested. Phase 0 certifies the exact compatible release and renderer. Default first-release choices are macOS/Linux/Windows, Node 22+, supported native overview plus right dashboard with six views, stable ordering, server-local data, no process termination, no automatic provider instructions, and no hidden daemon. Native synthetic rows, exact combined-machine numeric badges, and complete attribution of uncooperative preexisting detached jobs remain outside the verified plugin surface. They stay visibly unavailable or use the documented inspector/bridge paths.
 
 ## Live lifecycle amendment — 2026-10-06
 
@@ -486,3 +486,47 @@ state so updates outside the recent message window remain visible. Asynchronous
 stages recheck the visibility generation before starting additional heavy work.
 Explicit source/message readers perform bounded-memory, on-demand reads of their
 requested session only; they do not start background collection.
+
+## Remote server amendment — 2026-10-06
+
+The user requires remote sessions/machines and chose installation on **each
+remote Herdr server**. Each remote inspector collects its owning host's process,
+provider, transcript, Git, goal, ref and To-do data through that server's socket.
+The viewing client carries the terminal dashboard through Herdr's existing SSH
+transport. A local installation does not manage remote collectors or substitute
+local files/PIDs when remote data is inaccessible.
+
+Retain one collector per server endpoint. Persist a random server UUID in its
+private endpoint state; common hostnames/socket paths and repeated pane/session
+IDs are not cross-machine identities. Show the collecting hostname/session in
+the dashboard. Client saved-machine labels remain Herdr-owned. Include the
+built-in `machine` token in client custom rows. Because the active endpoint's
+native projection sorts all connected endpoints, prefix `hat_rank` with the
+server UUID before the zero-padded ordinal; each Prism-enabled server's tree
+stays contiguous. This amendment changes rank encoding, not the required stable
+workspace/tab/pane order within a server. Do not invent combined focus indices.
+
+Install/build/configure on the remote host; Herdr 0.9.3 forwards API-backed
+actions through `--machine`, but not repository installation. Client sidebar
+presentation is configured separately. Explicit copy in a Herdr TTY uses its
+foreground-client OSC 52 forwarding, with best-effort delivery and no clipboard
+reads. Reference resolution/source jumps are server-local; a headless remote
+desktop opener may be unavailable and must not fall back to local paths.
+
+The selected-visible-session requirement includes background-machine switching,
+last-viewer SSH disconnect, zoom and multiple viewers. Herdr 0.9.3's public API
+does not expose the union of client-visible panes. Shared server focus alone
+cannot fulfill those client-visibility cases. This is a remaining acceptance
+gate, not permission to redefine "visible" as the server's last focused tab.
+The [host API proposal](../remote-visibility-api.md) records the required query,
+events, freshness and fail-closed behavior. Existing inspector-close/server-tab
+gates and zoom checks remain useful until the host exposes that information.
+The user chose to retain this as an upstream dependency; do not patch or require
+a Herdr fork in this implementation pass.
+
+Actual SSH acceptance must prove remote activation, machine/server identity,
+remote transcript/process/Git facts, selected-server actions, reconnect retaining
+remote jobs, clipboard forwarding, and complete owned remote removal. Two-server
+tests must distinguish identical pane/session IDs. Verify exact client-visible
+heavy-work pause after the visibility API is available. Windows testing remains
+explicitly deferred until the user resumes on a Windows machine.

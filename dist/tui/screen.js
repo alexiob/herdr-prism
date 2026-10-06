@@ -77,6 +77,8 @@ function overview(session, state, columns, now, data) {
     const rows = [];
     const add = (id, text, definition) => rows.push({ id, text, ...(definition ? { action: { type: 'message', text: definition } } : {}) });
     const resource = session.resource, usage = session.usage, evidence = session.evidence;
+    if (data.server)
+        add('server', `Server ${data.server.host}/${data.server.session}`, `Collecting server: ${data.server.host}\nHerdr session: ${data.server.session}\nAll displayed process, transcript and Git facts belong to this server. Saved-machine labels are assigned separately by the viewing client.`);
     const chartWidth = Math.max(3, columns - 20);
     add('cpu', `CPU ${number(resource?.cpuPercent)}% ${spark(historyValues(session, 'cpu', chartWidth, now), chartWidth, state.ascii)}`, 'CPU: sampled user + kernel delta / monotonic elapsed; 100% = one logical core. First sample needs warmup. Scope includes verified owned processes only. History shows sampled bucket peaks; blanks are unavailable gaps and are never interpolated.');
     add('memory', `${resource?.memoryLabel === 'working-set sum' ? 'WS sum' : 'RSS sum'} ${resident(resource?.memoryBytes)}  peak ${resident(session.history?.peakMemoryBytes)}`, 'Resident-memory sum includes each process once but may count shared pages more than once. Windows uses working set. Peak is the highest observed aggregate sample, not a lifetime allocation figure.');
@@ -313,7 +315,8 @@ export function renderScreen(data, state, columns, height, now = Date.now()) {
         state.selectedKey = session.key;
     const numericTargets = new Map();
     let rows = [];
-    const header = session ? `${data.demo ? '[DEMO] ' : ''}${session.evidence.provider} · ${session.evidence.title ?? session.evidence.id} · ${session.evidence.model ?? session.usage?.model ?? 'model unavailable'} ${state.pin ? '[pin]' : ''}` : 'Herdr Prism · no session';
+    const server = data.server ? `${data.server.host}/${data.server.session} · ` : '';
+    const header = server + (session ? `${data.demo ? '[DEMO] ' : ''}${session.evidence.provider} · ${session.evidence.title ?? session.evidence.id} · ${session.evidence.model ?? session.usage?.model ?? 'model unavailable'} ${state.pin ? '[pin]' : ''}` : 'Herdr Prism · no session');
     const readerKey = `${session?.key ?? ''}:${state.tab}:${state.view}`;
     if (state.detail === undefined && !state.help && state.readerKey !== readerKey) {
         if (state.readerKey)

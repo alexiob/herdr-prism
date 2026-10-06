@@ -28,5 +28,7 @@ export function inspectorVisible(snapshot: HerdrSnapshot | undefined, terminalId
     if (!own) return false;
     if (snapshot.focused_workspace_id && own.workspace_id !== snapshot.focused_workspace_id) return false;
     if (snapshot.focused_tab_id && own.tab_id !== snapshot.focused_tab_id) return false;
+    const layout = snapshot.layouts?.find(layout => layout.tab_id === own.tab_id);
+    if (layout?.zoomed === true && layout.focused_pane_id !== own.pane_id) return false;
     return true;
 }

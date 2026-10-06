@@ -1,6 +1,6 @@
 # Herdr Prism
 
-A local, six-view terminal dashboard for Codex, Claude and Pi sessions in Herdr.
+A six-view terminal dashboard for Codex, Claude and Pi sessions in Herdr.
 It follows agent lineage, process ownership, messages, references, explicit goals,
 local To-do checkboxes and Git checkout state. An optional native overview adds
 compact summaries to Herdr's existing Agents panel.
@@ -70,10 +70,16 @@ began. Selecting transcript-only descendants inspects them without inventing a
 native pane.
 
 Full transcript, refs, To-do, Git and frequent resource updates follow only the
-session shown in an open, visible inspector. Hidden or closed panes pause that
-work; other agents retain lightweight inventory and explicitly stale cached
-summaries. Reopening warms up CPU measurements and catches up selected content.
+selected inspector session. Closing the pane or changing its server's active
+workspace/tab pauses that work; other agents retain lightweight inventory and
+explicitly stale cached summaries. Reopening warms up CPU measurements and catches
+up selected content. Herdr 0.9.3 exposes no attached-client visibility query, so
+last-client disconnect and background-machine pause remain an outstanding gate.
 Verified roots of other agents remain process attribution boundaries.
+
+Install Prism on each remote Herdr server to collect that host's sessions,
+transcripts, processes and Git state. The dashboard identifies its server and
+native rows retain Herdr's machine label. See [remote setup and limitations](docs/remote.md).
 
 `—` means unavailable; `0` means measured zero. Stale values include freshness
 information. CPU 100% represents one logical core. Resident memory is summed
@@ -90,7 +96,9 @@ native process/transcript rows or independent clickable fields. The inspector
 provides those details. One native projection has one owner; choose inspector
 only when another plugin owns the view.
 
-Collection is local, with no analytics/backend or automatic transcript uploads.
+Collection stays on each agent's Herdr server, with no analytics/backend or
+automatic transcript uploads. A remote dashboard reaches its viewing client
+through Herdr's SSH terminal transport.
 Hidden reasoning and system/developer content are excluded. Raw transcript
 archives are not created. User preferences, explicit goals, validated launch
 associations and local To-do state remain in private plugin directories.

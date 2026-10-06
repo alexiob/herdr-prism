@@ -10,6 +10,7 @@ import { SampleHistory } from "../metrics/history.js";
 import { GitCache } from "../git/cache.js";
 import { StateStore, identityName } from "../state/store.js";
 import { NativePublisher } from "../native/publisher.js";
+import { loadServerIdentity, serverSession } from "./server.js";
 function blank(provider, id, cwd, reason = 'Exact local transcript unavailable') { return { id, provider, cwd, messages: [], tools: [], usage: [], goals: [], availability: 'unavailable', reason }; }
 function nativeState(agent) { return typeof agent.agent_status === 'string' ? agent.agent_status : agent.agent_status?.state ?? agent.agent_status?.status ?? 'unknown'; }
 export function matchesHarness(provider, p) {
@@ -40,6 +41,7 @@ export class Collector extends EventEmitter {
     tracker = new ProcessTracker(this.ledger);
     history = new SampleHistory();
     rpc;
+    endpoint;
     sampler;
     git;
     publisher;
@@ -71,9 +73,11 @@ export class Collector extends EventEmitter {
     rootProofs = new Map();
     todoHydrated = new Set();
     derived = new Map();
-    constructor(options) { super(); this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
+    constructor(options) { super(); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
     async init() {
         await this.store.init();
+        this.data.server = await loadServerIdentity(this.store, { session: serverSession(this.endpoint) });
+        this.publisher.setServerIdentity(this.data.server.id);
         const goals = await this.store.read('goals');
         if (goals && typeof goals === 'object')
             for (const [key, value] of Object.entries(goals))
@@ -102,6 +106,7 @@ export class Collector extends EventEmitter {
         return this.starting;
     }
     invalidate() { void this.refresh(); }
+    get displayedSessionKey() { return this.visibleSession; }
     /** The foreground inspector owns this gate; finite hooks never open it. */
     setVisibleSession(key, open = true) {
         if (this.visibleSession === key && this.paneOpen === open)
@@ -225,10 +230,32 @@ export class Collector extends EventEmitter {
                     if (!evidence && ref?.kind === 'path' && this.paneOpen)
                         evidence = await this.index.resolve(provider, ref);
                     evidence = evidence ? { ...evidence } : blank(provider, ref?.value ?? `pane-${agent.terminal_id}`, agent.foreground_cwd ?? agent.cwd ?? undefined);
+                    if (ref?.kind === 'path' && evidence.id === ref.value && !evidence.path)
+                        evidence.path = ref.value;
                     evidence.state = nativeState(agent);
                     evidence.title = agent.name ?? agent.display_agent ?? evidence.title ?? undefined;
                     evidence.cwd = evidence.cwd ?? agent.foreground_cwd ?? agent.cwd ?? undefined;
                     const key = sessionKey(provider, evidence.id);
+                    if (ref?.kind === 'path') {
+                        const placeholderKey = sessionKey(provider, ref.value);
+                        const placeholder = key !== placeholderKey && this.data.sessions.find(s => s.key === placeholderKey && s.evidence.id === ref.value && s.evidence.path === ref.value && s.evidence.availability === 'unavailable' && (s.attachments ?? (s.attachment ? [s.attachment] : [])).some(a => sameOccupant(a, agent)));
+                        if (placeholder) {
+                            const goals = this.localGoals.get(placeholderKey);
+                            if (goals) {
+                                const migrated = new Map(this.localGoals);
+                                migrated.set(key, [...goals, ...migrated.get(key) ?? []].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0)).slice(-100));
+                                migrated.delete(placeholderKey);
+                                await this.store.write('goals', Object.fromEntries(migrated));
+                                this.localGoals = migrated;
+                            }
+                            if (this.visibleSession === placeholderKey)
+                                this.visibleSession = key;
+                            this.historical.delete(placeholderKey);
+                            known.delete(placeholderKey);
+                            this.todos.delete(placeholderKey);
+                            this.todoHashes.delete(placeholderKey);
+                        }
+                    }
                     if (this.paneOpen && !this.visibleSession && detailRef?.provider === provider && detailRef.kind === ref?.kind && detailRef.value === ref?.value)
                         this.visibleSession = key;
                     known.set(key, evidence);
@@ -338,7 +365,7 @@ export class Collector extends EventEmitter {
                     git ??= { availability: 'unavailable', branchState: 'unknown', reason: detailed ? 'Checkout path unavailable' : 'Details load when this session is shown', cwd: node.evidence.cwd ?? '', sampledAt: Date.now(), ageMs: 0 };
                     views.push({ ...node, resource: previous?.resource, refs, todos: list.items.map(t => ({ id: t.id, text: t.text, checked: t.checked, messageId: t.firstMessageId, firstSeenAt: t.firstSeen, latestMessageId: t.latestMessageId, repeated: t.repeated, source: t.source })), todoStatus: list.status, todoSourceMessageId: list.sourceMessageId, todoReportedAt: list.reportedAt, git });
                 }
-                this.data = { sessions: views, updatedAt: Date.now(), stale: false, diagnostics: [...forest.diagnostics, ...this.index.diagnostics, ...[...this.todos.values()].flatMap(list => list.diagnostics)] };
+                this.data = { server: this.data.server, sessions: views, updatedAt: Date.now(), stale: false, diagnostics: [...forest.diagnostics, ...this.index.diagnostics, ...[...this.todos.values()].flatMap(list => list.diagnostics)] };
                 this.updateResources();
                 this.scheduleProcessSample();
                 if (this.settings.nativeMode !== 'inspector-only') {

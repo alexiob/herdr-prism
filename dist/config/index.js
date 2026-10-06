@@ -28,7 +28,7 @@ export async function loadSettings(configDir) { const text = await readOptional(
                 throw new Error('Invalid cost rate');
     }
 } return result; }
-export function nativeRows(theme = 'dark') { const add = theme === 'light' ? '#17784C' : '#42B883', del = theme === 'light' ? '#B42335' : '#E06C75'; return [['$hat_group'], ['state_icon', 'agent', '$hat_line'], ['workspace', 'tab'], ['$hat_goal'], ['$hat_load', '$hat_counts'], ['$hat_branch', theme === 'mono' ? '$hat_add' : { token: '$hat_add', fg: add }, theme === 'mono' ? '$hat_del' : { token: '$hat_del', fg: del }], ['$hat_div', '$hat_conflict', '$hat_fresh'], ['$hat_last']]; }
+export function nativeRows(theme = 'dark') { const add = theme === 'light' ? '#17784C' : '#42B883', del = theme === 'light' ? '#B42335' : '#E06C75'; return [['$hat_group'], ['state_icon', 'agent', '$hat_line'], ['machine', 'workspace', 'tab'], ['$hat_goal'], ['$hat_load', '$hat_counts'], ['$hat_branch', theme === 'mono' ? '$hat_add' : { token: '$hat_add', fg: add }, theme === 'mono' ? '$hat_del' : { token: '$hat_del', fg: del }], ['$hat_div', '$hat_conflict', '$hat_fresh'], ['$hat_last']]; }
 function rowsToml(theme) { return '[\n' + nativeRows(theme).map(row => '  [' + row.map(token => typeof token === 'string' ? JSON.stringify(token) : `{ token = ${JSON.stringify(token.token)}, fg = ${JSON.stringify(token.fg)} }`).join(', ') + ']').join(',\n') + '\n]'; }
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 async function withLock(stateDir, operation) { await privateDir(stateDir); const path = join(stateDir, 'configuration.lock'); let handle; try {

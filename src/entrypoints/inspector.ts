@@ -76,7 +76,7 @@ export async function main(argv = process.argv.slice(2)) {
                 ][];
             }>('preferences');
             const cache = new SnapshotCache(rpc);
-            collector = new Collector({ rpc, settings: context.settings, stateDir: context.serverStateDir });
+            collector = new Collector({ rpc, endpoint: context.endpoint, settings: context.settings, stateDir: context.serverStateDir });
             lease = await store.acquire();
             cleanup = async () => { ui.close(); cache.close(); rpc.close(); await lease!.release(); await admission.release(); };
             let paneId = process.env.HERDR_PANE_ID;
@@ -187,7 +187,7 @@ export async function main(argv = process.argv.slice(2)) {
                 await collector.start();
                 data = collector.data;
                 if (!state.selectedKey || !data.sessions.some(session => session.key === state.selectedKey)) {
-                    state.selectedKey = data.sessions.find(session => session.attachment?.focused)?.key ?? data.sessions[0]?.key;
+                    state.selectedKey = data.sessions.find(session => session.key === collector!.displayedSessionKey)?.key ?? data.sessions.find(session => session.attachment?.focused)?.key ?? data.sessions[0]?.key;
                     syncVisibility();
                     await collector.refresh();
                     data = collector.data;
@@ -237,7 +237,7 @@ export async function main(argv = process.argv.slice(2)) {
                 cache.on('snapshot', () => { syncVisibility(); collector!.invalidate(); void follow(); });
                 cache.on('stale', () => { collector!.setVisibleSession(state.selectedKey,false); data.stale = true; paint(); });
                 collector.on('data', (next: DashboardData) => { data = next; ready = !data.stale; if (!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey))
-                    state.selectedKey = data.sessions.find(s => s.attachment?.focused)?.key ?? data.sessions[0]?.key; paint(); void follow(); });
+                    state.selectedKey = data.sessions.find(s => s.key === collector!.displayedSessionKey)?.key ?? data.sessions.find(s => s.attachment?.focused)?.key ?? data.sessions[0]?.key; paint(); void follow(); });
                 collector.on('diagnostic', (message: string) => { state.notice = message; paint(); });
                 ui.on('resize', () => { paint(); if (paneId)
                     void rpc.call('pane.layout', { pane_id: paneId }).then(result => { const layout = result.layout ?? result; const rect = layout.panes?.find((p: any) => p.pane_id === paneId)?.rect; if (rect?.width && layout.area?.width)
@@ -263,7 +263,7 @@ export async function main(argv = process.argv.slice(2)) {
                     }
                     if (action.type === 'copy') {
                         await copyText(action.text ?? '');
-                        state.notice = 'Copied';
+                        state.notice = 'Copy requested';
                         return;
                     }
                     if (action.type === 'open-ref') {

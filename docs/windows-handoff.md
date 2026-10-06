@@ -5,10 +5,25 @@ The final macOS/Linux pass is complete; no further Windows fixes or runner retri
 were attempted after the final failing run on 2026-10-06.
 
 Repository: [alexiob/herdr-prism](https://github.com/alexiob/herdr-prism).
-Last tested implementation commit: `376d3a6b1453275485c6f52f34111d791612b6e9`.
-Later handoff/documentation commits do not change that implementation.
+Last Windows-tested implementation commit: `376d3a6b1453275485c6f52f34111d791612b6e9`.
+The subsequent [remote-server amendment](remote.md) changes shared identity,
+selection, native ordering and clipboard code, with macOS/Linux evidence. It
+does not resume or resolve Windows validation. Use current main when resuming;
+the failure logs below remain the exact Windows baseline.
 Project/package: `herdr-prism`; plugin ID: `iob.herdr-prism`.
 Stack: strict TypeScript, compiled dependency-free ESM and a Rust native sampler.
+Keep exact client-visible collection as an upstream Herdr API dependency, as the
+user chose; see [the host contract](remote-visibility-api.md).
+
+Coordination: a separate Windows agent is now working on another machine. The
+remote-support pass made no Windows-specific fixes or runner retries and has
+stopped further edits. Fetch/rebase onto current main before continuing. Shared
+changes include `src/runtime/collector.ts`, `src/runtime/server.ts`,
+`src/entrypoints/inspector.ts`, `src/native/publisher.ts`, `src/tui/platform.ts`,
+native row configuration and dashboard types/rendering. Preserve those changes
+when integrating Windows fixes, then regenerate `dist/` from the merged source.
+The added SSH harness's strict host-keyboard check remains incomplete; it is
+separate from the Windows ACL/sampler/ConPTY work described below.
 
 ## Exact latest result
 

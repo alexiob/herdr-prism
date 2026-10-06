@@ -1,7 +1,13 @@
 import{spawn}from'node:child_process';
 import path from'node:path';
 function command(program:string,args:string[],input?:string):Promise<void>{return new Promise((resolve,reject)=>{const child=spawn(program,args,{stdio:[input===undefined?'ignore':'pipe','ignore','pipe'],windowsHide:true});let errorText='';const timer=setTimeout(()=>child.kill(),5000);child.stderr?.on('data',v=>{if(errorText.length<4096)errorText+=v;});child.once('error',error=>{clearTimeout(timer);reject(error);});child.once('close',code=>{clearTimeout(timer);code===0?resolve():reject(new Error(errorText.trim()||`${program} exited ${code}`));});if(input!==undefined)child.stdin?.end(input);});}
+/** Herdr forwards child OSC 52 writes to the foreground viewing client, including over SSH. */
+export function clipboardSequence(text:string):string {
+ if(Buffer.byteLength(text)>1024*1024)throw new Error('Clipboard size limit exceeded');
+ return '\x1b]52;c;'+Buffer.from(text,'utf8').toString('base64')+'\x07';
+}
 export async function copyText(text:string):Promise<void>{
+ if(process.env.HERDR_ENV==='1'&&process.stdout.isTTY)return new Promise((resolve,reject)=>process.stdout.write(clipboardSequence(text),error=>error?reject(error):resolve()));
  if(process.platform==='darwin')return command('pbcopy',[],text);
  if(process.platform==='win32')return command('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-Command','$text=[Console]::In.ReadToEnd(); Set-Clipboard -Value $text'],text);
  for(const[program,args]of [['wl-copy',[]],['xclip',['-selection','clipboard']],['xsel',['--clipboard','--input']]]as[string,string[]][]){try{await command(program,args,text);return;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}}
