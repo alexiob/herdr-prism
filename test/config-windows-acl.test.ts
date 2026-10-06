@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as security from '../src/config/safe-file.ts';
-import {mkdtemp,mkdir,rm,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,rm,symlink,readFile} from 'node:fs/promises';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 const api=security as unknown as {
@@ -11,6 +13,16 @@ const api=security as unknown as {
 };
 const user='S-1-5-21-100-200-300-1001',admin='S-1-5-32-544',system='S-1-5-18';
 const snapshot=(patch={})=>({userSid:user,ownerSid:user,tokenOwnerSid:admin,reparse:false,allowSids:[user],nullDacl:false,protected:true,...patch});
+
+test('atomic Windows replacement waits for a temporary reader lock while preserving the original',{skip:process.platform!=='win32'},async t=>{
+ const root=await mkdtemp(join(tmpdir(),'prism-replace-lock-'));t.after(()=>rm(root,{recursive:true,force:true}));await security.restrict(root);
+ const file=join(root,'result.json');await security.atomicWrite(file,'original');
+ const script="$f=[IO.File]::Open($env:PRISM_LOCK_FILE,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read); [Console]::Out.WriteLine('LOCKED'); [Console]::Out.Flush(); [Console]::ReadLine() | Out-Null; $f.Dispose()";
+ const locker=spawn('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{env:{...process.env,PRISM_LOCK_FILE:file},stdio:'pipe',windowsHide:true});t.after(()=>{if(locker.exitCode===null)locker.kill();});
+ await once(locker.stdout,'data');assert.equal(await readFile(file,'utf8'),'original');let checks=0;
+ await security.atomicWrite(file,'replacement',0o600,async()=>{checks++;if(checks===1)setTimeout(()=>locker.stdin.end('\n'),100);assert.equal(await readFile(file,'utf8'),'original');});
+ assert.ok(checks>1,'authorization is rechecked after a blocked rename');assert.equal(await readFile(file,'utf8'),'replacement');security.assertWindowsAcl(await security.readWindowsAcl(file),{strict:true});
+});
 
 test('recursive private directory creation protects every new intermediate without adopting an existing parent',{skip:process.platform!=='win32'},async t=>{
  const root=await mkdtemp(join(tmpdir(),'prism-intermediate-acl-'));t.after(()=>rm(root,{recursive:true,force:true}));

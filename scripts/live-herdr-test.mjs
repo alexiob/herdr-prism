@@ -31,8 +31,13 @@ export async function liveHerdrTest({release,herdr=process.env.HERDR_BIN_PATH??'
  const options={root:path.resolve(release),managedDir,herdrBin:herdr,herdrPrefix:['--session',name],env:{...env,HERDR_SOCKET_PATH:endpoint},timeoutMs:30000};
  const cli=async args=>JSON.parse((await exec(herdr,['--session',name,...args],{env:options.env,encoding:'utf8',timeout:30000,windowsHide:true,maxBuffer:2*1024*1024})).stdout).result;
  const waitAction=async log=>{for(let i=0;i<150;i++){const entry=(await cli(['plugin','log','list','--plugin','iob.herdr-prism','--limit','64'])).logs.find(item=>item.log_id===log.log_id);if(entry?.status==='failed')throw Error(entry.stderr||entry.error||'Lifecycle action failed');if(entry?.status==='succeeded'){assert.equal(entry.exit_code,0);return;}await delay(100);}throw Error('Lifecycle action completion timed out');};
+ // Windows recycles numeric PIDs quickly. Retain exact native birth identities
+ // so post-removal acceptance cannot mistake another process for our collector.
+ let sampler;const births=new Map();
+ const captureBirth=async pid=>{if(!sampler)return;const batch=await sampler.sample(),record=batch.processes.find(p=>p.pid===pid);assert.ok(record&&record.startTime!=='0'&&record.availability!=='unavailable','owned collector has a readable exact Windows birth identity');births.set(pid,{startTime:record.startTime,bootId:batch.bootId});};
  let success=false;
  try{
+  if(process.platform==='win32'){const {NativeSampler,verifyHelperArtifact}=await import(pathToFileURL(path.join(root,'dist/process/native-helper.js')).href);const helper=path.join(path.resolve(release),'bin','win32-x64','hat-sampler.exe');await verifyHelperArtifact(helper);sampler=new NativeSampler(helper);}
   let ready=false;
   for(let i=0;i<100;i++){if(serverError)throw serverError;if(server.exitCode!==null)throw Error('Isolated Herdr server exited '+server.exitCode);try{await rpc.call('session.snapshot');ready=true;break;}catch{await delay(100);}}
   assert.ok(ready,'isolated server startup');
@@ -41,6 +46,7 @@ export async function liveHerdrTest({release,herdr=process.env.HERDR_BIN_PATH??'
   const startedAt=Date.now();installed=await liveInstall(options);
   const store=new StateStore(path.join(installed.stateDir,'servers',identityName(endpoint)));
   const old=await store.read('controller');assert.ok(old?.terminalId&&old.pid);
+  await captureBirth(old.pid);
   const before=(await rpc.call('session.snapshot')).snapshot;
   assert.equal(before.panes.length,2);assert.equal(before.focused_pane_id,created.root_pane.pane_id,'opening preserves native focus');
   const layout=before.layouts.find(item=>item.tab_id===created.tab.tab_id);
@@ -52,12 +58,14 @@ export async function liveHerdrTest({release,herdr=process.env.HERDR_BIN_PATH??'
   const after=(await rpc.call('session.snapshot')).snapshot;const current=await store.read('controller');
   assert.equal(after.panes.length,2);assert.ok(!after.panes.some(item=>item.terminal_id===old.terminalId));assert.ok(current?.terminalId&&current.pid);
   assert.notEqual(current.terminalId,old.terminalId);assert.notEqual(current.pid,old.pid);
+  await captureBirth(current.pid);
   const removal=await liveUninstall(options);assert.equal(removal.removed,true);installed=undefined;
   const final=(await rpc.call('session.snapshot')).snapshot;assert.equal(final.panes.length,1);assert.equal(final.panes[0].terminal_id,originalTerminal);
   assert.equal((await cli(['plugin','list','--plugin','iob.herdr-prism','--json'])).plugins.length,0);
   for(const dir of [managedDir,removal.purged[0],removal.purged[1]])await assert.rejects(lstat(dir),error=>error.code==='ENOENT');
   assert.equal(await readFile(configPath,'utf8'),original,'pre-install configuration bytes restored');
-  for(const pid of [old.pid,current.pid])assert.throws(()=>process.kill(pid,0),error=>error.code==='ESRCH','collector stopped without an orphan');
+  if(sampler){const batch=await sampler.sample();for(const pid of [old.pid,current.pid]){const live=batch.processes.find(p=>p.pid===pid),birth=births.get(pid);if(!live)assert.throws(()=>process.kill(pid,0),error=>error.code==='ESRCH','missing sampler record also requires proven PID absence');else assert.ok(live.startTime!=='0'&&live.availability!=='unavailable'&&(batch.bootId!==birth.bootId||live.startTime!==birth.startTime),'exact Windows collector stopped without an orphan');}}
+  else for(const pid of [old.pid,current.pid])assert.throws(()=>process.kill(pid,0),error=>error.code==='ESRCH','collector stopped without an orphan');
   const version=(await exec(herdr,['--version'],{env,encoding:'utf8'})).stdout.trim();
   const evidence={kind:'actual-herdr-live-lifecycle',version,protocol:before.protocol,node:process.version,platform:process.platform,arch:process.arch,elapsedMs:Date.now()-startedAt,install:true,rightSplit:true,nativeFocusPreserved:true,restartClosedOldOwnedPane:true,uninstall:true,registryRemoved:true,ownedDirectoriesPurged:true,configExactlyRestored:true,preservedOriginalPane:true,collectorsStopped:true,beforePanes:before.panes.length,afterRestartPanes:after.panes.length,afterUninstallPanes:final.panes.length};
   await writeFile(path.join(proof,'lifecycle.json'),JSON.stringify(evidence,null,2)+'\n',{mode:0o600});success=true;return evidence;
@@ -66,6 +74,7 @@ export async function liveHerdrTest({release,herdr=process.env.HERDR_BIN_PATH??'
   try{failure.snapshot=(await rpc.call('session.snapshot')).snapshot;failure.logs=(await cli(['plugin','log','list','--plugin','iob.herdr-prism','--limit','64'])).logs;failure.paneText=[];for(const pane of failure.snapshot.panes){const output=await exec(herdr,['--session',name,'pane','read',pane.pane_id,'--source','visible','--lines','60'],{env:options.env,encoding:'utf8',timeout:30000,windowsHide:true});failure.paneText.push({paneId:pane.pane_id,text:output.stdout});}}catch{}
   await writeFile(path.join(proof,'failure.json'),JSON.stringify(failure,null,2)+'\n');throw error;
  }finally{
+  await sampler?.close();
   if(installed){try{await liveUninstall(options);}catch(error){await writeFile(path.join(proof,'cleanup-error.txt'),String(error)+'\n',{mode:0o600});}}
   // A failed activation may be registered without returning installed; attempt its
   // authenticated wrapper cleanup when the managed receipt exists.

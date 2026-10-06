@@ -172,30 +172,46 @@ catch (error) {
         return '';
     throw error;
 } }
-export async function atomicWrite(path, body, mode = 0o600, beforeRename) { const tmp = join(dirname(path), '.hat-' + randomBytes(12).toString('hex') + '.tmp'); const handle = await open(tmp, 'wx', mode); try {
-    await handle.writeFile(body);
-    await handle.sync();
-    await handle.close();
-    if (process.platform === 'win32')
-        await restrict(tmp);
-    await beforeRename?.();
-    await rename(tmp, path);
+export async function atomicWrite(path, body, mode = 0o600, beforeRename) {
+    const tmp = join(dirname(path), '.hat-' + randomBytes(12).toString('hex') + '.tmp');
+    const handle = await open(tmp, 'wx', mode);
     try {
-        const dir = await open(dirname(path), 'r');
-        try {
-            await dir.sync();
+        await handle.writeFile(body);
+        await handle.sync();
+        await handle.close();
+        if (process.platform === 'win32')
+            await restrict(tmp);
+        // Windows readers can temporarily deny delete-sharing. Keep the original
+        // intact and recheck the caller's authorization before each bounded retry.
+        for (let attempt = 0;; attempt++) {
+            await beforeRename?.();
+            try {
+                await rename(tmp, path);
+                break;
+            }
+            catch (error) {
+                if (process.platform !== 'win32' || attempt >= 4 || !['EPERM', 'EBUSY'].includes(error.code ?? ''))
+                    throw error;
+                await new Promise(resolve => setTimeout(resolve, 25 * 2 ** attempt));
+            }
         }
-        finally {
-            await dir.close();
+        try {
+            const dir = await open(dirname(path), 'r');
+            try {
+                await dir.sync();
+            }
+            finally {
+                await dir.close();
+            }
+        }
+        catch (error) {
+            if (process.platform !== 'win32')
+                throw error;
         }
     }
     catch (error) {
-        if (process.platform !== 'win32')
-            throw error;
+        await handle.close().catch(() => { });
+        await unlink(tmp).catch(() => { });
+        throw error;
     }
 }
-catch (error) {
-    await handle.close().catch(() => { });
-    await unlink(tmp).catch(() => { });
-    throw error;
-} }
