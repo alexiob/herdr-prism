@@ -232,7 +232,17 @@ server, both using Herdr 0.9.3. Actual host Ctrl+B/l/Tab changed the remote Pris
 view to Agents, with raw foreground PTY input and no onboarding overlay. Copy,
 disconnect preservation, reconnect, uninstall, container removal and generated
 SSH-file cleanup also passed. The real user's Herdr and SSH configuration were
-not changed. Linux x64 validation of this correction is pending.
+not changed.
+
+The Linux-only SSH run
+[37459983924](https://github.com/alexiob/herdr-prism/actions/runs/37459983924)
+then passed at `9b554ee`. Its downloaded artifact
+`artifacts/remote-ci-9b554ee-linux-x64/remote.json` records `ok: true` for an
+actual Linux x64 Node 24.21.0 client and Linux x64 Node 24.21.0 server. The same
+strict keyboard, remote collection, OSC 52, disconnect/reconnect and complete
+uninstall gates passed, including owned client/container/SSH-file cleanup.
+This workflow contains no Windows jobs. Synthetic provider and loopback SSH
+limits still apply, and the upstream client-visibility gate remains unproven.
 
 The merged checkout's `npm test` also completed with 260 tests: 249 passed,
 11 platform/opt-in skips, zero failures. This is not a strict native/PTY rerun;

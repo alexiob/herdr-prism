@@ -99,9 +99,10 @@ require or install a patched Herdr build.
 
 ## Verification
 
-The full SSH acceptance passed on a macOS arm64 client with a Linux arm64 server:
-remote collection, actual host-keyboard navigation, copy, disconnect/reconnect and
-complete removal. The previous keyboard failure came from the disposable
+The full SSH acceptance passed on a macOS arm64 client with a Linux arm64 server
+and on a Linux x64 client with a Linux x64 server: remote collection, actual
+host-keyboard navigation, copy, disconnect/reconnect and complete removal.
+The previous keyboard failure came from the disposable
 client's first-run onboarding overlay, which intercepted pane input. The fixture
 now configures `onboarding = false` only in its temporary home and records that
 the overlay was absent. It still requires host PTY input to change the remote
@@ -127,8 +128,9 @@ connection. The harness downloads only a checksummed, pinned Herdr **test**
 binary when needed; normal plugin installation performs no such download.
 The manual [Linux-only workflow](../.github/workflows/remote.yml) defines this
 test without triggering Windows validation. Its first Linux x64 run reproduced
-the onboarding failure; validation of the corrected fixture on Linux x64 remains
-pending until that workflow finishes.
+the onboarding failure. The corrected fixture passed all stages in
+[run 37459983924](https://github.com/alexiob/herdr-prism/actions/runs/37459983924)
+at commit `9b554ee`, including cleanup of the owned client, container and SSH files.
 
 The inspected routing contract is pinned to Herdr 0.9.3:
 [plugin runtime](https://github.com/herdrdev/herdr/blob/v0.9.3/src/app/api/plugins/runtime.rs),
