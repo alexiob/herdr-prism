@@ -14,11 +14,25 @@ is included with its checksum and matching toolchain notices. See
 
 ## Install and open
 
+Windows x64, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/install-windows.ps1 | iex
+```
+
 Install from GitHub with Herdr's standard command:
 
 ```sh
 herdr plugin install alexiob/herdr-prism
 herdr plugin action invoke activate-overview --plugin iob.herdr-prism
+```
+
+On Windows, use the [PowerShell installer](docs/install.md#windows-setup) to
+install Node automatically if it is missing from PATH, then install Prism through
+Herdr's standard commands.
+
+```powershell
+irm https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/install-windows.ps1 | iex
 ```
 
 The repository ships compiled JavaScript and macOS native helpers with

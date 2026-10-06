@@ -6,6 +6,40 @@ configuration and the outstanding visibility API boundary.
 
 ## Standard Herdr commands
 
+### Windows setup
+
+Use the PowerShell bootstrap when Node is missing from PATH. Herdr 0.9.3 or
+newer must already be installed. Run the standalone installer:
+
+```powershell
+irm https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/install-windows.ps1 | iex
+```
+
+To save and review the script before running it, or to pass options:
+
+```powershell
+$installer = Join-Path $env:TEMP ("install-prism-" + [Guid]::NewGuid().ToString('N') + ".ps1")
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/install-windows.ps1 -OutFile $installer
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
+```
+
+The script supports Windows x64, reuses Node 22.13 or newer on PATH, and otherwise
+installs checksum-pinned Node 24.21.0 under `%LOCALAPPDATA%\Programs` and adds it
+to the user PATH. It updates the current installation process's PATH immediately
+and notifies Windows environment listeners. No administrator rights or persistent
+execution-policy change is required. Existing plugin state and permissions are
+handled by Herdr's normal installation flow. An existing Prism installation is
+left in place; follow the deactivation/reinstallation commands below for updates.
+
+Use `-Yes` to accept the reviewed plugin manifest without a prompt, `-Ref <commit>`
+to choose a Git revision (default `main`), or `-PrepareOnly` to set up prerequisites
+without installing the plugin. The script does not restart an existing Herdr
+server or activate a pane. If Herdr was started before Node was available, restart
+it when convenient so its actions inherit the updated PATH. Then activate Prism
+explicitly in your chosen session using the command below.
+
+### Install and activate
+
 The marketplace and GitHub source identifier is `alexiob/herdr-prism`; the stable
 plugin ID used by actions/settings is `iob.herdr-prism`.
 

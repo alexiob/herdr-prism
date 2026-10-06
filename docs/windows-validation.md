@@ -168,3 +168,26 @@ ordinary GitHub lifecycle gate; both majors passed that flow locally.
 Historical failures above remain part of the evidence. The final Windows
 admission retry is platform-scoped; macOS/Linux and general feature
 implementation remain with the other machine.
+
+## Windows bootstrap installer
+
+`scripts/install-windows.ps1` runs standalone through `irm <raw-GitHub-URL> | iex`.
+It checks Herdr 0.9.3+, reuses supported Node or installs official Node 24.21.0
+under the user profile with pinned archive and executable SHA-256 checks, and
+uses Herdr's normal installation command. Existing plugins are left in place.
+
+Local Node 22/24 installer tests passed for version boundaries, corrupt archive
+refusal and preserving a different existing runtime. Fresh extraction/reuse of
+the verified archive passed. User PATH updates were checked for deduplication
+and unchanged machine PATH. An isolated Herdr session started without Node
+successfully installed Prism after bootstrap; its retained server environment
+still failed to launch a Node action, confirming the documented restart
+requirement. The harness used a verified cached archive and a process-only PATH
+override to avoid modifying real user settings. Proof:
+`artifacts/windows-installer-proof/acceptance.json`.
+
+The current-session activation failure was likewise an old server PATH, not a
+plugin build failure. A user-authorized activation through the verified absolute
+Node executable opened the real right pane without stopping existing agents.
+Normal actions in that already-running server need an environment refresh via
+a convenient restart; the installer never silently stops the server.
