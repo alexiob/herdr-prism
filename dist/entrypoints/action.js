@@ -71,15 +71,21 @@ export async function main(argv = process.argv.slice(2)) {
     try {
         const controller = await existingController(context);
         if (args.command === 'open') {
+            let existingPaneId;
+            let existingTerminalId;
             if (controller) {
                 try {
                     await controller.client.request('ping');
                     const current = await controller.client.request('location');
-                    if (current.paneId)
-                        return await openPanel(rpc, { existingPaneId: current.paneId });
+                    existingPaneId = current.paneId;
+                    existingTerminalId = current.terminalId;
                 }
                 catch { /* Validate/recover through doctor; do not kill an uncertain process. */ }
             }
+            // A live panel's move/focus failure must not fall back to creating
+            // another pane while its collector still owns the session.
+            if (existingPaneId)
+                return await openPanel(rpc, { existingPaneId, existingTerminalId });
             return await openPanel(rpc);
         }
         if (args.command === 'unconfigure')

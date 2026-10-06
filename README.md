@@ -38,6 +38,9 @@ The Windows installer also configures **Ctrl+B, then `i`** when the shortcut is
 free. Its setup and activation details are in
 [Windows setup](docs/install.md#windows-setup).
 
+Opening Prism from another agent tab brings the existing panel beside that agent
+instead of returning to the tab where Prism was first opened.
+
 To uninstall on Windows and remove the installer-owned shortcut:
 
 ```powershell

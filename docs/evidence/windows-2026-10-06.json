@@ -3,6 +3,17 @@
   "date": "2026-10-06",
   "platform": "win32-x64",
   "os": "Windows 11, NT 10.0.26200",
+  "crossTabPanelOpen": {
+    "liveSequence": ["claude", "codex", "claude"],
+    "correctTabAfterEveryOpen": true,
+    "singlePrismTerminalPreserved": true,
+    "nativeAgentTerminalsPreserved": true,
+    "automaticFollowEnabled": true,
+    "node22RelevantTestsPassed": 54,
+    "node24RelevantTestsPassed": 54,
+    "moveFailuresDoNotCreateDuplicatePanels": true,
+    "stableTerminalResolvesChangedPaneIds": true
+  },
   "todoDefaultChange": {
     "platforms": ["windows", "macos", "linux"],
     "enabledByDefault": true,

@@ -1,5 +1,17 @@
 # Windows x64 validation, 2026-10-06
 
+## Cross-tab open action
+
+The open action now resolves its existing panel by the authenticated controller's
+stable terminal identity and brings it into the invoking agent's tab before
+focusing it. Same-tab opens only focus; relocation failures propagate without
+creating another panel. This fixes Ctrl+B, then I returning to the Codex tab when
+invoked from Claude. The current Windows installation passed Claude → Codex →
+Claude open actions with automatic follow enabled, one unchanged Prism terminal,
+correct tab placement and both native agent terminals preserved.
+All 54 configuration, content, collector, entrypoint and Windows installer tests
+passed on both Node 22.23.3 and 24.21.0; TypeScript checking passed.
+
 ## Windows installer shortcut
 
 The standalone installer now configures `prefix+i` (default Ctrl+B, then I)
