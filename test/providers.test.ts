@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, appendFile, rename, rm, symlink, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join,resolve } from 'node:path';
 
 const module = await import('../src/providers/index.ts').catch(() => ({})) as any;
 const line = (record: unknown) => JSON.stringify(record) + '\n';
@@ -21,18 +21,18 @@ test('reference history recovers old edits beyond the hot window and incremental
  assert.equal(typeof ix.readReferences,'function','historical reference reader missing');
  let state=await ix.readReferences('codex',{kind:'id',value:'r'},()=>true);assert.equal(state.refs.length,1);assert.equal(state.refs[0].messageId,'first');assert.equal(state.refs[0].edited,true);assert.equal(ix.resolveCached('codex',{kind:'id',value:'r'}).messages.length,200);
  await appendFile(file,line(text('latest','Again `src/a.ts`')));await ix.refresh();state=await ix.readReferences('codex',{kind:'id',value:'r'},()=>true);assert.equal(state.refs[0].messageId,'latest');assert.deepEqual(state.refs[0].sources.map((s:any)=>s.messageId),['first','latest']);
- await writeFile(file,[meta('r'),text('replacement','See `src/b.ts`')].map(line).join(''));await ix.refresh();state=await ix.readReferences('codex',{kind:'id',value:'r'},()=>true);assert.equal(state.refs.length,1);assert.ok(state.refs[0].target.endsWith('/src/b.ts'));
+ await writeFile(file,[meta('r'),text('replacement','See `src/b.ts`')].map(line).join(''));await ix.refresh();state=await ix.readReferences('codex',{kind:'id',value:'r'},()=>true);assert.equal(state.refs.length,1);assert.equal(state.refs[0].target,resolve('/same','src','b.ts'));
  await rename(file,file+'.old');await writeFile(file,[meta('r'),text('rotated','See `src/c.ts`')].map(line).join(''));await ix.refresh();state=await ix.readReferences('codex',{kind:'id',value:'r'},()=>true);assert.equal(state.refs[0].messageId,'rotated');assert.equal(state.refs.length,1);
  assert.equal(await ix.readReferences('codex',{kind:'id',value:'r'},()=>false),undefined);
 });
 test('reference history preserves standalone successful patch events after cwd changes without inferring failed edits',async t=>{
  const root=await home(t);await put(root,'codex/sessions/r.jsonl',[meta('r'),text('first','See `src/a.ts` and `src/b.ts`'),{type:'event_msg',payload:{type:'patch_apply_end',success:true,changes:{'src/a.ts':{}}}},{type:'event_msg',payload:{type:'patch_apply_end',success:false,changes:{'src/b.ts':{}}}},{type:'turn_context',payload:{cwd:'/another-checkout'}},...Array.from({length:250},(_,i)=>text('plain-'+i,'No references'))]);
  const ix=index(root);t.after(()=>ix.close());await ix.refresh();const state=await ix.readReferences('codex',{kind:'id',value:'r'},()=>true);
- assert.equal(state.refs.find((r:any)=>r.target==='/same/src/a.ts').edited,true);assert.equal(state.refs.find((r:any)=>r.target==='/same/src/b.ts').edited,false);assert.equal(state.refs.length,2);
+ assert.equal(state.refs.find((r:any)=>r.target===resolve('/same','src','a.ts')).edited,true);assert.equal(state.refs.find((r:any)=>r.target===resolve('/same','src','b.ts')).edited,false);assert.equal(state.refs.length,2);
 });
 test('reference history deduplicates mirrors and cancellation never becomes malformed input or a partial result',async t=>{
  const root=await home(t);await put(root,'codex/archived_sessions/r.jsonl',[meta('r'),text('first','`src/a.ts`'),text('shared','`src/b.ts`')]);await put(root,'codex/sessions/r.jsonl',[meta('r'),text('shared','`src/b.ts`'),text('latest','`src/a.ts`')]);const ix=index(root);t.after(()=>ix.close());await ix.refresh();
- const state=await ix.readReferences('codex',{kind:'id',value:'r'},()=>true);const a=state.refs.find((r:any)=>r.target.endsWith('/src/a.ts'));assert.deepEqual(a.sources.map((s:any)=>s.messageId),['first','latest']);assert.equal(a.messageId,'latest');assert.equal(state.refs.find((r:any)=>r.target.endsWith('/src/b.ts')).sources.length,1);
+ const state=await ix.readReferences('codex',{kind:'id',value:'r'},()=>true);const a=state.refs.find((r:any)=>r.target===resolve('/same','src','a.ts'));assert.deepEqual(a.sources.map((s:any)=>s.messageId),['first','latest']);assert.equal(a.messageId,'latest');assert.equal(state.refs.find((r:any)=>r.target===resolve('/same','src','b.ts')).sources.length,1);
  assert.ok(Number.isFinite(state.observedAt),'reference existence evidence needs an observation time');const repeated=await ix.readReferences('codex',{kind:'id',value:'r'},()=>true);assert.equal(repeated.observedAt,state.observedAt,'unchanged history must reuse its existence-check evidence');
  const {JsonlTail}=await import('../src/providers/tail.ts');const file=await put(root,'cancel.jsonl',Array.from({length:50},(_,i)=>({count:i})));const tail=new JsonlTail(1024);let active=true;let count=0;const diagnostics:string[]=[];
  await assert.rejects(tail.read(file,()=>{count++;if(count===2)active=false;},()=>{},message=>diagnostics.push(message),()=>active),{name:'AbortError'});assert.equal(count,2);assert.deepEqual(diagnostics,[]);
