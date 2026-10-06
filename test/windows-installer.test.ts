@@ -10,6 +10,19 @@ const literal=(value:string)=>"'"+value.replaceAll("'","''")+"'";
 const library=resolve('scripts/install-windows.ps1');
 async function run(body:string){return exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from("$ErrorActionPreference='Stop'; . "+literal(library)+"; "+body,'utf16le').toString('base64')],{windowsHide:true,timeout:15000});}
 
+test('Windows installed runtime binds every Node command and repairs legacy open promise cleanup idempotently',windows,async t=>{
+ const root=await mkdtemp(join(tmpdir(),'prism-runtime-bind-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const {mkdir}=await import('node:fs/promises');await mkdir(join(root,'dist/entrypoints'),{recursive:true});
+ const manifest=join(root,'herdr-plugin.toml'),action=join(root,'dist/entrypoints/action.js');
+ const original='[[actions]]\ncommand = ["node", "dist/entrypoints/action.js", "open"]\n[[events]]\ncommand = ["node", "dist/entrypoints/event.js"]\n';await writeFile(manifest,original);await writeFile(action,'            return openPanel(rpc);\n            return openPanel(rpc, { existingPaneId: current.paneId });\n');
+ const call='Set-PrismInstalledRuntime -PluginRoot '+literal(root)+' -NodeExe '+literal(process.execPath);
+ await run('$before=(Get-Acl -LiteralPath '+literal(manifest)+').Sddl; '+call+'; '+call+'; if ((Get-Acl -LiteralPath '+literal(manifest)+').Sddl -ne $before) { throw "ACL changed" }');
+ let output=await readFile(manifest,'utf8');assert.equal(output.match(/command = \[/g)?.length,2);assert.ok(!output.includes('["node"'));assert.ok(output.includes(JSON.stringify(process.execPath)));
+ await writeFile(manifest,output.replaceAll(JSON.stringify(process.execPath),JSON.stringify(join(root,'old-runtime/node.exe'))));await run(call);
+ output=await readFile(manifest,'utf8');assert.ok(!output.includes('old-runtime'));assert.ok(output.includes(JSON.stringify(process.execPath)));
+ assert.equal(await readFile(manifest+'.prism-windows.bak','utf8'),original);assert.match(await readFile(action,'utf8'),/return await openPanel/);assert.ok(!(await readFile(action,'utf8')).includes('await await'));
+});
+
 test('Windows shortcut preserves config bytes and ACL, creates backup and is idempotent',windows,async t=>{
  const root=await mkdtemp(join(tmpdir(),'prism-shortcut-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const config=join(root,'config.toml'),original='\ufeff# keep me\r\n[keys]\r\nprevious_tab = "prefix+p"\r\n';await writeFile(config,original);

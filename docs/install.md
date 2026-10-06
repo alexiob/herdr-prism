@@ -43,9 +43,14 @@ configure it. The shortcut remains available after Prism deactivation; remove it
 Use `-Yes` to accept the reviewed plugin manifest without a prompt, `-Ref <commit>`
 to choose a Git revision (default `main`), or `-PrepareOnly` to set up prerequisites
 without installing the plugin. The script does not restart an existing Herdr
-server or activate a pane. If Herdr was started before Node was available, restart
-it when convenient so its actions inherit the updated PATH. Then activate Prism
-explicitly in your chosen session using the command below.
+server or activate a pane. It binds commands in the Windows installed manifest
+to the verified absolute Node executable and reloads Herdr, so an existing
+server's stale PATH does not prevent actions or panes from starting. Older
+installed `open` actions receive a backed-up compatibility repair that awaits
+panel opening before closing RPC; shared repository sources remain untouched.
+Backups use `.prism-windows.bak` beside each changed installed file, preserving
+its original contents and permissions. Then activate Prism explicitly in your
+chosen session using the command below.
 
 ### Install and activate
 

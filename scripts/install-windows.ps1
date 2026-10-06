@@ -158,13 +158,76 @@ console.log(result);
     }
 }
 
+function Update-PrismInstalledFile([string]$Path, [scriptblock]$Transform) {
+    Assert-PrismRegularPath $Path $false
+    $acl = [IO.File]::GetAccessControl($Path)
+    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) { throw 'Refusing to edit a plugin file owned by another identity.' }
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    try {
+        if ($stream.Length -gt 2097152) { throw 'Plugin file exceeds installer size limit.' }
+        $bytes = New-Object byte[] ([int]$stream.Length)
+        $offset = 0
+        while ($offset -lt $bytes.Length) {
+            $count = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+            if ($count -eq 0) { throw 'Incomplete plugin file read.' }
+            $offset += $count
+        }
+        $encoding = [Text.UTF8Encoding]::new($false, $true)
+        $original = $encoding.GetString($bytes)
+        $next = & $Transform $original
+        if ($next -ceq $original) { return $false }
+        $backupPath = $Path + '.prism-windows.bak'
+        if (-not (Test-Path -LiteralPath $backupPath)) {
+            $backup = [IO.File]::Open($backupPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try { [IO.File]::SetAccessControl($backupPath, $acl); $backup.Write($bytes, 0, $bytes.Length); $backup.Flush($true) }
+            finally { $backup.Dispose() }
+        }
+        $output = $encoding.GetBytes($next)
+        try { $stream.Position = 0; $stream.Write($output, 0, $output.Length); $stream.SetLength($output.Length); $stream.Flush($true) }
+        catch { $stream.Position = 0; $stream.Write($bytes, 0, $bytes.Length); $stream.SetLength($bytes.Length); $stream.Flush($true); throw }
+        return $true
+    } finally { $stream.Dispose() }
+}
+
+function Set-PrismInstalledRuntime([string]$PluginRoot, [string]$NodeExe) {
+    Assert-PrismRegularPath $PluginRoot $true
+    Assert-PrismRegularPath $NodeExe $false
+    $quotedNode = ConvertTo-Json -Compress -InputObject ([IO.Path]::GetFullPath($NodeExe))
+    $manifestChanged = Update-PrismInstalledFile (Join-Path $PluginRoot 'herdr-plugin.toml') {
+        param($text)
+        [regex]::Replace($text, '(?m)^(command\s*=\s*\[)\s*("(?:[^"\\]|\\.)*")(\s*,\s*"(?:dist/entrypoints/[a-z-]+\.js|scripts/check-install\.mjs)")', {
+            param($match)
+            $program = ConvertFrom-Json -InputObject $match.Groups[2].Value
+            if ($program -eq 'node' -or ([IO.Path]::IsPathRooted($program) -and [IO.Path]::GetFileName($program) -ieq 'node.exe')) {
+                return $match.Groups[1].Value + $quotedNode + $match.Groups[3].Value
+            }
+            return $match.Value
+        })
+    }
+    # Windows installed-copy compatibility repair for releases whose open action
+    # returns a pending promise inside finally { rpc.close() }. Shared sources
+    # stay untouched; already-correct releases do not match these exact lines.
+    $entryParent = Join-Path $PluginRoot 'dist'
+    Assert-PrismRegularPath $entryParent $true
+    $entryParent = Join-Path $entryParent 'entrypoints'
+    Assert-PrismRegularPath $entryParent $true
+    $actionChanged = Update-PrismInstalledFile (Join-Path $entryParent 'action.js') {
+        param($text)
+        [regex]::Replace($text, '(?m)^(\s*)return openPanel\(rpc(\);|, \{ existingPaneId: current\.paneId \}\);)', '$1return await openPanel(rpc$2')
+    }
+    if ($manifestChanged -or $actionChanged) { Write-Host 'Bound Windows plugin commands to the verified Node executable; legacy open cleanup repaired if needed.' }
+    return ($manifestChanged -or $actionChanged)
+}
+
 function Enable-PrismShortcut([string]$HerdrExe, [string]$NodeExe, [string]$PluginRoot) {
+    $runtimeChanged = Set-PrismInstalledRuntime $PluginRoot $NodeExe
     $configPath = $env:HERDR_CONFIG_PATH
     if (-not $configPath) {
         $base = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { $env:APPDATA }
         $configPath = Join-Path $base 'herdr/config.toml'
     }
-    if (Set-PrismShortcut -ConfigPath $configPath -NodeExe $NodeExe -PluginRoot $PluginRoot) {
+    $shortcutChanged = Set-PrismShortcut -ConfigPath $configPath -NodeExe $NodeExe -PluginRoot $PluginRoot
+    if ($runtimeChanged -or $shortcutChanged) {
         & $HerdrExe server reload-config
         if ($LASTEXITCODE -ne 0) { Write-Warning 'Shortcut saved. Start or reload Herdr to use it.' }
     }
@@ -198,7 +261,6 @@ function Invoke-PrismWindowsInstall {
     } else { $nodeExe = $node.Source }
     Write-Host "Ready: $herdrVersion; Node $version"
     if ($OnlyPrepare) { return }
-    Write-Host 'If Herdr was running before Node setup, restart it when convenient before invoking plugin actions.'
     $listing = & $herdr.Source plugin list --plugin iob.herdr-prism --json
     if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect existing Prism registration.' }
     $plugins = ($listing | Out-String | ConvertFrom-Json).result.plugins

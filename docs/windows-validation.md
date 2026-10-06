@@ -15,8 +15,20 @@ idempotence, and a 40 KiB configuration. TypeScript checking passed. A disposabl
 Herdr 0.9.3 server starting without Node completed fresh pinned Node setup,
 standard GitHub installation at `2e68d55`, shortcut creation, and configuration
 reload with zero diagnostics. The actual existing installation likewise accepted
-the shortcut and a second run added nothing. A server launched before Node setup
-still needs a user-initiated restart for normal plugin actions to inherit PATH.
+the shortcut and a second run added nothing.
+
+The initial shortcut release still depended on the launcher's Node PATH; even
+restarting Herdr from an older shell retained `program not found`. The installer
+now binds all recognized Prism Node commands to the verified executable in the
+Windows installed manifest, including replacing an earlier absolute Node path
+on rerun. It also repairs the exact legacy installed `openPanel` return sites to
+await opening before RPC cleanup; shared repository sources remain untouched.
+Original installed files are backed up and their ownership/ACLs preserved.
+Seven installer tests passed on Node 22/24. Fresh installation against an already
+running, Node-less disposable Herdr server now executes `doctor` successfully
+without restarting the server. The actual installation's `open` action succeeded
+and displayed Prism; repeated opening also succeeded. The older restart advice
+is superseded by these Windows installed-copy repairs.
 
 Windows work resumed locally on Windows 11 x64 (NT build 26200), using
 checksum-verified portable Node 22.23.3 and 24.21.0, Rust MSVC 1.90.0 and
