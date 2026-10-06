@@ -8,7 +8,9 @@ export function windowsInspector(inspection:string,options:{timeoutMs?:number;ma
  let child:ChildProcessWithoutNullStreams|undefined,buffer='',ready=false,idle:NodeJS.Timeout|undefined;
  let pending:{path:string;sent:boolean;resolve:(value:string)=>void;reject:(error:Error)=>void;timer:NodeJS.Timeout}|undefined;
  let queue:Promise<unknown>=Promise.resolve();
- const script="$ErrorActionPreference='Stop'; [Console]::InputEncoding=[Text.UTF8Encoding]::new($false); [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); [Console]::Out.WriteLine('PRISM_ACL_READY'); [Console]::Out.Flush(); while($null -ne ($line=[Console]::ReadLine())) { try { $env:HAT_PRIVATE_PATH=ConvertFrom-Json -InputObject $line; "+inspection+" } catch { [pscustomobject]@{inspectionError=$_.Exception.Message} | ConvertTo-Json -Compress } }";
+ // Read the redirected pipe explicitly. Console encoding setters can interact
+ // with an attached ConPTY; this worker must never consume the pane's input.
+ const script="$ErrorActionPreference='Stop'; $encoding=[Text.UTF8Encoding]::new($false); $reader=[IO.StreamReader]::new([Console]::OpenStandardInput(),$encoding); $writer=[IO.StreamWriter]::new([Console]::OpenStandardOutput(),$encoding); $writer.AutoFlush=$true; $writer.WriteLine('PRISM_ACL_READY'); while($null -ne ($line=$reader.ReadLine())) { try { $env:HAT_PRIVATE_PATH=ConvertFrom-Json -InputObject $line; $result=& { "+inspection+" }; $writer.WriteLine([string]$result) } catch { $writer.WriteLine([string]([pscustomobject]@{inspectionError=$_.Exception.Message} | ConvertTo-Json -Compress)) } }";
  const send=()=>{if(ready&&pending&&!pending.sent){pending.sent=true;child!.stdin.write(JSON.stringify(pending.path)+'\n');}};
  const stop=()=>{clearTimeout(idle);const old=child;child=undefined;buffer='';ready=false;old?.stdin.end();};
  const fail=(error:Error)=>{const task=pending;pending=undefined;if(task){clearTimeout(task.timer);task.reject(error);}const old=child;stop();old?.kill();};
@@ -37,7 +39,7 @@ export function windowsInspector(inspection:string,options:{timeoutMs?:number;ma
    });
   }
   child.ref();for(const stream of [child.stdin,child.stdout,child.stderr])(stream as any).ref?.();
-  pending={path,sent:false,resolve,reject,timer:setTimeout(()=>fail(new Error('Windows ACL inspection timed out')),remaining)};
+  pending={path,sent:false,resolve,reject,timer:setTimeout(()=>fail(new Error('Windows ACL inspection timed out '+(ready?'awaiting pipe response':'awaiting worker readiness'))),remaining)};
   send();
  });
  return path=>{
