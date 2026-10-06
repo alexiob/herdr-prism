@@ -22,7 +22,7 @@ def own_controlling_terminal():
     os.tcsetpgrp(0, os.getpgrp())
 child = subprocess.Popen(config['argv'], stdin=slave, stdout=slave, stderr=slave, close_fds=True, preexec_fn=own_controlling_terminal, env=environment, cwd=config['cwd'])
 os.close(slave)
-state = {'pid': child.pid, 'actualPTY': os.isatty(master), 'capturedBytes': 0, 'remoteFixtureSeen': False, 'prismSeen': False, 'remoteHostnameSeen': False, 'disconnectedAppendSeen': False, 'clipboardRemoteRef': False, 'osc52Seen': False, 'inputWrites': []}
+state = {'pid': child.pid, 'actualPTY': os.isatty(master), 'capturedBytes': 0, 'remoteFixtureSeen': False, 'prismSeen': False, 'remoteHostnameSeen': False, 'disconnectedAppendSeen': False, 'clipboardRemoteRef': False, 'osc52Seen': False, 'onboardingSeen': False, 'inputWrites': []}
 output = bytearray()
 try:
     while child.poll() is None:
@@ -42,6 +42,7 @@ try:
             for key, marker in [('remoteFixtureSeen', b'REMOTE_SYNTHETIC'), ('prismSeen', b'[Overview]'), ('remoteHostnameSeen', b'prism-remote-fixture'), ('disconnectedAppendSeen', b'APPEND DURING DISCONNECT')]:
                 state[key] = state[key] or marker in output
             state['prismSeen'] = state['prismSeen'] or b'< Overview >' in output
+            state['onboardingSeen'] = state['onboardingSeen'] or b'this is a mouse-first terminal.' in output
             for match in re.finditer(rb'\x1b\]52;[^;]*;([A-Za-z0-9+/=]{1,1024})(?:\x07|\x1b\\)', output):
                 state['osc52Seen'] = True
                 state['clipboardRemoteRef'] = state['clipboardRemoteRef'] or base64.b64decode(match.group(1)) == b'/home/prism/fixture/checkout/remote.txt'

@@ -210,6 +210,43 @@ a separate Windows agent, so this pass stops further edits and testing. Windows
 was not resumed. Machine-background/last-viewer pause stays an upstream API
 dependency, as the user explicitly chose.
 
+## SSH keyboard fixture correction — 2026-10-06
+
+After integrating the separate Windows agent's commits, local `main` matched
+`origin/main` at `9c100f6`. Windows implementation and validation remain with
+that agent; this correction changes only the Unix SSH fixture and its evidence.
+
+The Linux-only SSH run
+[37458599060](https://github.com/alexiob/herdr-prism/actions/runs/37458599060)
+failed at host keyboard navigation after passing attachment, activation and
+remote data checks. A fresh macOS reproduction in
+`artifacts/remote-onboarding-red/remote.json` captured Herdr's first-run onboarding
+overlay while the strict keyboard assertion failed. Pinned Herdr 0.9.3 source
+loads that overlay from the client's fresh configuration and consumes pane keys
+while it is present.
+
+Setting `onboarding = false` only in the fixture's disposable client config
+resolved the failure. `artifacts/remote-onboarding-green/remote.json` passed all
+SSH gates with a macOS arm64 Node 26.10.0 client and Linux arm64 Node 24.21.0
+server, both using Herdr 0.9.3. Actual host Ctrl+B/l/Tab changed the remote Prism
+view to Agents, with raw foreground PTY input and no onboarding overlay. Copy,
+disconnect preservation, reconnect, uninstall, container removal and generated
+SSH-file cleanup also passed. The real user's Herdr and SSH configuration were
+not changed. Linux x64 validation of this correction is pending.
+
+The merged checkout's `npm test` also completed with 260 tests: 249 passed,
+11 platform/opt-in skips, zero failures. This is not a strict native/PTY rerun;
+the full SSH fixture above provides the actual remote interaction evidence.
+
+The merged platform run
+[37458785002](https://github.com/alexiob/herdr-prism/actions/runs/37458785002)
+finished with seven Unix jobs passing, one macOS x64 Node 24 lifecycle failure
+(`Dashboard did not become ready`), and both Windows jobs failing strict tests.
+The macOS failure's archived snapshot/log is retained under
+`artifacts/ci-9c100f6-darwin-x64-node24/`; it is unresolved. Windows failures are
+left to the Windows agent and were not retried here. These results do not replace
+the remaining full acceptance and upstream visibility gates.
+
 ## Performance evidence
 
 `scripts/profile-host.mjs` now profiles 50 declared fixture sessions, 500 real
