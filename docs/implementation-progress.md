@@ -653,3 +653,14 @@ adds storage latency and waits for the saved completion before reading disk.
 Real PTY + Notes fixture suites pass 10/10 on macOS and Linux. No Windows runtime
 code was changed. This first CI failure remains recorded; a fresh matrix run is
 required for the corrected commit.
+
+
+Final cross-platform CI at `d6653f1` is green: all ten jobs in
+[run 37515181628](https://github.com/alexiob/herdr-prism/actions/runs/37515181628),
+covering macOS/Linux arm64 and x64 plus Windows x64 on Node 22/24. These include
+strict tests, actual PTY/ConPTY, staged distribution, live lifecycle and
+reference/Notes interaction, independent tab-pane recovery and ordinary GitHub
+installation on Linux/Windows. Windows runtime implementation was preserved;
+only the shared terminal-label expectation and portable storage-latency test
+were adjusted. Native-pixel, missing host API, paid-provider and soak gates
+remain as documented for the broader original implementation objective.

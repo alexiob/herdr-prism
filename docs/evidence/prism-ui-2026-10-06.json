@@ -259,6 +259,29 @@
         "failed": 0
       }
     },
-    "freshCi": "pending"
+    "freshCi": {
+      "url": "https://github.com/alexiob/herdr-prism/actions/runs/37515181628",
+      "testedCommit": "d6653f13415fa225bd551123e2f37754fa371415",
+      "conclusion": "success",
+      "jobsPassed": 10,
+      "platforms": [
+        "macOS arm64/x64",
+        "Linux arm64/x64",
+        "Windows x64"
+      ],
+      "nodeMajors": [
+        22,
+        24
+      ],
+      "coverage": [
+        "strict actual-platform tests",
+        "PTY/ConPTY smoke",
+        "release staging/distribution checks",
+        "actual live install/restart/removal",
+        "reference/Notes interaction and ownership",
+        "independent per-tab panes/crash recovery",
+        "ordinary GitHub installation on Linux/Windows"
+      ]
+    }
   }
 }

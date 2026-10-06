@@ -21,3 +21,5 @@ Final: no deferred minor findings. Full reviewed profiles macOS342/320/22 and Li
 Task 5: complete (commits b33a7a6..96deef9, tests: node --experimental-strip-types --test test/config.test.ts test/native.test.ts test/lifecycle-races.test.ts test/tui-redesign.test.ts test/notes-editor.test.ts test/notes.test.ts test/tui.test.ts test/ui-preview.test.ts → ℹ duration_ms 1252.537125)
 
 Post-push CI: fixed stale narrow-tab smoke expectation and a fixed-delay autosave assertion; each was reproduced RED→GREEN locally. Shared Notes/real-PTY suites macOS10/10 and Linux10/10. Windows runtime unchanged; original failed run remains recorded.
+
+Final post-push acceptance: CI run37515181628 at d6653f1 passed all10 platform/Node22/24 jobs, including both Windows majors. This evidence-only follow-up changes no source or runtime artifact.
