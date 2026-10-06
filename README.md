@@ -168,6 +168,11 @@ associations and local To-do state remain in private plugin directories.
 
 ## Development and releases
 
+For the UI redesign, print every synthetic terminal design with
+`npm run ui:preview`, or browse with `npm run ui:preview -- --browse --width 80`.
+See the [gallery controls and theme/size options](docs/ui-design-preview.md).
+These are design previews; they do not replace the live plugin or persist Notes.
+
 ```sh
 npm ci
 npm run check

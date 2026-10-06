@@ -16,6 +16,7 @@
     "test": "node --experimental-strip-types --test --test-concurrency=1 test/*.test.ts",
     "test:native": "cargo test --manifest-path native/sampler/Cargo.toml",
     "dev": "node --experimental-strip-types src/entrypoints/inspector.ts",
+    "ui:preview": "node --experimental-strip-types scripts/ui-preview.ts",
     "verify": "npm run check && npm test && npm run build && npm run test:native"
   },
   "devDependencies": { "@types/node": "22.19.19", "typescript": "5.9.3" }

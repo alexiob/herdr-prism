@@ -561,3 +561,17 @@ The installer owns a reversible `prefix+i` binding (`Ctrl+B`, then `i` by defaul
 Actual isolated macOS arm64 and Podman Linux arm64 proofs cover no Node in the existing server PATH, checksum-pinned dependency setup, authenticated activation, real controlling-PTY shortcut dispatch, complete config/state/installation purge, original shortcut/layout restoration, dependency reuse and missing-server setup. See [durable evidence](evidence/unix-bootstrap-2026-10-06.json). Windows installer changes are pulled from the other machine and retain separate ownership. UI redesign requested by the user is the next feature phase, inspired primarily by btop and also htop, Radar and agent-panel; the existing crowded presentation is not claimed finished.
 
 The public-source installer now passes the same complete delivery pipeline against actual GitHub downloads on macOS arm64 (`56f2ee9`) and Podman Linux arm64 (`e617f0c`). The macOS source-path and committed-helper regressions are fixed and covered; final installer-targeted suite passes 51 tests.
+
+## UI redesign gallery — 2026-10-06
+
+The [terminal design gallery](ui-design-preview.md) now implements the requested
+reviewable preview: all eight tabs, Notes editing layout, compact native sidebar
+content, selected-entry help on `?`, and full content on Enter. Right arrows
+mark destinations; Overview Processes, Git, To-do and other activity summaries
+have matching tab destinations. Long rows show meaningful summaries with full
+facts in details. Dark/light/mono, ASCII and 36/50/80/120-column geometry are
+covered. The synthetic gallery is open in the named local Herdr pane for user
+iteration; the production UI and persistent Notes editor remain to be replaced.
+Gallery + existing TUI/input tests pass 29/29, with TypeScript checks and actual
+PTY help/detail/back/exit proof. Collection schedules and Windows code are
+unchanged by this preview.
