@@ -9,7 +9,7 @@ export interface PreviewEntry {
   id:string;label:string;value?:string;help:string;detail?:string;target?:PreviewView;role?:ColorRole;display?:string;
 }
 interface DetailField {label:string;value:string;role?:ColorRole;}
-interface Section {title:string;entries:PreviewEntry[];description?:string[];fields?:DetailField[];}
+interface Section {title:string;entries:PreviewEntry[];description?:string[];descriptionRole?:ColorRole;fields?:DetailField[];column?:0|1;}
 export interface PreviewOptions {width?:number;height?:number;selected?:number;scroll?:number;ascii?:boolean;theme?:ThemeName;entry?:PreviewEntry;}
 export interface PreviewFrame {
   view:PreviewView;lines:string[];spans:TextSpan[][];entries:(PreviewEntry&{display:string})[];
@@ -31,7 +31,7 @@ const sections:Record<Exclude<PreviewView,'Help'|'Detail'>,Section[]>={
     ]},
     {title:'Resources',entries:[
       fact('cpu','CPU','124%  ▁▂▄▆▅█','CPU\n\nAggregate: 124%\n100% = one logical core.\nScope: self + verified owned jobs.\nHistory: sampled peaks; blank columns are gaps.\nThis aggregate may exceed 100%.','Sampled CPU of the selected scope. 100% means one core; history gaps are not interpolated. Enter opens readings and coverage.'),
-      fact('memory','RSS sum','620 MiB  ▂▂▃▄▆█','Memory\n\nRSS sum: 620 MiB\nObserved peak: 710 MiB\nShared resident pages can be counted by more than one process.\nWindows reports working-set sum.','Resident-memory sum, not host memory percent. Shared pages can appear in several processes. Enter opens the peak and coverage.'),
+      fact('memory','RSS sum','620 MiB  ▂▂▃▄▆█','Memory\n\nRSS sum: 620 MiB\nObserved peak: 710 MiB\nShared resident pages can be counted by more than one process.\nWindows reports working-set sum.','Resident-memory sum, not host memory percent. Shared pages can appear in several processes. Peak is the highest observed aggregate sample. Windows uses working-set sum. Enter opens the measurements and scope.'),
       link('processes','Processes','4/4 readable','Processes','Enter opens owned processes. The denominator includes verified unavailable processes; unreadable values are not measured zero.'),
     ]},
     {title:'Usage',entries:[
@@ -137,17 +137,64 @@ function structuredDetail(entry:PreviewEntry):Section[]|undefined{
   const text=entry.detail??'';
   const values=new Map<string,string>();
   for(const line of text.split('\n')){const field=/^([A-Za-z][A-Za-z -]*):\s+(.+)$/.exec(line);if(field)values.set(field[1]!,field[2]!);}
-  const section=(title:string,fields:DetailField[]):Section=>({title,entries:[],fields});
+  const section=(title:string,fields:DetailField[],column:0|1=0):Section=>({title,entries:[],fields,column});
   const known=(keys:[string,string,ColorRole?][]):DetailField[]=>keys.flatMap(([key,label,role])=>values.has(key)?[{label,value:values.get(key)!,role}]:[]);
+  if(entry.id==='memory')return[
+    section('Memory',[
+      ...known([['RSS sum','Current','quantity'],['Observed peak','Peak','quantity']]),
+      {label:'History',value:'▂▂▃▄▆█',role:'quantity'},
+    ]),
+    section('Sample scope',[{label:'Metric',value:'RSS sum',role:'identity'},{label:'Includes',value:'Selected agent + owned jobs'}],1),
+  ];
+  if(entry.id==='cpu')return[
+    section('CPU',known([['Aggregate','Current','quantity']])),
+    section('Sample scope',known([['Scope','Includes']]),1),
+    section('History',[{label:'Samples',value:'▁▂▄▆▅█',role:'quantity'}]),
+  ];
+  if(entry.id==='context'||entry.id==='tokens'){
+    const context=/^([\d,]+) \/ ([\d,]+) \(([\d.]+)%\)$/.exec(values.get('Current context')??'');
+    const cache=values.get('Cache read')?.replace(/\s+\(.+\)$/,'');
+    return[
+      section('Recorded tokens',[
+        ...known([['Input','Input','quantity'],['Output','Output','quantity']]),
+        ...(cache?[{label:'Cache read',value:cache,role:'quantity' as const}]:[]),
+        ...known([['Cache write','Cache write','quantity'],['Reasoning','Reasoning','quantity']]),
+        ...(values.get('Cache read')?.includes('subset')?[{label:'Cache mode',value:'Subset of input',role:'identity' as const}]:[]),
+      ]),
+      section('Context',context?[
+        {label:'Used',value:context[1]+' tokens',role:'quantity'},
+        {label:'Capacity',value:context[2]+' tokens',role:'quantity'},
+        {label:'Occupancy',value:context[3]+'%',role:'quantity'},
+        {label:'Meter',value:'▰▱▱▱▱▱▱▱',role:'quantity'},
+      ]:[],1),
+      section('Turn',known([['Last recorded turn','Last turn','quantity']]),1),
+      section('Rates and cost',known([['Generation rate','Generation','quantity'],['Cost','Cost','quantity']]),1),
+      section('Provenance',known([['Coverage','Coverage']])),
+    ].filter(item=>item.fields!.length);
+  }
+  if(entry.id.startsWith('git-'))return[
+    section('Checkout identity',known([['Branch','Branch','identity'],['Repository','Repository','path'],['Checkout','Worktree','path']])),
+    section('Changes',known([['Added lines','Added','positive'],['Deleted lines','Deleted','negative'],['Untracked files','Untracked','quantity'],['Conflicts','Conflicts']]).map(field=>({...field,value:field.label==='Added'?`+${field.value} lines`:field.label==='Deleted'?`-${field.value} lines`:field.label==='Untracked'?field.value+' files':field.value,role:field.label==='Conflicts'?(field.value==='0'?'positive':'negative'):field.role})),1),
+    section('Tracking',known([['Ahead','Ahead','quantity'],['Behind','Behind','quantity']]).map(field=>({...field,value:field.value+' commits'})),1),
+    section('Snapshot',known([['Git snapshot age','Age','duration']])),
+  ];
+  if(entry.id==='turn')return[
+    section('Session',known([['Session age','Age','duration'],['Harness uptime','Uptime','duration']])),
+    section('Turn',known([['Current turn elapsed','Elapsed','duration'],['Generation time','Generation','duration']]),1),
+  ];
+  if(entry.id==='agent-cached')return[
+    section('Cached resources',known([['CPU','CPU','quantity'],['RSS sum','RSS','quantity']])),
+    section('Observation',known([['Sample','Age','duration']]),1),
+  ];
   if(/^p\d+$/.test(entry.id))return[
-    section('Identity',known([['Process','Name','accent'],['PID','PID'],['PPID','PPID'],['Birth identity','Birth']])),
-    section('Resources',known([['CPU','CPU','accent'],['RSS','RSS','accent'],['Threads','Threads'],['Availability','Status','warning']])),
-    section('Ownership',known([['Owner','Agent','accent']])),
+    section('Identity',known([['Process','Name','identity'],['PID','PID','identity'],['PPID','PPID','identity'],['Birth identity','Birth']])),
+    section('Resources',known([['CPU','CPU','quantity'],['RSS','RSS','quantity'],['Threads','Threads','quantity'],['Availability','Status','warning']]),1),
+    section('Ownership',known([['Owner','Agent','identity']])),
   ].filter(item=>item.fields!.length);
   if(entry.id==='process-scope')return[
-    section('Selected scope',known([['Scope','Includes','accent']])),
-    section('Readable samples',known([['CPU','CPU','positive'],['Memory','Memory','positive']])),
-    section('Aggregate readings',known([['Aggregate CPU','CPU','accent'],['Aggregate RSS','RSS','accent']])),
+    section('Selected scope',known([['Scope','Includes','identity']])),
+    section('Readable samples',known([['CPU','CPU','positive'],['Memory','Memory','positive']]),1),
+    section('Aggregate readings',known([['Aggregate CPU','CPU','quantity'],['Aggregate RSS','RSS','quantity']]),1),
   ];
   if(entry.id.startsWith('ref-')){
     const target=text.split('\n').find(line=>/^(?:\/|[A-Za-z]:[\\/])/.test(line));
@@ -156,24 +203,33 @@ function structuredDetail(entry:PreviewEntry):Section[]|undefined{
     const missing=entry.id==='ref-missing';
     return[
       section('Reference target',[
-        {label:'Name',value:name,role:'accent'},
-        {label:'Path',value:fullPath},
-        ...(match[2]?[{label:'Line',value:match[2]}]:[]),
+        {label:'Name',value:name,role:'identity'},
+        {label:'Path',value:fullPath,role:'path'},
+        ...(match[2]?[{label:'Line',value:match[2],role:'quantity' as const}]:[]),
       ]),
       section('Recorded facts',[
         {label:'State',value:missing?'Missing target':'Recorded target',role:missing?'warning':'text'},
         ...known([['Edited','Edited'],['Sources','Sources','accent'],['Source message','Message','accent']]),
-      ]),
+      ],1),
     ];
+  }
+  if(values.size){
+    const fields=[...values].map(([label,value]):DetailField=>({label,value,role:/^(?:status|state|locally checked)$/i.test(label)?/^(?:active|working|done|yes)$/i.test(value)?'positive':/^(?:waiting|blocked|unknown)$/i.test(value)?'warning':'text':/source|author|recipient|parent|provider/i.test(label)?'identity':/checkout|repository|path/i.test(label)?'path':/^\d/.test(value)?'quantity':undefined}));
+    const narrative=text.split('\n').filter(line=>!/^([A-Za-z][A-Za-z -]*):\s+(.+)$/.test(line));
+    return [{title:entry.label,entries:[],description:narrative,descriptionRole:'text'},section('Recorded facts',fields,1)];
   }
 }
 function semanticText(text:string,role:ColorRole='text',selected=false):TextSpan[]{
   return text.split(/([+]\d+|-\d+)/g).filter(Boolean).map(part=>span(part,/^\+\d+$/.test(part)?'positive':/^-\d+$/.test(part)?'negative':role,selected));
 }
+function fieldSpans(text:string,role:ColorRole='text'):TextSpan[]{
+  if(/^(?:unavailable|—)/i.test(text.trim()))return [span(text,'warning')];
+  return text.split(/(\b(?:tokens|MiB|GiB|KiB|lines|files|commits|seconds|minutes)\b)/g).filter(Boolean).map(part=>span(part,/^(?:tokens|MiB|GiB|KiB|lines|files|commits|seconds|minutes)$/.test(part)?'secondary':role));
+}
 
 export function renderPreview(view:PreviewView,options:PreviewOptions={}):PreviewFrame{
   const width=Math.max(26,Math.floor(options.width??50)),height=Math.max(10,Math.floor(options.height??34));
-  const theme=options.theme??'dark';const two=view==='Overview'&&width>=80;
+  const theme=options.theme??'dark';let two=view==='Overview'&&width>=80;
   const allEntries:(PreviewEntry&{display:string})[]=[];
   const positions:PreviewFrame['positions']=[];
   type BodyLine={parts:TextSpan[];entries:{index:number;column:number;width:number}[]};
@@ -182,13 +238,14 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
     for(const section of items){
       const heading=`┌ ${section.title} `;result.push({parts:[span(heading,'accent'),span('─'.repeat(Math.max(0,innerWidth-cellWidth(heading)-1))+'┐','border')],entries:[]});
       for(const field of section.fields??[]){
-        const labelWidth=10,valueWidth=innerWidth-4-labelWidth;
+        const labelWidth=12,valueWidth=innerWidth-4-labelWidth;
+        if(cellWidth(field.label)>labelWidth)for(const label of readableWrap(field.label,innerWidth-4))result.push({parts:[span('│ ','border'),span(pad(label,innerWidth-4),'secondary'),span(' │','border')],entries:[]});
         for(const [index,line]of readableWrap(field.value,valueWidth).entries())result.push({parts:[
-          span('│ ','border'),span(pad(index?'':field.label,labelWidth),'secondary'),
-          span(pad(line,valueWidth),field.role??'text'),span(' │','border'),
+          span('│ ','border'),span(pad(index||cellWidth(field.label)>labelWidth?'':field.label,labelWidth),'secondary'),
+          ...fieldSpans(pad(line,valueWidth),field.role),span(' │','border'),
         ],entries:[]});
       }
-      for(const text of section.description??[])for(const line of readableWrap(text,innerWidth-4))result.push({parts:[span('│ ','border'),...semanticText(pad(line,innerWidth-4),'secondary'),span(' │','border')],entries:[]});
+      for(const text of section.description??[])for(const line of readableWrap(text,innerWidth-4))result.push({parts:[span('│ ','border'),...semanticText(pad(line,innerWidth-4),section.descriptionRole??'secondary'),span(' │','border')],entries:[]});
       for(const entry of section.entries){
         const index=allEntries.length,display=compactEntry(entry,innerWidth-4);allEntries.push({...entry,display});
         result.push({parts:[span('│','border'),...semanticText(' '+display+' ',entry.role??'text',index===(options.selected??0)),span('│','border')],entries:[{index,column:2,width:innerWidth-2}]});
@@ -197,21 +254,27 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
     }
     return result;
   };
+  const columns=(leftItems:Section[],rightItems:Section[]):BodyLine[]=>{
+    const colWidth=Math.floor((width-2)/2),left=sectionLines(leftItems,colWidth),right=sectionLines(rightItems,width-colWidth-2);
+    return Array.from({length:Math.max(left.length,right.length)},(_,i)=>{
+      const l=left[i],r=right[i];return {parts:[...(l?.parts??[span(' '.repeat(colWidth))]),span('  '),...(r?.parts??[span(' '.repeat(width-colWidth-2))])],entries:[...l?.entries??[],...(r?.entries??[]).map(e=>({...e,column:e.column+colWidth+2}))]};
+    });
+  };
   let body:BodyLine[];
   if(view==='Help'||view==='Detail'){
     const entry=options.entry??sections.Overview[0]!.entries[0]!;
     const title=view==='Help'?`Help · ${entry.label}`:`Detail · ${entry.label}`;
     const text=view==='Help'?`${entry.help}\n\nEnter opens ${entry.target??'full content'}.\n? shows this entry's help.\nEscape returns to your previous selection.`:entry.detail??`${entry.label}\n\n${entry.value??''}\n\nDestination: ${entry.target??'none'}`;
-    body=sectionLines(view==='Detail'?structuredDetail(entry)??[{title,description:text.split('\n'),entries:[]}]:[{title,description:text.split('\n'),entries:[]}],width);
+    const detail=view==='Detail'?structuredDetail(entry):undefined;
+    two=width>=80&&Boolean(detail?.some(section=>section.column===1));
+    body=two?columns(detail!.filter(section=>section.column!==1),detail!.filter(section=>section.column===1)):sectionLines(detail??[{title,description:text.split('\n'),descriptionRole:'text',entries:[]}],width);
   }else if(two){
-    const colWidth=Math.floor((width-2)/2),items=sections.Overview;
-    const left=sectionLines([items[1]!,items[2]!],colWidth);
-    const right=sectionLines([items[0]!,items[3]!,items[4]!],width-colWidth-2);
-    body=Array.from({length:Math.max(left.length,right.length)},(_,i)=>{
-      const l=left[i],r=right[i];return {parts:[...(l?.parts??[span(' '.repeat(colWidth))]),span('  '),...(r?.parts??[span(' '.repeat(width-colWidth-2))])],entries:[...l?.entries??[],...(r?.entries??[]).map(e=>({...e,column:e.column+colWidth+2}))]};
-    });
+    const items=sections.Overview;body=columns([items[1]!,items[2]!],[items[0]!,items[3]!,items[4]!]);
   }else body=sectionLines(sections[view],width);
-  const detailContext=options.entry?.id.startsWith('ref-')?'Refs':options.entry?.id==='process-scope'||/^p\d+$/.test(options.entry?.id??'')?'Processes':'Overview';
+  const detailId=options.entry?.id??'';
+  const detailContext=detailId.startsWith('ref-')?'Refs':detailId==='process-scope'||/^p\d+$/.test(detailId)?'Processes':detailId.startsWith('git-')?'Git':detailId.startsWith('agent-')?'Agents':detailId.startsWith('message-')?'Messages':detailId.startsWith('todo-')?'To-do':'Overview';
+  const detailTitles:Record<string,string>={memory:'Memory',cpu:'CPU',context:'Recorded usage',tokens:'Recorded usage',turn:'Timing','process-scope':'Scope coverage','agent-cached':'Cached resources'};
+  const detailTitle=detailTitles[detailId]??(detailContext==='Processes'?'Process details':detailContext==='Refs'?'Reference details':detailContext==='Git'?'Git checkout':options.entry?.label??'Detail');
   const active=view==='Notes editor'?'Notes':view==='Detail'||view==='Help'?detailContext:inspectorPreviewTabs.includes(view as any)?view:'Overview';
   const tabNames=width<50?['Overview','Agents','Procs','Msgs','Refs','To-do','Git','Notes']:inspectorPreviewTabs;
   const tabParts=tabNames.map((name,i)=>({name,active:inspectorPreviewTabs[i]===active}));
@@ -219,7 +282,7 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
   for(const item of tabParts){const label=(item.active?'['+item.name+']':item.name)+' ';if(used+cellWidth(label)>width&&tabLine.length){tabLines.push(tabLine);tabLine=[];used=0;}tabLine.push(span(label,item.active?'accent':'secondary'));used+=cellWidth(label);}
   if(tabLine.length)tabLines.push(tabLine);
   const chrome:TextSpan[][]=[
-    [span(truncate(`PRISM · DESIGN · ${view==='Detail'&&detailContext==='Processes'?options.entry?.id==='process-scope'?'Scope coverage':'Process details':view==='Detail'&&detailContext==='Refs'?'Reference details':view}`,width),'accent')],
+    [span(truncate(`PRISM · DESIGN · ${view==='Detail'?detailTitle:view}`,width),'accent')],
     [span(width<50?'Monitor · codex · working':'Monitor · codex / demo-model · working','text')],
     [span(truncate('local/main · Self + jobs · Follow',width),'secondary')],...tabLines,
   ];

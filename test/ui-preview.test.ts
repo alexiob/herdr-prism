@@ -87,3 +87,37 @@ test('process, scope and ref details separate aligned labels from styled full va
     for(const line of frame.lines)assert.ok(cellWidth(line)<=width);
   }
 });
+
+test('memory, usage and Git details organize facts and highlight quantities, paths and Git changes',()=>{
+  const fixtures=[['Overview','memory',['Memory','Sample scope'],'Current','620 MiB','quantity'],
+    ['Overview','tokens',['Recorded tokens','Context','Turn','Rates and cost'],'Input','42,180 tokens','quantity'],
+    ['Git','git-diff',['Checkout identity','Changes','Tracking','Snapshot'],'Added','+128 lines','positive']] as const;
+  for(const [tab,id,headings,label,value,role]of fixtures)for(const width of [36,50,80,120]){
+    const entry=api.renderPreview(tab,{width,height:40}).entries.find((e:any)=>e.id===id);
+    const frame=api.renderPreview('Detail',{entry,width,height:50});
+    for(const heading of headings)assert.ok(frame.lines.some((line:string)=>line.includes(heading)),`${id}: ${heading}`);
+    const line=frame.spans.find((parts:any[])=>parts.some(p=>p.text.trim()===label));
+    assert.ok(line?.some((p:any)=>p.role==='secondary'&&p.text.trim()===label));
+    assert.ok(line?.some((p:any)=>p.role===role),`${id}: ${role}`);
+    const labelAt=line.findIndex((p:any)=>p.text.trim()===label);
+    const valueParts=line.slice(labelAt+1);
+    assert.equal(valueParts.slice(0,valueParts.findIndex((p:any)=>p.role==='border')).map((p:any)=>p.text).join('').trim(),value);
+    assert.ok(frame.lines.join('\n').includes(value),`${id}: ${value}`);
+    for(const line of frame.lines)assert.ok(cellWidth(line)<=width,`${id}/${width}: ${line}`);
+    assert.equal(frame.columns,width>=80?2:1);
+  }
+  const usage=api.renderPreview('Overview').entries.find((e:any)=>e.id==='tokens');
+  const styled=api.renderPreview('Detail',{entry:usage,width:80,height:40}).spans.flat();
+  assert.ok(styled.some((p:any)=>p.text.includes('unavailable')&&p.role==='warning'));
+  assert.ok(styled.some((p:any)=>p.text.trim()==='tokens'&&p.role==='secondary'));
+});
+
+test('fact detail views keep explanation prose in help and preserve full narrative content',()=>{
+  for(const [tab,id,explanation]of [['Overview','memory','Shared resident pages'],['Overview','cpu','one logical core'],['Git','git-diff','Git values belong']]){
+    const entry=api.renderPreview(tab).entries.find((e:any)=>e.id===id);
+    const detail=api.renderPreview('Detail',{entry,width:80,height:50}).lines.join('\n');
+    assert.ok(!detail.includes(explanation));
+  }
+  const goal=api.renderPreview('Overview').entries.find((e:any)=>e.id==='goal');
+  assert.ok(api.renderPreview('Detail',{entry:goal,width:80,height:40}).lines.join('\n').includes('reliable monitoring'));
+});

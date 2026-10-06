@@ -56,6 +56,13 @@ and Ownership; scope facts group Selected scope, Readable samples and Aggregate
 readings; ref facts group Reference target and Recorded facts. Full paths wrap
 at directory boundaries, and explanatory metric prose stays in `?` help.
 
+Apply that structure consistently to memory, CPU, usage, Git and timing details.
+Highlight by data type: quantities blue, identities/branches lavender, paths
+teal, durations warm gold, units quieter than numbers, unavailable values amber,
+and Git deltas green/red. Preserve textual labels and unavailable markers in
+mono mode. At 80/120 columns use related regions in two columns, stacking at
+36/50. Keep narrative content complete and place metric explanations in help.
+
 Palette roles: text, secondary, border, one cyan accent, green additions,
 amber stale/wait, red deletions/errors. Default terminal background; selectable
 rows use a subdued background and a visible marker. Dark/light/mono and ASCII

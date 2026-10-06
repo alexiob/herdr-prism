@@ -34,6 +34,9 @@ npm run ui:preview -- --view Processes --plain
 npm run ui:preview -- --view Detail --entry p1
 npm run ui:preview -- --view Detail --entry process-scope
 npm run ui:preview -- --view Detail --entry ref-session
+npm run ui:preview -- --view Detail --entry memory
+npm run ui:preview -- --view Detail --entry tokens
+npm run ui:preview -- --view Detail --entry git-diff
 npm run ui:preview -- --width 50 --save artifacts/ui-design/50
 ```
 
@@ -47,6 +50,13 @@ the selected scope, readable-sample coverage and aggregate readings. Reference
 details separate the full target path and recorded facts. Labels use the quiet
 secondary style; values align in one column with semantic emphasis. Long paths
 wrap at directory boundaries. Metric explanations remain in `?` help.
+
+Memory, CPU, recorded usage, Git, timings and other fact views now use the same
+layout. Wide panes arrange related regions in two columns; narrow panes stack
+them. Numbers use blue with quieter units, identities and branches lavender,
+paths teal, durations warm gold, Git additions/deletions green/red, and
+unavailable readings amber. Text and labels preserve meaning in mono/ASCII.
+Narrative content retains its full text; metric explanations appear in `?` help.
 
 In the current local Herdr session, the preview is in the pane named
 **Prism UI Gallery** (`w2:pN`), beside the agent's original pane. These IDs are

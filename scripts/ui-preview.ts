@@ -42,7 +42,7 @@ if(!args.includes('--browse')){
     if(key==='tab'||key==='shift+tab'){const i=previewViews.indexOf(view);view=previewViews[(i+(key==='tab'?1:previewViews.length-1))%previewViews.length]!;selected=0;scroll=0;history.length=0;}
     else if(key==='escape'){const previous=history.pop();if(previous)({view,selected,scroll}=previous);else if(view==='Detail'||view==='Help'){view=initial?.tab??'Overview';selected=0;scroll=0;}}
     else if(key==='?'||key==='enter'){
-      const picked=frame.entries[Math.max(0,Math.min(selected,frame.entries.length-1))];
+      const picked=frame.entries[Math.max(0,Math.min(selected,frame.entries.length-1))]??(key==='?'&&view==='Detail'?entry:undefined);
       if(picked){entry=picked;history.push({view,selected,scroll});view=key==='?'?'Help':picked.target??'Detail';selected=0;scroll=0;}
     }else if(key==='down'||key==='j'){if(frame.entries.length)selected=Math.min(selected+1,frame.entries.length-1);else scroll++;}
     else if(key==='up'||key==='k'){if(frame.entries.length)selected=Math.max(0,selected-1);else scroll=Math.max(0,scroll-1);}
