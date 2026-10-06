@@ -300,3 +300,10 @@ Actual Claude and Codex tabs now each have their own correctly rendered view,
 with one unchanged collector PID, both native agents preserved, focus restored
 and todosEnabled still true. Proof:
 `artifacts/per-tab-current-proof/current.json`. No user agent input was sent.
+
+Fresh cross-platform CI passed all ten jobs for `85c64b2`:
+[run 37500791064](https://github.com/alexiob/herdr-prism/actions/runs/37500791064).
+Both Windows Node 22/24 jobs and all eight macOS/Linux architecture/Node jobs
+passed strict tests, PTY/ConPTY, distribution integrity, live lifecycle,
+advanced interaction and the new independent-panel/crash-recovery gate. The
+ordinary pinned GitHub installation gate also passed where configured.
