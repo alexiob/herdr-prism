@@ -86,11 +86,12 @@ public static class HatConPtySmoke {
    at=capture.Text().Length;HResult(ResizePseudoConsole(console,new Coord(26,12)),"ResizePseudoConsole narrow");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("< Agents >"),"80x24 to 26x12 resize repaint");Thread.Sleep(150);
    at=capture.Text().Length;HResult(ResizePseudoConsole(console,new Coord(80,24)),"ResizePseudoConsole wide");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("[Agents]"),"26x12 to 80x24 resize repaint");Thread.Sleep(150);
    at=capture.Text().Length;Send(inputWrite,"q");Expect(capture,s=>s.Substring(Math.Min(at,s.Length)).Contains("PRISM_SAVED_SCREEN"),"saved original-screen restoration on quit");
-   if(WaitForSingleObject(process.process,3000)!=0)throw new Exception("ConPTY child did not terminate on quit");uint exit;Check(GetExitCodeProcess(process.process,out exit),"ConPTY exit status");if(exit!=0)throw new Exception("ConPTY child exit "+exit);
+   if(WaitForSingleObject(process.process,3000)!=0)throw new Exception("ConPTY child did not terminate on quit capabilities="+(File.Exists(report)?File.ReadAllText(report):"missing"));uint exit;Check(GetExitCodeProcess(process.process,out exit),"ConPTY exit status");if(exit!=0)throw new Exception("ConPTY child exit "+exit);
    if(!Capability(report,"rawRestored"))throw new Exception("ConPTY raw mode was not restored on clean exit");
+   if(!Capability(report,"stdinDestroyed"))throw new Exception("Owned ConPTY input stream was not closed on quit");
    Close(ref inputWrite);ClosePseudoConsole(console);console=IntPtr.Zero;
    if(!reader.Join(3000))throw new Exception("ConPTY output did not reach EOF after owned console closed");lock(capture.Gate){if(!capture.Eof||capture.Error!=null)throw new Exception(capture.Error??"ConPTY EOF missing");}
-   return "{\"ok\":true,\"transport\":\"ConPTY\",\"keyboard\":true,\"resize\":true,\"exitCode\":0,\"eof\":true,\"screenRestored\":true,\"rawRestored\":true,\"alternateEnterForwarded\":"+capture.Text().Contains("\x1b[?1049h").ToString().ToLower()+",\"alternateExitForwarded\":"+capture.Text().Contains("\x1b[?1049l").ToString().ToLower()+",\"sizes\":[[80,24],[26,12],[80,24]],\"capturedBytes\":"+capture.Count()+"}";
+   return "{\"ok\":true,\"transport\":\"ConPTY\",\"keyboard\":true,\"resize\":true,\"exitCode\":0,\"eof\":true,\"screenRestored\":true,\"rawRestored\":true,\"alternateEnterForwarded\":"+capture.Text().Contains("\x1b[?1049h").ToString().ToLower()+",\"alternateExitForwarded\":"+capture.Text().Contains("\x1b[?1049l").ToString().ToLower()+",\"sizes\":[[80,24],[26,12],[80,24]],\"capturedBytes\":"+capture.Count()+",\"consoleCapabilities\":"+File.ReadAllText(report)+"}";
   }catch(Exception error){
    // Only expose the fixture's capability marker, never arbitrary captured terminal content.
    var diagnostic=System.Text.RegularExpressions.Regex.Match(capture.Text(),@"SMOKE_CONSOLE [^\r\n\x1b]{1,200}");

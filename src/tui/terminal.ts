@@ -62,6 +62,9 @@ export class TerminalUi extends EventEmitter {
         return; this.closed = true; clearTimeout(this.paintTimer); clearTimeout(this.escapeTimer); process.stdin.off('data', this.onData); process.stdout.off('resize', this.onResize); if (this.interactive) {
         process.stdin.setRawMode(false);
         process.stdin.pause();
+        // The pane owns this input stream. Finish pending Windows console reads
+        // after restoring its mode, rather than leaving a paused TTY handle alive.
+        if(process.platform==='win32')process.stdin.destroy();
         process.stdout.write('\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l');
     } }
 }

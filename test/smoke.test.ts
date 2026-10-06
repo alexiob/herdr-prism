@@ -24,7 +24,7 @@ test('terminal smoke rejects a one-shot stdout renderer instead of accepting it 
 test('required terminal smoke records real resize, keyboard and clean exit evidence',{skip:process.env.HAT_PTY_TESTS!=='1',timeout:30000},async()=>{
  const {stdout}=await exec(process.execPath,['scripts/smoke.mjs'],{timeout:25000});const result=JSON.parse(stdout.trim().split('\n').at(-1)!);
  assert.equal(result.ok,true);assert.equal(result.transport,process.platform==='win32'?'ConPTY':'PTY');assert.equal(result.keyboard,true);assert.equal(result.resize,true);assert.equal(result.exitCode,0);assert.equal(result.eof,true);assert.deepEqual(result.sizes,[[80,24],[26,12],[80,24]]);
- if(process.platform==='win32'){assert.equal(result.screenRestored,true);assert.equal(result.rawRestored,true);assert.equal(typeof result.alternateEnterForwarded,'boolean');assert.equal(typeof result.alternateExitForwarded,'boolean');}
+ if(process.platform==='win32'){assert.equal(result.screenRestored,true);assert.equal(result.rawRestored,true);assert.equal(result.consoleCapabilities.stdinDestroyed,true);assert.equal(typeof result.alternateEnterForwarded,'boolean');assert.equal(typeof result.alternateExitForwarded,'boolean');}
 });
 test('terminal smoke fails stuck keyboard behavior and terminates its disposable child',{timeout:15000},async(ctx)=>{
  let failure:any;try{await exec(process.execPath,['scripts/smoke.mjs','--entry',resolve('test/fixtures/smoke/keyboard-stuck.mjs')],{timeout:12000});assert.fail('Unresponsive arrows were accepted');}catch(error){failure=error;}

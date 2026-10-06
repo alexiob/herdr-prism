@@ -11,7 +11,7 @@ const evidence={stdinTTY:process.stdin.isTTY===true,stdoutTTY:process.stdout.isT
 const save=()=>writeFileSync(report,JSON.stringify(evidence));
 save();
 const observer=setInterval(()=>{if(!evidence.rawEnabled&&process.stdin.isRaw===true){evidence.rawEnabled=true;save();}},10);observer.unref();
-process.on('exit',code=>{clearInterval(observer);evidence.rawRestored=evidence.rawEnabled&&process.stdin.isRaw===false;evidence.exitCode=code;save();});
+process.on('exit',code=>{clearInterval(observer);evidence.rawRestored=evidence.rawEnabled&&process.stdin.isRaw===false;evidence.stdinDestroyed=process.stdin.destroyed===true;evidence.exitCode=code;save();});
 process.stdout.write('\x1b[2J\x1b[HPRISM_SAVED_SCREEN');
 // Let the real console render the main-buffer contents before the app starts.
 await new Promise(resolve=>setTimeout(resolve,100));
