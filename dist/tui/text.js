@@ -1,4 +1,5 @@
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const numberFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
 export function sanitize(input) { return String(input ?? '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\x1b[ -/]*[@-~]/g, '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, ''); }
 function graphemeWidth(grapheme) {
     if (/^\p{Mark}+$/u.test(grapheme))
@@ -68,7 +69,7 @@ export function bytes(value) { if (value === undefined)
 catch {
     return '—';
 } }
-export function number(value) { return value === undefined || !Number.isFinite(value) ? '—' : value.toLocaleString('en-US', { maximumFractionDigits: 1 }); }
+export function number(value) { return value === undefined || !Number.isFinite(value) ? '—' : numberFormatter.format(value); }
 export function age(timestamp, now = Date.now()) { if (timestamp === undefined)
     return '—'; const seconds = Math.max(0, Math.floor((now - timestamp) / 1000)); return seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds / 60) % 60}m`; }
 export function spark(values, width, ascii = false) { if (!values.length)

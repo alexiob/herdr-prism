@@ -1,4 +1,5 @@
 const segmenter=new Intl.Segmenter(undefined,{granularity:'grapheme'});
+const numberFormatter=new Intl.NumberFormat('en-US',{maximumFractionDigits:1});
 export function sanitize(input:unknown):string {return String(input??'').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)/g,'').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'').replace(/\x1b[ -/]*[@-~]/g,'').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g,'');}
 function graphemeWidth(grapheme:string):number {
   if(/^\p{Mark}+$/u.test(grapheme))return 0;
@@ -24,6 +25,6 @@ export function wrap(input:string,width:number,maxLines=Infinity):string[]{
  return output;
 }
 export function bytes(value?:string):string {if(value===undefined)return '—';try{const amount=BigInt(value);return amount>=1073741824n?`${(Number(amount)/1073741824).toFixed(1)}GiB`:`${(Number(amount)/1048576).toFixed(0)}MiB`;}catch{return '—';}}
-export function number(value?:number):string{return value===undefined||!Number.isFinite(value)?'—':value.toLocaleString('en-US',{maximumFractionDigits:1});}
+export function number(value?:number):string{return value===undefined||!Number.isFinite(value)?'—':numberFormatter.format(value);}
 export function age(timestamp?:number,now=Date.now()):string {if(timestamp===undefined)return '—';const seconds=Math.max(0,Math.floor((now-timestamp)/1000));return seconds<60?`${seconds}s`:seconds<3600?`${Math.floor(seconds/60)}m ${seconds%60}s`:`${Math.floor(seconds/3600)}h ${Math.floor(seconds/60)%60}m`;}
 export function spark(values:(number|undefined)[],width:number,ascii=false):string {if(!values.length)return '—';const chars=ascii?' .:-=+*#@':'▁▂▃▄▅▆▇█';const slice=values.slice(-Math.max(1,width));const max=Math.max(1,...slice.filter((x):x is number=>x!==undefined));return slice.map(v=>v===undefined?' ':chars[Math.min(chars.length-1,Math.floor(Math.max(0,v)/max*(chars.length-1)))]).join('');}

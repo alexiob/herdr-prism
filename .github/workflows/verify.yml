@@ -87,6 +87,9 @@ jobs:
         run: node scripts/herdr-test-bin.mjs
       - name: Actual isolated live Herdr install, restart and complete removal
         run: node scripts/live-herdr-test.mjs --release artifacts/release --proof artifacts/live-herdr-proof
+      - name: Actual isolated live interaction and ownership acceptance
+        if: matrix.target.platform != 'win32'
+        run: node scripts/live-features-test.mjs --release artifacts/release --proof artifacts/live-features-proof
       - name: Pinned ordinary GitHub install and lifecycle on Linux
         if: github.event_name == 'push' && matrix.target.platform == 'linux' && matrix.node == '24'
         run: node scripts/github-herdr-test.mjs --repo "${{ github.repository }}" --ref "${{ github.sha }}" --expected-commit "${{ github.sha }}" --proof artifacts/github-herdr-proof
@@ -105,6 +108,13 @@ jobs:
         with:
           name: live-herdr-${{ matrix.target.platform }}-${{ matrix.target.arch }}-node${{ matrix.node }}
           path: artifacts/live-herdr-proof
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: live-features-${{ matrix.target.platform }}-${{ matrix.target.arch }}-node${{ matrix.node }}
+          path: artifacts/live-features-proof
           if-no-files-found: ignore
           retention-days: 14
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

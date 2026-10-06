@@ -4,6 +4,12 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {resolve} from 'node:path';
 const exec=promisify(execFile);
+test('raw-keyboard fixture fails closed with console-handle diagnostics when launched through pipes',async()=>{
+ await assert.rejects(exec(process.execPath,[resolve('test/fixtures/smoke/keyboard-stuck.mjs')],{timeout:3000}),(error:any)=>{
+  assert.equal(error.code,1);assert.match(error.stderr,/SMOKE_CONSOLE stdin=false stdout=false stderr=false rawMode=undefined/);
+  assert.doesNotMatch(error.stderr,/TypeError|setRawMode is not a function/);return true;
+ });
+});
 test('terminal smoke rejects a one-shot stdout renderer instead of accepting it as PTY interaction',async()=>{
  await assert.rejects(exec(process.execPath,['scripts/smoke.mjs','--entry',resolve('test/fixtures/smoke/noninteractive.mjs')],{timeout:15000}),(error:any)=>{assert.match(error.stderr,/terminal smoke failed/i);assert.doesNotMatch(error.stderr,/MODULE_NOT_FOUND/);return true;});
 });

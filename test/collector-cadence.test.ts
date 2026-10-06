@@ -1,6 +1,7 @@
+import {freshPrivateDirectory} from './helpers/private-dir.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Collector} from '../src/runtime/collector.ts';
@@ -9,7 +10,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const settle=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
 test('selected idle resources wait five seconds despite a working background agent; expanded Processes and working selection use faster cadence',async t=>{
- const directory=await mkdtemp(join(tmpdir(),'prism-cadence-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ const directory=await freshPrivateDirectory(join(tmpdir(),'prism-cadence-'));t.after(()=>rm(directory,{recursive:true,force:true}));
  const agents=['a','background'].map((id,i)=>({pane_id:id,terminal_id:id,workspace_id:'w',tab_id:'tab',agent:'codex',agent_status:i?'working':'idle',agent_session:{kind:'id',value:id},focused:!i,revision:1}));
  const records=agents.map(a=>({id:a.pane_id,provider:'codex',messages:[],tools:[],usage:[],goals:[],availability:'known'}));
  const rpc={async call(method:string,payload:any){if(method==='session.snapshot')return {snapshot:{protocol:22,agents}};const i=agents.findIndex(a=>a.pane_id===(payload?.target??payload?.pane_id));if(method==='agent.get')return {agent:agents[i]};if(method==='pane.process_info')return {process_info:{foreground_processes:[{pid:42+i,name:'codex'}]}};return {};}};
@@ -33,7 +34,7 @@ test('selected idle resources wait five seconds despite a working background age
  }finally{await collector.close({clearNative:false});t.mock.timers.reset();}
 });
 test('selected idle Git retains its measured checkout for thirty seconds despite working background sessions',async t=>{
- const directory=await mkdtemp(join(tmpdir(),'prism-idle-git-'));t.after(()=>rm(directory,{recursive:true,force:true}));const exec=promisify(execFile);const git=async(cwd:string,args:string[])=>(await exec('git',args,{cwd,env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout;await git(directory,['init','--quiet']);
+ const directory=await freshPrivateDirectory(join(tmpdir(),'prism-idle-git-'));t.after(()=>rm(directory,{recursive:true,force:true}));const exec=promisify(execFile);const git=async(cwd:string,args:string[])=>(await exec('git',args,{cwd,env:{...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}})).stdout;await git(directory,['init','--quiet']);
  const agents=['a','background'].map((id,i)=>({pane_id:id,terminal_id:id,workspace_id:'w',tab_id:'tab',agent:'codex',agent_status:i?'working':'idle',agent_session:{kind:'id',value:id},focused:!i,revision:1}));const evidence=agents.map(a=>({id:a.pane_id,provider:'codex',cwd:directory,messages:[],tools:[],usage:[],goals:[],availability:'known'}));
  const rpc={async call(method:string){return method==='session.snapshot'?{snapshot:{protocol:22,agents}}:{};}};const index={setActiveRefs(){},setDetailedRefs(){},async refreshSnapshots(){return evidence;},resolveSnapshotCached(_provider:string,ref:any){return evidence.find(e=>e.id===ref.value);},diagnostics:[],close(){}};
  let now=1000;const cache=new GitCache({now:()=>now,runner:async(c,args)=>git(c,args)});const collector=new Collector({rpc:rpc as any,index:index as any,git:cache,stateDir:join(directory,'state'),paneOpen:true,visibleSession:'codex:a',settings:{nativeMode:'inspector-only',providerHomes:{},todosEnabled:false,sampleIntervalMs:2000,follow:false,ascii:true,monochrome:true} as any});

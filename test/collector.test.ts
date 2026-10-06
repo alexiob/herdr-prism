@@ -1,6 +1,7 @@
+import {freshPrivateDirectory} from './helpers/private-dir.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { ProviderIndex } from '../src/providers/index.ts';
@@ -8,7 +9,7 @@ const runtime = await import('../src/runtime/collector.ts').catch(() => ({})) as
 const settings = { nativeMode: 'inspector-only', providerHomes: {}, todosEnabled: true, sampleIntervalMs: 2000, follow: true, ascii: false, monochrome: true };
 test('collector joins exact session lineage, content, telemetry and private checkbox state', async () => {
     assert.equal(typeof runtime.Collector, 'function', 'foreground collector missing');
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'hat-collector-'));
+    const dir = await freshPrivateDirectory(path.join(os.tmpdir(), 'hat-collector-'));
     await mkdir(path.join(dir, 'codex', 'sessions'), { recursive: true });
     const write = async (id: string, parent?: string) => writeFile(path.join(dir, 'codex', 'sessions', id + '.jsonl'), [{ type: 'session_meta', payload: { id, cwd: dir, source: parent ? { subagent: { thread_spawn: { parent_thread_id: parent } } } : 'cli' } }, { type: 'response_item', timestamp: '2026-10-06T10:00:00Z', payload: { type: 'message', id: 'm', role: 'assistant', channel: 'final', content: [{ type: 'output_text', text: 'See `plan.md`\nACTION: Review plan' }] } }].map(v => JSON.stringify(v) + '\n').join(''));
     await write('root');
@@ -51,7 +52,7 @@ test('collector joins exact session lineage, content, telemetry and private chec
     }
 });
 test('failed sampling stays stale through content refresh and scope changes', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'hat-health-'));
+    const dir = await freshPrivateDirectory(path.join(os.tmpdir(), 'hat-health-'));
     let fail = false, n = 0;
     const agent = { pane_id: 'p', terminal_id: 't', workspace_id: 'w', tab_id: 'tab', agent: 'codex', agent_status: 'working', agent_session: { kind: 'id', value: 'a' }, focused: false, revision: 1 };
     const rpc = { call: async (method: string) => method === 'session.snapshot' ? { snapshot: { agents: [agent], protocol: 22 } } : method === 'agent.get' ? { agent } : method === 'pane.process_info' ? { process_info: { foreground_processes: [{ pid: 42, name: 'codex' }] } } : {} };
@@ -99,7 +100,7 @@ test('harness matching does not interpret arbitrary command arguments as executa
     assert.equal(runtime.matchesHarness('codex', { name: 'codex-unrelated' }), false);
 });
 test('mirrored session panes keep every attachment and both verified roots without doubling transcript usage', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'hat-mirror-'));
+    const dir = await freshPrivateDirectory(path.join(os.tmpdir(), 'hat-mirror-'));
     const evidence = { id: 'same', provider: 'codex', messages: [], tools: [], usage: [{ id: 'counter', kind: 'cumulative', input: 10, output: 2 }], goals: [], availability: 'known' };
     const agents = [1, 2].map(i => ({ pane_id: 'p' + i, terminal_id: 't' + i, workspace_id: 'w', tab_id: 'tab', agent: 'codex', agent_status: 'working', agent_session: { kind: 'id', value: 'same' }, focused: i === 1, revision: 1 }));
     let count = 0;
@@ -127,7 +128,7 @@ test('mirrored session panes keep every attachment and both verified roots witho
 });
 
 test('heavy collection requires an open pane and follows only its selected session', async () => {
- const dir=await mkdtemp(path.join(os.tmpdir(),'hat-visible-'));
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'hat-visible-'));
  const agents=['a','b'].map(id=>({pane_id:id,terminal_id:'t'+id,workspace_id:'w',tab_id:'tab',agent:'codex',agent_status:'working',agent_session:{kind:'id',value:id},focused:id==='a',revision:1}));
  const evidence=agents.map(a=>({id:a.pane_id,provider:'codex',cwd:'/fixture/'+a.pane_id,messages:[],tools:[],usage:[],goals:[],availability:'known'}));
  let detailed:any[]=[], sampleCalls=0;const processQueries:string[]=[],gitQueries:string[]=[];
@@ -145,7 +146,7 @@ test('heavy collection requires an open pane and follows only its selected sessi
 });
 
 test('paused nested agent remains an exclusion boundary for selected parent Self+jobs',async()=>{
- const dir=await mkdtemp(path.join(os.tmpdir(),'hat-exclusions-'));
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'hat-exclusions-'));
  const agents=['parent','child'].map(id=>({pane_id:id,terminal_id:'t'+id,workspace_id:'w',tab_id:'tab',agent:'codex',agent_status:'working',agent_session:{kind:'id',value:id},focused:id==='parent',revision:1}));
  const evidence=agents.map(a=>({id:a.pane_id,parentId:a.pane_id==='child'?'parent':undefined,provider:'codex',messages:[],tools:[],usage:[{id:'usage',kind:'delta',input:10,output:1,includesChildren:false,contextUsed:a.pane_id==='parent'?100:900,contextLimit:1000,model:a.pane_id,timestamp:a.pane_id==='parent'?1:2,turnMs:a.pane_id==='parent'?1000:50}],goals:[],availability:'known'}));
  const index={setActiveRefs(){},setDetailedRefs(){},refreshSnapshots:async()=>evidence,resolveSnapshotCached:(_p:string,r:any)=>evidence.find(e=>e.id===r.value),diagnostics:[],close(){}};
@@ -156,7 +157,7 @@ test('paused nested agent remains an exclusion boundary for selected parent Self
 });
 
 test('closing during Todo hydration prevents starting later Git work and hidden inventory reads',async()=>{
- const dir=await mkdtemp(path.join(os.tmpdir(),'hat-gate-race-'));
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'hat-gate-race-'));
  let release!:()=>void,entered!:()=>void;const blocked=new Promise<void>(r=>release=r),started=new Promise<void>(r=>entered=r);let scans=0,gitCalls=0;
  const evidence={id:'a',provider:'codex',cwd:dir,messages:[],tools:[],usage:[],goals:[],availability:'known'};
  const agent={pane_id:'a',terminal_id:'ta',workspace_id:'w',tab_id:'tab',agent:'codex',agent_status:'working',agent_session:{kind:'id',value:'a'},focused:true,revision:1};
@@ -169,7 +170,7 @@ test('closing during Todo hydration prevents starting later Git work and hidden 
 });
 
 test('reopening recovers a complete ACTION list outside the hot message window',async()=>{
- const fs=await import('node:fs/promises');const dir=await mkdtemp(path.join(os.tmpdir(),'hat-resume-todo-'));
+ const fs=await import('node:fs/promises');const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'hat-resume-todo-'));
  const file=path.join(dir,'codex','sessions','a.jsonl');await mkdir(path.dirname(file),{recursive:true});
  const message=(id:string,text:string)=>JSON.stringify({type:'response_item',payload:{type:'message',id,role:'assistant',channel:'final',content:[{type:'output_text',text}]}})+'\n';
  await writeFile(file,JSON.stringify({type:'session_meta',payload:{id:'a',source:'cli'}})+'\n'+message('old','ACTION: Old task'));

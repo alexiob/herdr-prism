@@ -20,10 +20,18 @@ async function closeOwnedPanes(store, rpc, owned) {
     const closed = new Set();
     for (const record of owned) {
         const pane = panes.find((p) => p.terminal_id === record.terminalId);
-        if (pane && typeof pane.pane_id === 'string' && !closed.has(pane.pane_id)) {
+        if (!pane || typeof pane.pane_id !== 'string' || closed.has(pane.pane_id))
+            continue;
+        try {
             await rpc.call('plugin.pane.close', { pane_id: pane.pane_id });
-            closed.add(pane.pane_id);
         }
+        catch (error) {
+            // Herdr may remove the terminal as its collector exits after snapshot.
+            // Its precise absence response means the requested cleanup is done.
+            if (error.code !== 'plugin_pane_not_found')
+                throw error;
+        }
+        closed.add(pane.pane_id);
     }
     // Do not erase a newer inspector's marker if it appeared during cleanup.
     const current = await store.read('pane');
@@ -52,7 +60,7 @@ export async function acknowledge(root, request, value) {
         await unlink(path.join(root, '.hat-lifecycle-request.json'));
 }
 export async function activate(context, rpc, options = {}) {
-    if (process.platform === 'win32' && options.request && options.root)
+    if (process.platform === 'win32' && process.env.HERDR_PLUGIN_ID === pluginId)
         await securePluginNamespace(context.configDir, context.stateDir);
     const state = new StateStore(context.stateDir), config = new StateStore(context.configDir);
     const admission = await acquireAdmission(context.stateDir, { allowDisabled: true, timeoutMs: options.timeoutMs });
@@ -160,7 +168,7 @@ export async function waitForDetailsStopped(dir, timeoutMs = 15000) {
     throw new Error('Detail popup shutdown did not complete; refusing purge');
 }
 export async function deactivate(context, rpc, options = {}) {
-    if (process.platform === 'win32' && options.request && options.root)
+    if (process.platform === 'win32' && process.env.HERDR_PLUGIN_ID === pluginId)
         await securePluginNamespace(context.configDir, context.stateDir);
     const state = new StateStore(context.stateDir);
     await state.init();

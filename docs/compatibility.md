@@ -2,18 +2,19 @@
 
 Updated 2026-10-06. The first complete release requires actual macOS, Linux and
 Windows execution plus live Herdr acceptance. Those gates are **not yet complete**.
-The source has implementation/tests and strict CI definitions; an unexecuted
-workflow is not runtime evidence.
+The initial actual-platform CI run completed with seven passing jobs and three
+failures. The corrected source still requires a fresh run; see the exact evidence
+below and the [progress ledger](implementation-progress.md).
 
 ## Platform matrix
 
 | Target | Runtime backend | Packaged native artifact | Evidence recorded in this workspace |
 | --- | --- | --- | --- |
-| macOS arm64 | Rust libproc/sysctl helper | `bin/darwin-arm64/hat-sampler` | Actual enumeration, single/multicore ownership, memory and teardown passed. Signed development artifact built and checked. Live Herdr install/restart/remove passed in an isolated server; install/remove also passed in the user's session. Complete dashboard acceptance remains pending. |
-| macOS x64 | Rust libproc/sysctl helper | `bin/darwin-x64/hat-sampler` | Thin x64 artifact built and checked. x64 Node/helper suite passed under Rosetta (214 passed, zero failed, two skipped). Physical Intel host and latest live lifecycle validation remain pending. |
-| Linux x64 | TypeScript procfs | Not required | Parser/ownership fixture tests pass locally; actual Linux controlled-worker/procfs, terminal and socket CI execution pending. |
-| Linux arm64 | TypeScript procfs | Not required | Actual Podman arm64 suite passed (221 passed, zero failed, two other-platform skips), with PTY, staged release, preflight and live Herdr install/restart/removal. Final renamed-source rerun remains pending. |
-| Windows x64 | Rust Win32 working-set/process helper | `bin/win32-x64/hat-sampler.exe` | Win32/ACL/named-pipe/ConPTY implementations require actual Windows CI; no local Windows certification. |
+| macOS arm64 | Rust libproc/sysctl helper | `bin/darwin-arm64/hat-sampler` | Actual host resource tests, local live lifecycle and ordinary GitHub installation passed. CI Node 24 passed; Node 22 hit a restart race now corrected locally, awaiting rerun. |
+| macOS x64 | Rust libproc/sysctl helper | `bin/darwin-x64/hat-sampler` | Physical Intel CI passed on Node 22/24, including strict native/socket tests, PTY, distribution and live lifecycle. |
+| Linux x64 | TypeScript procfs | Not required | Actual CI passed on Node 22/24 with strict procfs/socket tests, PTY, distribution and live lifecycle. Node 24 also passed ordinary GitHub installation. |
+| Linux arm64 | TypeScript procfs | Not required | Actual CI passed on Node 22/24 with strict procfs/socket tests, PTY, distribution and live lifecycle. Node 24 also passed ordinary GitHub installation; earlier Podman acceptance passed. |
+| Windows x64 | Rust Win32 working-set/process helper | Pending inclusion after acceptance | Actual Node 22/24 CI built the native helper and passed typecheck, then failed ACL, ConPTY and portability tests. Corrections are awaiting actual Windows rerun. |
 
 Windows arm64 and other platforms are not release targets; the installation
 checker rejects them rather than selecting a mismatched helper. Host platform
@@ -26,7 +27,7 @@ release provenance. Linux does not require a native runtime helper.
 
 | Component | Supported/tested contract | Limits |
 | --- | --- | --- |
-| Node.js | Minimum 22.13.0; CI matrix 22 and 24 | Local arm64 development used Node 26.10.0; translated macOS x64 used Node 22.23.3; Podman Linux arm64 used Node 24.21.0. Full matrix runs remain unrecorded. Release code is compiled ESM, with no runtime npm install. |
+| Node.js | Minimum 22.13.0; actual CI matrix 22 and 24 | Seven jobs passed in the first run; three need corrected-source reruns. Local arm64 development used Node 26.10.0. Release code is compiled ESM, with no runtime npm install. |
 | Herdr | Installed 0.9.3, protocol 22 | Actual ordinary RPC/subscription and macOS live install/restart/remove exercised. Ordinary calls use separate connections; event subscriptions have dedicated streams. Complete native renderer and cross-platform lifecycle acceptance remain required. |
 | Native sidebar | Real agent rows, ≤16 rows/tokens per row; ≤14 `hat_` keys in default template | No synthetic native nodes or per-field click handlers. Metadata shares the pane's retained-key budget. |
 | Native projection | One source-guarded owner | Radar/Pi-tree cannot concurrently own the same layout/projection; inspector-only mode is the fallback. |
@@ -72,6 +73,9 @@ flags `HAT_SOCKET_TESTS=1` and `HAT_REQUIRE_NATIVE=1` promote unavailable requir
 capabilities to failures. The smoke command runs unconditionally; a missing
 script or unsupported terminal cannot silently pass the gate. CI artifacts are
 archived with executable permissions retained. There is no automatic publishing.
+Unix jobs additionally require advanced live follow/pin, hidden pause/resume,
+metadata TTL, stale occupant guards, close/restart and ownership-conflict checks.
+The Windows equivalent still needs its separate portable TTL fixture.
 
 Action pins were checked against the official repositories' tag references on
 2026-10-06: [checkout v5.0.0](https://github.com/actions/checkout/releases/tag/v5.0.0),
@@ -85,7 +89,11 @@ with its matching `rust-docs` notices. None of these build tools is installed by
 
 ## Remaining acceptance
 
-Record actual CI results before advertising complete platform support. Live
+The platform evidence above applies to source commit
+`2655fa4f3000e623e31a044e6f1149b54185e982` in
+[run 37445486188](https://github.com/alexiob/herdr-prism/actions/runs/37445486188).
+It does not certify later corrections. Rerun all jobs and ordinary repository
+installation on every platform before advertising complete platform support. Live
 Herdr acceptance must still verify right placement/follow/pin, multi-client local
 rows, metadata TTL/readback, source-safe coexistence, pane/PID replacement,
 upgrade lifetime, disconnect recovery and reversible unconfigure. The full
@@ -98,5 +106,5 @@ automated suite uses disposable repositories/config/provider homes. A separate,
 user-authorized current-session macOS lifecycle test temporarily installed and
 removed the plugin; it verified exact original configuration restoration and
 preservation of all original panes and the other plugin. It left this plugin
-uninstalled. Windows will be validated in GitHub Actions once the repository is
-hosted on GitHub; a workflow definition alone is not execution evidence.
+uninstalled. Windows validation now uses actual GitHub Actions runners, as
+requested; the current failed run is evidence of remaining work.

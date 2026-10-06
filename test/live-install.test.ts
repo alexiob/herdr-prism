@@ -1,6 +1,7 @@
+import {freshPrivateDirectory} from './helpers/private-dir.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,cp,access,readdir} from 'node:fs/promises';
+import {mkdir,writeFile,readFile,rm,cp,access,readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import ts from 'typescript';
@@ -8,7 +9,7 @@ import {createHash} from 'node:crypto';
 // @ts-ignore dependency-free release lifecycle utility
 import {liveInstall,liveUninstall} from '../scripts/live-install.mjs';
 async function fixture(t:any){
- const dir=await mkdtemp(join(tmpdir(),'hat lifecycle-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const dir=await freshPrivateDirectory(join(tmpdir(),'hat lifecycle-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const root=join(dir,'reviewed release'),managedDir=join(dir,'managed install'),control=join(dir,'control.json'),registry=join(dir,'registry.json'),log=join(dir,'argv.json'),job=join(dir,'job.json');
  await mkdir(root);for(const sub of ['dist/entrypoints','dist/herdr','dist/config','companion/pi','scripts'])await mkdir(join(root,sub),{recursive:true});
  for(const name of ['action','startup','event','inspector','detail'])await writeFile(join(root,'dist/entrypoints',name+'.js'),'export const fixture=true;');

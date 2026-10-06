@@ -60,6 +60,11 @@ public static class HatConPtySmoke {
    job=CreateJobObjectW(IntPtr.Zero,null);if(job==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error(),"Owned smoke job");
    IntPtr limits=Marshal.AllocHGlobal(144);try{Marshal.Copy(new byte[144],0,limits,144);Marshal.WriteInt32(limits,16,0x2000);Check(SetInformationJobObject(job,9,limits,144),"Owned job kill-on-close");}finally{Marshal.FreeHGlobal(limits);}
    var startup=new StartupInfoEx();startup.startup.cb=(uint)Marshal.SizeOf(typeof(StartupInfoEx));startup.attributes=attributes;
+   // ConPTY fills NULL standard slots with console handles. Explicitly request these slots:
+   // otherwise the redirected PowerShell host's standard pipes can survive console attachment.
+   // This is the Microsoft/node-pty ConPTY launch pattern; transport pipes are NOT child stdio.
+   startup.startup.flags=0x100; // STARTF_USESTDHANDLES
+   startup.startup.input=IntPtr.Zero;startup.startup.output=IntPtr.Zero;startup.startup.error=IntPtr.Zero;
    var command=new StringBuilder(Quote(node)+" "+Quote(entry)+" --demo --ascii --monochrome");
    // Start suspended so teardown ownership is installed before any child code can execute.
    Check(CreateProcessW(node,command,IntPtr.Zero,IntPtr.Zero,false,0x80004,IntPtr.Zero,null,ref startup,out process),"CreateProcessW attached to ConPTY");
@@ -79,7 +84,11 @@ public static class HatConPtySmoke {
    Close(ref inputWrite);ClosePseudoConsole(console);console=IntPtr.Zero;
    if(!reader.Join(3000))throw new Exception("ConPTY output did not reach EOF after owned console closed");lock(capture.Gate){if(!capture.Eof||capture.Error!=null)throw new Exception(capture.Error??"ConPTY EOF missing");}
    return "{\"ok\":true,\"transport\":\"ConPTY\",\"keyboard\":true,\"resize\":true,\"exitCode\":0,\"eof\":true,\"sizes\":[[80,24],[26,12],[80,24]],\"capturedBytes\":"+capture.Count()+"}";
-  }catch(Exception error){throw new Exception(error.Message+" childPid="+process.pid);}finally{
+  }catch(Exception error){
+   // Only expose the fixture's capability marker, never arbitrary captured terminal content.
+   var diagnostic=System.Text.RegularExpressions.Regex.Match(capture.Text(),@"SMOKE_CONSOLE [^\r\n\x1b]{1,200}");
+   throw new Exception(error.Message+(diagnostic.Success?" "+diagnostic.Value:"")+" childPid="+process.pid);
+  }finally{
    if(process.process!=IntPtr.Zero&&WaitForSingleObject(process.process,0)!=0){TerminateProcess(process.process,1);WaitForSingleObject(process.process,3000);}
    Close(ref inputWrite);Close(ref inputRead);Close(ref outputWrite);
    if(console!=IntPtr.Zero){ClosePseudoConsole(console);console=IntPtr.Zero;}

@@ -1,6 +1,7 @@
+import {freshPrivateDirectory} from './helpers/private-dir.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm, mkdir, lstat } from 'node:fs/promises';
+import { writeFile, readFile, rm, mkdir, lstat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -10,7 +11,7 @@ import { deactivate, managedRequest, acknowledge, activate } from '../src/runtim
 import { clearPublication } from '../src/native/publisher.ts';
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 test('removal awaits actual collector cleanup, restores original config and guards other metadata', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'hat-live-'));
+    const dir = await freshPrivateDirectory(path.join(os.tmpdir(), 'hat-live-'));
     const stateDir = path.join(dir, 'state'), configDir = path.join(dir, 'config'), configPath = path.join(dir, 'config.toml'), endpoint = 'test-socket', serverStateDir = path.join(stateDir, 'servers', identityName(endpoint));
     const context = { stateDir, configDir, configPath, endpoint, serverStateDir };
     const { configure } = await import('../src/config/index.ts');
@@ -49,7 +50,7 @@ test('ownership cleanup rejects a reused terminal and managed acknowledgement ca
     const calls: any[] = [];
     await clearPublication({ call: async (m, p): Promise<any> => { calls.push([m, p]); return { pane: { terminal_id: 'replacement', tokens: { hat_load: 'same' } } }; } }, [{ paneId: 'old', terminalId: 'gone', hashes: { hat_load: sha('same') } }]);
     assert.equal(calls.length, 1);
-    const root = await mkdtemp(path.join(os.tmpdir(), 'hat-receipt-'));
+    const root = await freshPrivateDirectory(path.join(os.tmpdir(), 'hat-receipt-'));
     try {
         const receipt = { version: 1, pluginId: 'iob.herdr-prism', token: '1234567890123456', installRoot: root };
         await writeFile(path.join(root, '.hat-managed-install.json'), JSON.stringify(receipt));
@@ -68,9 +69,9 @@ test('ownership cleanup rejects a reused terminal and managed acknowledgement ca
     }
 });
 test('live activation waits for authenticated ready pane and marks only owned directories', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'hat-active-'));
+    const dir = await freshPrivateDirectory(path.join(os.tmpdir(), 'hat-active-'));
     const context = { stateDir: path.join(dir, 'state'), configDir: path.join(dir, 'config'), configPath: path.join(dir, 'config.toml'), endpoint: 'test', serverStateDir: path.join(dir, 'state', 'servers', identityName('test')) };
-    await mkdir(context.stateDir,{recursive:true});await mkdir(context.configDir,{recursive:true});const savedEnv={HERDR_PLUGIN_ID:process.env.HERDR_PLUGIN_ID,HERDR_PLUGIN_CONFIG_DIR:process.env.HERDR_PLUGIN_CONFIG_DIR,HERDR_PLUGIN_STATE_DIR:process.env.HERDR_PLUGIN_STATE_DIR};process.env.HERDR_PLUGIN_ID='iob.herdr-prism';process.env.HERDR_PLUGIN_CONFIG_DIR=context.configDir;process.env.HERDR_PLUGIN_STATE_DIR=context.stateDir;
+    const {privateDir}=await import('../src/config/safe-file.ts');await privateDir(context.stateDir);await privateDir(context.configDir);const savedEnv={HERDR_PLUGIN_ID:process.env.HERDR_PLUGIN_ID,HERDR_PLUGIN_CONFIG_DIR:process.env.HERDR_PLUGIN_CONFIG_DIR,HERDR_PLUGIN_STATE_DIR:process.env.HERDR_PLUGIN_STATE_DIR};process.env.HERDR_PLUGIN_ID='iob.herdr-prism';process.env.HERDR_PLUGIN_CONFIG_DIR=context.configDir;process.env.HERDR_PLUGIN_STATE_DIR=context.stateDir;
     const store = new StateStore(context.serverStateDir);
     let ready = false, server: MailboxServer | undefined;
     const root = path.join(dir, 'managed');
@@ -101,13 +102,13 @@ test('live activation waits for authenticated ready pane and marks only owned di
     }
 });
 test('all live endpoints reload only after restoration and delayed startup cannot recreate purged state',async()=>{
- const {acquireAdmission}=await import('../src/runtime/admission.ts');const {configure}=await import('../src/config/index.ts');const dir=await mkdtemp(path.join(os.tmpdir(),'hat-multi-'));const context={stateDir:path.join(dir,'state'),configDir:path.join(dir,'config'),configPath:path.join(dir,'config.toml'),endpoint:'primary',serverStateDir:path.join(dir,'state','servers',identityName('primary'))};const original='[ui.sidebar.agents]\nrows = [["agent"]]\n';await writeFile(context.configPath,original);await configure(context.configPath,context.stateDir,{ownNative:true});await new StateStore(path.join(context.stateDir,'servers',identityName('secondary'))).write('server',{endpoint:'secondary'});const reloads:string[]=[];
+ const {acquireAdmission}=await import('../src/runtime/admission.ts');const {configure}=await import('../src/config/index.ts');const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'hat-multi-'));const context={stateDir:path.join(dir,'state'),configDir:path.join(dir,'config'),configPath:path.join(dir,'config.toml'),endpoint:'primary',serverStateDir:path.join(dir,'state','servers',identityName('primary'))};const original='[ui.sidebar.agents]\nrows = [["agent"]]\n';await writeFile(context.configPath,original);await configure(context.configPath,context.stateDir,{ownNative:true});await new StateStore(path.join(context.stateDir,'servers',identityName('secondary'))).write('server',{endpoint:'secondary'});const reloads:string[]=[];
  const client=(endpoint:string)=>({call:async(method:string):Promise<any>=>{if(method==='server.reload_config'){assert.equal(await readFile(context.configPath,'utf8'),original,'secondary clients must reload restored config');reloads.push(endpoint);}return{};},close(){}});
  try{await deactivate(context,client('primary'),{rpcFactory:client});assert.deepEqual(new Set(reloads),new Set(['primary','secondary']));await assert.rejects(acquireAdmission(context.stateDir),/deactivated/);await rm(context.stateDir,{recursive:true});await assert.rejects(acquireAdmission(context.stateDir),/ENOENT/);await assert.rejects(lstat(context.stateDir),/ENOENT/);}finally{await rm(dir,{recursive:true,force:true});}
 });
 
 test('reactivation closes every recorded old owned pane before opening replacement and removal closes replacement',async t=>{
- const dir=await mkdtemp(path.join(os.tmpdir(),'hat-restart-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'hat-restart-'));t.after(()=>rm(dir,{recursive:true,force:true}));
  const context={stateDir:path.join(dir,'state'),configDir:path.join(dir,'config'),configPath:path.join(dir,'config.toml'),endpoint:'restart',serverStateDir:path.join(dir,'state','servers',identityName('restart'))};
  const store=new StateStore(context.serverStateDir);const servers:MailboxServer[]=[];t.after(async()=>{for(const server of servers)await server.close();});
  const start=async(token:string,paneId:string,terminalId:string)=>{await store.write('controller',{token,pid:process.pid,paneId,terminalId});let server:MailboxServer;server=new MailboxServer(context.serverStateDir,token,async op=>{if(op==='shutdown'){setTimeout(()=>void(async()=>{await server.close();await store.remove('controller');})(),30);return{stopping:true};}return{ready:true,stale:false};});servers.push(server);await server.start();};
@@ -118,7 +119,7 @@ test('reactivation closes every recorded old owned pane before opening replaceme
 });
 
 test('failed inspector startup retains authoritative opened-pane identity for complete cleanup',async t=>{
- const dir=await mkdtemp(path.join(os.tmpdir(),'hat-start-failure-'));t.after(()=>rm(dir,{recursive:true,force:true}));const context={stateDir:path.join(dir,'state'),configDir:path.join(dir,'config'),configPath:path.join(dir,'config.toml'),endpoint:'failed-start',serverStateDir:path.join(dir,'state','servers',identityName('failed-start'))};const store=new StateStore(context.serverStateDir);await store.init();const closed:string[]=[];const pane={pane_id:'never-started',terminal_id:'never-started-term'};
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'hat-start-failure-'));t.after(()=>rm(dir,{recursive:true,force:true}));const context={stateDir:path.join(dir,'state'),configDir:path.join(dir,'config'),configPath:path.join(dir,'config.toml'),endpoint:'failed-start',serverStateDir:path.join(dir,'state','servers',identityName('failed-start'))};const store=new StateStore(context.serverStateDir);await store.init();const closed:string[]=[];const pane={pane_id:'never-started',terminal_id:'never-started-term'};
  await store.write('pane',{paneId:'reused',terminalId:'gone-term'});
  const rpc={call:async(method:string,params:any={}):Promise<any>=>{if(method==='session.snapshot')return{snapshot:{focused_pane_id:'agent',panes:[pane,{pane_id:'reused',terminal_id:'replacement-term'}]}};if(method==='plugin.pane.open')return{plugin_pane:{plugin_id:'iob.herdr-prism',entrypoint:'inspector',pane}};if(method==='plugin.pane.close')closed.push(params.pane_id);return{};}};
  await assert.rejects(activate(context,rpc,{mode:'inspector-only',timeoutMs:150}),/did not become ready/);assert.deepEqual(await store.read('pane'),{paneId:pane.pane_id,terminalId:pane.terminal_id});await deactivate(context,rpc,{timeoutMs:150});assert.deepEqual(closed,['never-started']);

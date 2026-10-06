@@ -5,11 +5,10 @@ It follows agent lineage, process ownership, messages, references, explicit goal
 local To-do checkboxes and Git checkout state. An optional native overview adds
 compact summaries to Herdr's existing Agents panel.
 
-**Release status:** implementation candidate. macOS, Linux and Windows are
-required release targets; the complete actual-platform CI and live Herdr
-acceptance runs have not yet been recorded. See [compatibility](docs/compatibility.md)
-for the evidence and remaining gates. A successful build or checksum check does
-not certify operating-system behavior.
+**Release status:** implementation candidate. Actual macOS and Linux CI and
+GitHub installation checks have passed. Windows validation is in progress, and
+its native helper is not yet included in the repository installation. See
+[compatibility](docs/compatibility.md) for the exact evidence and remaining gates.
 
 ## Install and open
 
@@ -20,7 +19,7 @@ herdr plugin install alexiob/herdr-prism
 herdr plugin action invoke activate-overview --plugin iob.herdr-prism
 ```
 
-The repository ships compiled JavaScript and reviewed native helpers with
+The repository ships compiled JavaScript and macOS native helpers with
 checksums and license notices. The install build hook checks these files; it
 does not run npm or Cargo. The second command activates the plugin in the
 current live session, because Herdr 0.9.3 runs startup hooks at server startup.
@@ -28,9 +27,9 @@ Use `activate-inspector` instead for inspector-only coexistence. Standard update
 enable/disable and uninstall commands are described in
 [installation](docs/install.md#standard-herdr-commands).
 
-The public repository's `herdr-plugin` topic and root manifest make it eligible
-for automatic [marketplace discovery](https://herdr.dev/docs/marketplace/).
-Indexing is separate from installation and does not certify platform support.
+The plugin is listed in the [Herdr marketplace](https://herdr.dev/plugins/).
+The public repository's `herdr-plugin` topic and root manifest provide automatic
+discovery. Listing is separate from installation and platform verification.
 
 For immediate activation and complete removal through one lifecycle wrapper,
 use a checksummed release as described below.

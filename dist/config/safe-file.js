@@ -4,12 +4,49 @@ import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const exec = promisify(execFile);
-// Fixed script: neither paths nor identities are interpreted as PowerShell code.
-const aclInspection = "$ErrorActionPreference='Stop'; $p=$env:HAT_PRIVATE_PATH; $s=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $i=Get-Item -LiteralPath $p -Force; if(($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Reparse point refused'}; $a=Get-Acl -LiteralPath $p; if($a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $s.Value){throw 'Owner is not current user'}; if($env:HAT_PRIVATE_STRICT -eq '1'){foreach($r in $a.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])){if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Value -ne $s.Value){throw 'Foreign allow ACL'}}}";
-async function inspectWindows(path, strict) { await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(aclInspection, 'utf16le').toString('base64')], { windowsHide: true, timeout: 5000, env: { ...process.env, HAT_PRIVATE_PATH: path, HAT_PRIVATE_STRICT: strict ? '1' : '0' } }); }
-async function ownedPath(path) { const info = await lstat(path); if (info.isSymbolicLink())
+// Fixed readonly script: paths only enter LiteralPath through the environment.
+// Return typed data so command, parsing and policy failures remain distinguishable.
+const aclInspection = "$ErrorActionPreference='Stop'; $p=$env:HAT_PRIVATE_PATH; $s=[System.Security.Principal.WindowsIdentity]::GetCurrent(); $i=Get-Item -LiteralPath $p -Force; $a=Get-Acl -LiteralPath $p; $raw=[System.Security.AccessControl.RawSecurityDescriptor]::new($a.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::All)); [pscustomobject]@{userSid=$s.User.Value; ownerSid=$a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value; tokenOwnerSid=$s.Owner.Value; reparse=[bool](($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0); allowSids=@($a.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]) | Where-Object {$_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow} | ForEach-Object {$_.IdentityReference.Value}); nullDacl=[object]::ReferenceEquals($raw.DiscretionaryAcl,$null); protected=[bool]$a.AreAccessRulesProtected} | ConvertTo-Json -Compress";
+const validSid = (value) => typeof value === 'string' && /^S-1-(?:\d+-){1,14}\d+$/.test(value);
+export function parseWindowsAcl(value) {
+    if (value.length > 65536)
+        throw new Error('Windows ACL inspection exceeds limit');
+    let acl;
+    try {
+        acl = JSON.parse(value.replace(/^\ufeff/, ''));
+    }
+    catch {
+        throw new Error('Invalid Windows ACL inspection JSON');
+    }
+    if (!acl || typeof acl !== 'object' || Array.isArray(acl) || !validSid(acl.userSid) || !validSid(acl.ownerSid) || !validSid(acl.tokenOwnerSid) || typeof acl.reparse !== 'boolean' || typeof acl.nullDacl !== 'boolean' || typeof acl.protected !== 'boolean' || !Array.isArray(acl.allowSids) || acl.allowSids.length > 4096 || acl.allowSids.some((sid) => !validSid(sid)))
+        throw new Error('Invalid Windows ACL inspection fields or SID');
+    return { userSid: acl.userSid, ownerSid: acl.ownerSid, tokenOwnerSid: acl.tokenOwnerSid, reparse: acl.reparse, allowSids: acl.allowSids, nullDacl: acl.nullDacl, protected: acl.protected };
+}
+export function assertWindowsAcl(acl, { strict = false, allowTokenOwner = false } = {}) {
+    if (acl.reparse)
+        throw new Error('Reparse point refused');
+    // A proven new artifact can initially inherit the creator token's default owner
+    // (e.g. Administrators under elevation). Never use this exception for a generic
+    // existing path, and require exact user SID ownership after normalization.
+    if (acl.ownerSid !== acl.userSid && (strict || !allowTokenOwner || acl.ownerSid !== acl.tokenOwnerSid))
+        throw new Error(`Owner is not current user (actual ${acl.ownerSid}, expected ${acl.userSid})`);
+    if (strict && acl.nullDacl)
+        throw new Error('Unsafe null DACL');
+    if (strict && !acl.protected)
+        throw new Error('DACL inheritance is not protected');
+    if (strict && acl.allowSids.some(sid => sid !== acl.userSid))
+        throw new Error('Foreign allow ACL');
+}
+export function windowsAclCommands(path, sid, directory) {
+    if (!validSid(sid))
+        throw new Error('Invalid current user SID');
+    // /setowner and DACL modification are separate documented icacls modes.
+    return [[path, '/setowner', '*' + sid], [path, '/inheritance:r', '/grant:r', `*${sid}:${directory ? '(OI)(CI)' : ''}F`]];
+}
+export async function readWindowsAcl(path) { const result = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(aclInspection, 'utf16le').toString('base64')], { windowsHide: true, timeout: 15000, maxBuffer: 65536, encoding: 'utf8', env: { ...process.env, HAT_PRIVATE_PATH: path } }); return parseWindowsAcl(result.stdout); }
+async function ownedPath(path, allowTokenOwner = false) { const info = await lstat(path); if (info.isSymbolicLink())
     throw new Error('Refusing symlink state path'); if (process.platform === 'win32')
-    await inspectWindows(path, false);
+    assertWindowsAcl(await readWindowsAcl(path), { allowTokenOwner });
 else if (info.uid !== process.getuid?.())
     throw new Error('Refusing unowned state path'); return info; }
 export async function restrict(path, created = true) {
@@ -24,29 +61,32 @@ export async function restrict(path, created = true) {
     }
     // No paths or identities enter PowerShell syntax. Existing directories are verified,
     // never stripped of foreign ACLs. Only newly created plugin artifacts get an ACL.
+    let stage = 'ownership inspection';
     try {
         // Verify the actual owner before any ACL mutation; never acquire a foreign path.
-        await inspectWindows(path, false);
+        const acl = await readWindowsAcl(path);
+        assertWindowsAcl(acl, { allowTokenOwner: created });
         if (created) {
-            const identity = await exec('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { windowsHide: true, timeout: 5000 });
-            const sid = identity.stdout.match(/S-1-(?:\d+-)*\d+/)?.[0];
-            if (!sid)
-                throw new Error('Current user SID unavailable');
-            const rights = info.isDirectory() ? `*${sid}:(OI)(CI)F` : `*${sid}:F`;
-            await exec('icacls.exe', [path, '/inheritance:r', '/grant:r', rights, '/setowner', '*' + sid], { windowsHide: true, timeout: 5000 });
+            for (const args of windowsAclCommands(path, acl.userSid, info.isDirectory())) {
+                stage = args[1] === '/setowner' ? 'owner normalization' : 'DACL restriction';
+                await exec('icacls.exe', args, { windowsHide: true, timeout: 5000, maxBuffer: 65536 });
+            }
         }
         // Verification only; immutable script and environment path avoid shell interpolation.
-        await inspectWindows(path, true);
+        stage = 'private ACL verification';
+        assertWindowsAcl(await readWindowsAcl(path), { strict: true });
     }
-    catch {
-        throw new Error('Cannot ensure current-user-only Windows ACL; use a new plugin-owned state directory or secure its ACL explicitly');
+    catch (error) {
+        const detail = error.killed ? 'Windows command timed out' : String(error.stderr || error.message).trim().slice(0, 1200);
+        throw new Error(`Cannot ensure current-user-only Windows ACL (${stage}: ${detail}); use a new plugin-owned state directory or secure its ACL explicitly`, { cause: error });
     }
 }
 export async function privateDir(path) { const created = await mkdir(path, { recursive: true, mode: 0o700 }); await restrict(path, created !== undefined); }
 export const ensurePrivateDir = privateDir;
-/** Dedicated managed-install authorization. Call only after validating the lifecycle
- * request against this runtime's plugin root. Generic privateDir never strips ACLs
- * on existing directories. Both trusted namespaces are checked before either changes. */
+/** Herdr activation authorizes only this plugin's exact environment namespaces,
+ * for both ordinary GitHub installs and managed installs. A managed receipt is
+ * not required for these Herdr-created directories. Generic privateDir remains
+ * verification-only on existing directories. Check both before changing either. */
 export async function securePluginNamespace(configDir, stateDir) {
     if (process.env.HERDR_PLUGIN_ID !== 'iob.herdr-prism')
         throw new Error('Refusing untrusted Herdr plugin identity');
@@ -55,9 +95,17 @@ export async function securePluginNamespace(configDir, stateDir) {
     for (let i = 0; i < paths.length; i++) {
         if (!expected[i])
             throw new Error('Missing trusted Herdr plugin namespace');
-        const info = await ownedPath(paths[i]);
-        if (!info.isDirectory())
-            throw new Error('Herdr plugin namespace must be a directory');
+        // Plugin activation explicitly authorizes only these exact Herdr namespaces.
+        // Their creator may be elevated, using the token's default owner SID. Both
+        // namespaces are inspected before either one is normalized to the user SID.
+        // Inspect both leaf spellings before canonicalization: passing a real target
+        // must not conceal a junction in the trusted environment path itself.
+        const spellings = paths[i] === expected[i] ? [paths[i]] : [expected[i], paths[i]];
+        for (const spelling of spellings) {
+            const info = await ownedPath(spelling, true);
+            if (!info.isDirectory())
+                throw new Error('Herdr plugin namespace must be a directory');
+        }
         if (await realpath(paths[i]) !== await realpath(expected[i]))
             throw new Error('Refusing mismatched Herdr plugin namespace');
     }

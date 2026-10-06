@@ -56,107 +56,117 @@ previous unit suite passed.
 - Deeply frozen provider snapshots and bounded stat-keyed metadata caches avoid
   repeated body clones, header parsing and Pi companion-window reads.
 
-## Evidence and remaining gates
+## Rename and marketplace
 
-- Bundled Herdr 0.9.3 schema exported read-only to
-  `/private/tmp/herdr-prism-herdr-0.9.3-schema.json`.
-- Latest recorded strict broad macOS suite: 236 tests, 235 passed, zero failed,
-  one Linux-only skip (`/private/tmp/prism-current-strict-suite.log`). Later edits still
-  require a fresh final suite; the recorded count is not a certification of every
-  subsequent source change.
-- Real local macOS PTY smoke passed keyboard, 80→26→80 column resizing, terminal
-  restoration, clean process exit and master EOF. The Windows ConPTY source
-  compiles; actual Windows execution remains required.
-- macOS arm64: actual host process enumeration, controlled single/multicore CPU,
-  memory, exact-session collector and helper EOF/teardown passed. The six strict
-  native tests passed with the explicitly ad-hoc-signed helper; evidence is
-  `artifacts/macos-proof/final-signed-native.log`. Thin arm64/x64 helpers were
-  built, checksummed and checked for system-only dependencies. Developer ID
-  signing and notarization are not established by ad-hoc signing.
-- macOS x64: official x64 Node and the x64 helper ran under Rosetta. The recorded
-  suite passed 214 of 216 tests with zero failures and two skips
-  (`artifacts/macos-x64-proof/tests.log`). This is translated x64 userspace
-  evidence, not a physical Intel-host run. Latest signed-helper and live x64
-  lifecycle reruns remain pending.
-- Real Herdr 0.9.3/protocol-22 ordinary RPC uses one request per connection;
-  subscriptions use separate streams. The client and contract tests now follow
-  that observed behavior. Actual socket tests passed.
-- Isolated macOS live install/right split/restart/uninstall passed, including
-  exact config restoration and owned collector/pane/directory cleanup:
-  `artifacts/live-herdr-macos-arm64/lifecycle.json`.
-- In the user's current macOS Herdr session, live installation activated an
-  authenticated collector and right inspector without changing focus. Removal
-  restored configuration byte-for-byte, removed the plugin's owned state and
-  managed installation, stopped collection, and preserved all seven existing
-  panes and the other installed plugin:
-  `artifacts/current-herdr-proof/lifecycle.json`. The test left this plugin
-  uninstalled. This proves lifecycle, not every dashboard field or interaction.
-- Actual Linux arm64 Podman testing passed 221 of 223 tests, zero failures and
-  two macOS/Windows-only skips, plus real PTY keyboard/resize/exit, release staging,
-  distribution/preflight and actual Herdr install/right split/restart/uninstall
-  with exact configuration restoration (`artifacts/linux-final-arm64-proof/`).
-  Later renamed/provider/performance changes require a fresh container or CI run.
-- The Linux x64 QEMU build failed when the emulated Rust compiler crashed. It
-  does not establish an application failure or successful x64 validation. Actual
-  Linux x64 and Windows x64 runs remain required. Windows testing will use GitHub
-  Actions once the repository is on GitHub, as requested by the user.
-- Performance fixture with real provider/Git files, 50 sessions, 500 synthetic
-  processes and 105 MB history: initial all-session idle Node CPU was 14.4% (fail).
-  The final selected-session 20-second measurement was 0.463%, heap increase
-  2.33 MiB, keyboard/render p95 0.250 ms (startup 91 ms). It excludes helper/Git-child CPU and real terminal
-  latency. Profile evidence: `/private/tmp/hat-profile-selected-final.json`; full live-host
-  performance and soak certification remain required.
-- Remaining end-to-end acceptance: real provider-version compatibility; the
-  mixed Codex/Claude/Pi scenario with deep children, another worktree, compiler
-  and registered detached job; selected-session visibility behavior measured in
-  live Herdr; follow/pin and focus replacement; native colors/TTL/readback;
-  multi-client rendering and ownership-conflict coexistence; upgrade/reconnect
-  and long-running recovery. Fixture tests cover many of these behaviors but do
-  not replace actual live acceptance.
-- Final release work: rerun the final source on all supported targets, record
-  signing/dependency checks and stage/install/remove those exact artifacts,
-  finish the capability matrix and requirement-by-requirement evidence audit.
-  Public release signing/notarization remains separate from the working
-  development packages.
-- Local Git metadata and the user-provided remote now exist; no remote CI run has
-  yet completed in this evidence snapshot.
-  Full-access local testing works. No sandbox restriction remains a claimed
-  blocker. The goal remains active because the outstanding acceptance gates
-  have not been satisfied.
+- Project/package: `herdr-prism`; display name: Herdr Prism; plugin ID:
+  `iob.herdr-prism`. Companion commands use `/prism-goal` and `/prism-parent`.
+  `docs/design/herdr-agent-tree.md` redirects to the renamed complete specification
+  so the original goal's acceptance scope is preserved.
+- Public source: [alexiob/herdr-prism](https://github.com/alexiob/herdr-prism).
+  The default branch contains the root manifest, compiled dependency-free
+  JavaScript and checked macOS native artifacts. Install hooks validate those
+  committed files without npm, Cargo, compilers or helper downloads.
+- The live [marketplace index](https://assets.herdr.dev/plugins/index.json) was
+  read on 2026-10-06. It contains this repository and manifest, plugin ID, name,
+  version 0.1.0, minimum Herdr 0.9.3 and source commit
+  `2655fa4f3000e623e31a044e6f1149b54185e982`. Listing is discovery, not review.
+- Standard install is `herdr plugin install alexiob/herdr-prism`, followed by an
+  explicit activation action in an existing session. Tested Herdr 0.9.3 has no
+  `plugin update` or `plugin state-dir` CLI. Safe upgrades deactivate, reinstall,
+  then activate. Ordinary uninstall removes its GitHub checkout and retains
+  configuration/state. The managed release wrapper provides authenticated
+  immediate activation and complete owned-file removal. See [installation](install.md).
 
-## Rename, marketplace and new acceptance evidence
+## Recorded execution evidence
 
-- The project/package is now `herdr-prism`, display name Herdr Prism and plugin
-  ID `iob.herdr-prism`. The original goal specification path redirects to
-  `docs/design/herdr-prism.md` without changing the acceptance scope.
-- The public remote is `https://github.com/alexiob/herdr-prism`; its
-  `herdr-plugin` topic is configured. Root manifest plus committed compiled
-  JavaScript/native artifacts provide the standard GitHub install path without
-  installer toolchains. The Windows helper must be supplied by actual Windows
-  CI before that platform's repository install is advertised as working.
-- Actual installed Herdr 0.9.3 has no `plugin update` or `plugin state-dir` CLI.
-  Safe repository upgrades use successful deactivation, reinstall and activation.
-  Its ordinary uninstall removes its GitHub checkout but retains configuration
-  and state. Newer master documentation describes different retention/update
-  behavior; that is not substituted for tested 0.9.3 behavior.
-- `scripts/github-herdr-test.mjs` is prepared for exact-commit actual GitHub
-  install/reinstall/activation/enable/disable/uninstall acceptance. No remote
-  execution success is claimed until the code is pushed and the test runs.
-- Actual isolated advanced macOS acceptance passed all ten stages on the prior
-  plugin-ID release: exact synthetic sessions, native metadata readback/TTL,
-  follow/right movement/pin, hidden pause/resume, stale occupant guards, collector
-  shutdown, projection ownership and configuration-conflict recovery. Proof is
-  `/private/tmp/prism-features-proof-20261006-r7/features.json`; renamed-release
-  rerun and native client pixels remain pending.
-- A read-only current-provider audit found newer Codex goal, inter-agent and
-  explicit turn-counter shapes; source-verified adapters and regressions now
-  cover them. Encrypted bodies remain unavailable. See
-  `docs/provider-compatibility.md` for precise versions, source evidence and limits.
-- Actual-host profiling now uses 50 declared fixture sessions, 500 real kernel
-  processes, 100 MiB history, actual collector/helper/Git CPU accounting and a
-  real PTY. Initial idle/active CPU failed at 1.76%/6.05%, while memory and latency
-  passed (`artifacts/macos-performance/`). Bounded rendering and documented idle
-  cadences reduced an intermediate run to 0.89%/3.18%, but its final outstanding
-  frame acknowledgement failed; it is not a complete passing profile. Further
-  optimization and a strict complete rerun remain required. Controlled RPC is
-  still distinct from full live Herdr transport/soak certification.
+Evidence below applies to the identified source/artifact, rather than promising
+that every later edit has been executed on every platform.
+
+- Source commit `2655fa4f3000e623e31a044e6f1149b54185e982` is published on `main`.
+  Its local strict macOS suite had 237 tests: 236 passed, zero failed and one
+  Linux-only skip (`/private/tmp/prism-pre-push-strict-suite.log`).
+- The corrected candidate's fresh strict macOS suite passed 242 of 247 tests,
+  zero failed, with three Windows-only, one Linux-only and one opt-in PTY skip
+  (`/private/tmp/prism-reviewed-strict-suite.log`). Explicit macOS PTY smoke also
+  passed. Typecheck, compiled build and repository install preflight passed.
+  Astra's narrow ACL review findings have regression fixes and were re-reviewed.
+- Actual ten-job GitHub [run 37445486188](https://github.com/alexiob/herdr-prism/actions/runs/37445486188)
+  completed: both Linux architectures on Node 22/24, physical Intel macOS on
+  Node 22/24 and arm64 macOS on Node 24 passed all required steps. These steps
+  include strict tests, real PTY, distribution/preflight and isolated live
+  Herdr install/right split/restart/complete removal. Linux Node 24 also passed
+  exact-commit ordinary GitHub install/reinstall/enable/disable/uninstall.
+- The same run failed on Windows Node 22/24 and arm64 macOS Node 22. Windows
+  exposed inherited ACL/default-owner handling, redirected ConPTY standard
+  handles and nonportable fixture paths/stat timestamps. macOS exposed an old
+  pane exiting between snapshot and close during restart. Targeted corrections
+  and local regressions are implemented; an actual-platform rerun is required.
+- The ordinary default-branch macOS GitHub installation passed against exact
+  commit `2655fa4f3000e623e31a044e6f1149b54185e982` using Herdr 0.9.3:
+  `artifacts/prism-github-install-macos/github.json`. It verified build-hook
+  preflight, authenticated activation, right split, preserved native focus,
+  config restoration, safe reinstall, restart, enable/disable, stopped collectors
+  and ordinary uninstall. Herdr's retained configuration/state were observed
+  and the harness removed only its own disposable server/root afterward.
+- In the user's original macOS Herdr session, the managed lifecycle test passed:
+  `artifacts/current-herdr-proof/lifecycle.json`. Removal restored config bytes,
+  stopped owned collection and removed owned directories while preserving all
+  seven original panes and the other installed plugin. It left Prism uninstalled.
+- The renamed staged macOS release passed live install/restart/complete removal
+  and all ten advanced acceptance stages: exact synthetic Pi sessions, metadata TTL/readback, follow/right
+  movement/pin, hidden pause/resume, stale occupant guards, collector shutdown,
+  projection ownership and configuration-conflict recovery. Proof:
+  `artifacts/prism-corrected-live-macos/lifecycle.json` and
+  `artifacts/prism-corrected-features-macos/features.json`. Headless readback does
+  not certify native client pixels. Unix CI now requires these advanced stages;
+  Windows needs its separate portable TTL fixture before the same gate applies.
+- Both thin macOS helpers were built, ad-hoc signed, checksummed and checked
+  for system-only dependencies. Actual CPU/memory/process identity and shutdown
+  checks passed. This is development signing, not Apple Developer ID/notarization.
+  The Windows helper must pass actual Windows acceptance before inclusion in
+  repository installation or a supported-platform claim.
+- Earlier actual Linux arm64 Podman and translated macOS x64 runs also passed;
+  the new actual-platform CI above supersedes those older source snapshots.
+  The failed Linux x64 QEMU compiler probe does not invalidate actual x64 CI.
+- Read-only current-provider inspection and source-verified fixtures cover new
+  Codex explicit goals, inter-agent messages and turn-counter records. Encrypted
+  message bodies remain unavailable. [Provider compatibility](provider-compatibility.md)
+  records exact inspected versions and format limits; synthetic fixtures do not
+  certify every current/future provider schema.
+
+## Performance evidence
+
+`scripts/profile-host.mjs` now profiles 50 declared fixture sessions, 500 real
+kernel processes and 100 MiB of history through the real collector, helper, Git
+children and PTY. Its RPC layer is controlled; this is not a full live Herdr
+transport or soak certification. Measurements include helper/Git CPU and drain
+all outstanding frame acknowledgements without dropping observations.
+
+| Complete macOS profile | Idle CPU | Active CPU | Incremental memory | Event p95 | Keyboard p95 |
+| --- | --- | --- | --- | --- | --- |
+| Initial `artifacts/macos-performance/` | 1.76% fail | 6.05% fail | 133.97 MiB pass | 102.05 ms pass | 77.52 ms pass |
+| Bounded render/cadence `artifacts/macos-performance-final/` | 0.88% pass | 3.02% fail | 114.07 MiB pass | 88.55 ms pass | 70.23 ms pass |
+| Cached number format `artifacts/macos-performance-number-cached/` | 0.80% pass | 3.03% fail | 116.86 MiB pass | 101.71 ms pass | 90.22 ms pass |
+
+The intermediate optimized run had an incomplete terminal acknowledgement and
+is not a passing complete profile. Narrow formatter/ref microbenchmarks do not
+replace the aggregate budgets. Active CPU remains above the strict 3% target.
+
+## Remaining completion gates
+
+- Rerun the corrected source on all ten actual-platform CI jobs; validate and
+  include the Windows helper with its exact checksums and matching notices.
+  Then exercise ordinary GitHub installation on every packaged platform.
+- Run the renamed advanced acceptance gate on all Unix CI targets; add actual
+  Windows TTL coverage, native client/theme pixels and multiple clients.
+- Exercise the full mixed-provider/deep-child/second-worktree/registered-detached
+  scenario, launch ownership, selected-session visibility and reconnect/upgrade
+  recovery in live Herdr. Complete provider audit limitations remain explicit.
+- Meet active CPU and full live-host performance budgets; run long recovery/soak
+  acceptance. Unit fixtures and controlled transport profiles are not substitutes.
+- Finish a requirement-by-requirement evidence audit and stage/install/remove
+  the exact final artifacts. Release signing/notarization and public tagged
+  release publication are separate from working development packages.
+
+Full-access local testing and remote CI are available. No sandbox restriction is
+an outstanding blocker. The original implementation goal remains active.

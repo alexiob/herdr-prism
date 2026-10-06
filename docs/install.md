@@ -15,7 +15,10 @@ Use `--yes` on install only after reviewing the manifest if a noninteractive
 installation is desired. Herdr clones the repository into its managed plugin
 store. The root manifest's build command validates the committed dependency-free
 JavaScript and the matching committed native helper. Node.js is required;
-installation does not run npm, Cargo, a compiler or a helper download.
+installation does not run npm, Cargo, a compiler or a helper download. Repository
+installation currently includes both macOS helpers and uses procfs on Linux.
+The Windows helper remains pending actual Windows acceptance; its missing-helper
+preflight fails explicitly instead of installing an incomplete dashboard.
 
 `activate-overview` opens the right inspector and configures the native overview
 with a reversible backup. `activate-inspector` opens only the inspector. Herdr

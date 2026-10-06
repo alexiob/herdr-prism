@@ -18,7 +18,18 @@ async function closeOwnedPanes(store:StateStore,rpc:Rpc,owned:OwnedPane[]){
     const response=await rpc.call('session.snapshot');const panes=(response.snapshot??response).panes;
     if(!Array.isArray(panes))throw new Error('Cannot verify owned dashboard panes without a session snapshot');
     const closed=new Set<string>();
-    for(const record of owned){const pane=panes.find((p:any)=>p.terminal_id===record.terminalId);if(pane&&typeof pane.pane_id==='string'&&!closed.has(pane.pane_id)){await rpc.call('plugin.pane.close',{pane_id:pane.pane_id});closed.add(pane.pane_id);}}
+    for (const record of owned) {
+        const pane = panes.find((p: any) => p.terminal_id === record.terminalId);
+        if (!pane || typeof pane.pane_id !== 'string' || closed.has(pane.pane_id)) continue;
+        try {
+            await rpc.call('plugin.pane.close', { pane_id: pane.pane_id });
+        } catch (error) {
+            // Herdr may remove the terminal as its collector exits after snapshot.
+            // Its precise absence response means the requested cleanup is done.
+            if ((error as { code?: string }).code !== 'plugin_pane_not_found') throw error;
+        }
+        closed.add(pane.pane_id);
+    }
     // Do not erase a newer inspector's marker if it appeared during cleanup.
     const current=await store.read<OwnedPane>('pane');if(current&&owned.some(p=>p.terminalId===current.terminalId))await store.remove('pane');
 }
@@ -60,7 +71,7 @@ export async function activate(context: LifecycleContext, rpc: Rpc, options: {
     root?: string;
     timeoutMs?: number;
 } = {}) {
-    if (process.platform === 'win32' && options.request && options.root)
+    if (process.platform === 'win32' && process.env.HERDR_PLUGIN_ID === pluginId)
         await securePluginNamespace(context.configDir, context.stateDir);
     const state = new StateStore(context.stateDir), config = new StateStore(context.configDir);
     const admission = await acquireAdmission(context.stateDir, { allowDisabled: true, timeoutMs: options.timeoutMs });
@@ -168,7 +179,7 @@ export async function deactivate(context: LifecycleContext, rpc: Rpc, options: {
         close?: () => void;
     };
 } = {}) {
-    if (process.platform === 'win32' && options.request && options.root)
+    if (process.platform === 'win32' && process.env.HERDR_PLUGIN_ID === pluginId)
         await securePluginNamespace(context.configDir, context.stateDir);
     const state = new StateStore(context.stateDir);
     await state.init();

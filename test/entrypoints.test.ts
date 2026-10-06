@@ -1,3 +1,4 @@
+import {freshPrivateDirectory} from './helpers/private-dir.ts';
 import{test}from'node:test';import assert from'node:assert/strict';
 const action=await import('../src/runtime/actions.ts').catch(()=>({}))as any;
 test('right-panel open uses manifest entrypoint and preserves native focus',async()=>{
@@ -9,5 +10,5 @@ test('CLI arguments retain path spelling and refuse missing option values',()=>{
 });
 test('inspector validation failures do not leak a collector lease',async()=>{
  const fs=await import('node:fs/promises'),os=await import('node:os'),path=await import('node:path');const {main}=await import('../src/entrypoints/inspector.ts');const {identityName}=await import('../src/state/store.ts');
- const dir=await fs.mkdtemp(path.join(os.tmpdir(),'hat-start-fail-'));try{const config=path.join(dir,'config'),state=path.join(dir,'state');await assert.rejects(main(['--config-dir',config,'--state-dir',state,'--socket=']),/HERDR_SOCKET_PATH/);const serverDir=path.join(state,'servers',identityName('no-server'));await assert.rejects(fs.lstat(path.join(serverDir,'collector.lock')),/ENOENT/);const corruptDir=path.join(state,'servers',identityName('unused'));await fs.mkdir(corruptDir,{recursive:true});await fs.writeFile(path.join(corruptDir,'preferences.json'),'bad');await assert.rejects(main(['--config-dir',config,'--state-dir',state,'--socket','unused']),/JSON/);await assert.rejects(fs.lstat(path.join(corruptDir,'collector.lock')),/ENOENT/);}finally{await fs.rm(dir,{recursive:true,force:true});}
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'hat-start-fail-'));try{const config=path.join(dir,'config'),state=path.join(dir,'state');await assert.rejects(main(['--config-dir',config,'--state-dir',state,'--socket=']),/HERDR_SOCKET_PATH/);const serverDir=path.join(state,'servers',identityName('no-server'));await assert.rejects(fs.lstat(path.join(serverDir,'collector.lock')),/ENOENT/);const corruptDir=path.join(state,'servers',identityName('unused'));await (await import('../src/config/safe-file.ts')).privateDir(corruptDir);await fs.writeFile(path.join(corruptDir,'preferences.json'),'bad');await assert.rejects(main(['--config-dir',config,'--state-dir',state,'--socket','unused']),/JSON/);await assert.rejects(fs.lstat(path.join(corruptDir,'collector.lock')),/ENOENT/);}finally{await fs.rm(dir,{recursive:true,force:true});}
 });

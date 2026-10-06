@@ -1,2 +1,6 @@
 bin/*/hat-sampler* -text
 bin/*/rust-licenses/** -text -whitespace
+bin/** linguist-vendored=true
+dist/** linguist-generated=true
+companion/pi/index.js linguist-generated=true
+schema/** linguist-generated=true
