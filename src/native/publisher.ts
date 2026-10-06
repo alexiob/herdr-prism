@@ -1,6 +1,7 @@
 import type { Rpc } from '../model/types.ts';
 import type { SessionView } from '../tui/types.ts';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { serverIdPattern } from '../runtime/server.ts';
 import { sanitize, truncate, number, bytes } from '../tui/text.ts';
 export const pluginId = 'iob.herdr-prism';
 export const source = `plugin:${pluginId}`;
@@ -40,7 +41,13 @@ export class NativePublisher {
     }>();
     private seq = Date.now() * 1000;
     private view = false;
+    private serverId: string = randomUUID();
     constructor(rpc: Rpc) { this.rpc = rpc; }
+    setServerIdentity(id: string): void {
+        if (!serverIdPattern.test(id)) throw new Error('Invalid server identity');
+        if (this.sent.size && id !== this.serverId) throw new Error('Cannot replace an active publication server identity');
+        this.serverId = id;
+    }
     ownership(): Publication[] { return [...this.sent].map(([paneId, record]) => ({ paneId, terminalId: record.terminal, hashes: Object.fromEntries(Object.entries(JSON.parse(record.text) as Record<string, string>).map(([key, value]) => [key, hash(value)])) })); }
     async publish(sessions: SessionView[], now = Date.now(), graph: SessionView[] = sessions): Promise<void> {
         this.diagnostics = [];
@@ -68,7 +75,7 @@ export class NativePublisher {
                 hat_branch: git?.branch ?? git?.branchState ?? 'Git —', hat_add: git?.added === undefined ? '' : `+${git.added}`, hat_del: git?.deleted === undefined ? '' : `-${git.deleted}`,
                 hat_div: `↑${number(git?.ahead)} ↓${number(git?.behind)}`, hat_conflict: git?.conflicts ? `conflicts ${git.conflicts}` : '',
                 hat_last: truncate(session.evidence.messages.filter(m => m.kind !== 'inter-agent' && m.role === 'assistant').at(-1)?.text ?? '', 100),
-                hat_rank: String(rank).padStart(10, '0'), hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability ?? 'unavailable', hat_group: ''
+                hat_rank: `${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability ?? 'unavailable', hat_group: ''
             };
             for (const key of keys)
                 tokens[key] = sanitize(tokens[key]).replace(/[\r\n\t]/g, ' ');

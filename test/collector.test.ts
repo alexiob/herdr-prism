@@ -7,6 +7,34 @@ import os from 'node:os';
 import { ProviderIndex } from '../src/providers/index.ts';
 const runtime = await import('../src/runtime/collector.ts').catch(() => ({})) as any;
 const settings = { nativeMode: 'inspector-only', providerHomes: {}, todosEnabled: true, sampleIntervalMs: 2000, follow: true, ascii: false, monochrome: true };
+test('reopening a native path session hydrates its exact source and keeps the selected attachment', async t => {
+    const dir = await freshPrivateDirectory(path.join(os.tmpdir(), 'prism-path-reopen-'));
+    t.after(() => rm(dir, {recursive:true, force:true}));
+    const files = [path.join(dir,'alpha.jsonl'),path.join(dir,'beta.jsonl')];
+    for (const [i,file] of files.entries()) await writeFile(file,[
+        {type:'session',version:3,id:i?'beta':'alpha',cwd:dir},
+        {type:'message',id:i?'beta-message':'alpha-message',message:{role:'assistant',content:[{type:'text',text:i?'ACTION: Check beta':'Alpha only'}]}}
+    ].map(row=>JSON.stringify(row)+'\n').join(''));
+    const agents = files.map((file,i)=>({pane_id:`p${i}`,terminal_id:`t${i}`,workspace_id:'w',tab_id:'tab',agent:'pi',agent_status:'working',agent_session:{kind:'path',value:file},focused:i===0,revision:1}));
+    const snapshot:any={protocol:22,version:'0.9.3',agents,panes:[],tabs:[],workspaces:[],layouts:[],focused_pane_id:'p0'};
+    const rpc={call:async ():Promise<any>=>({snapshot})};
+    const index=new ProviderIndex({piHome:path.join(dir,'pi'),codexHome:path.join(dir,'codex'),claudeHome:path.join(dir,'claude')});
+    const collector=new runtime.Collector({rpc,index,settings,stateDir:path.join(dir,'state'),git:{get:async()=>({availability:'unavailable'}),close(){}},sampler:{sample:async()=>{throw Error('unexpected sample');},close(){}}});
+    t.after(()=>collector.close());
+    await collector.init(); await collector.refresh();
+    const placeholder=collector.data.sessions.find((s:any)=>s.attachment?.terminal_id==='t1');
+    assert.equal(placeholder.evidence.path,files[1],'closed inventory must retain native path identity without loading its body');
+    assert.equal(placeholder.evidence.messages.length,0);
+    await collector.setGoal(placeholder.key,'Explicit beta goal');
+    collector.setVisibleSession(placeholder.key,true); await collector.refresh();
+    const selected=collector.data.sessions.find((s:any)=>s.key===collector.displayedSessionKey);
+    assert.equal(selected.key,'pi:beta'); assert.equal(selected.attachment.terminal_id,'t1');
+    assert.deepEqual(selected.evidence.messages.map((m:any)=>m.id),['beta-message']);
+    assert.equal(selected.evidence.goals.at(-1).objective,'Explicit beta goal');
+    assert.equal(selected.todos[0].text,'Check beta');
+    assert.equal(collector.data.sessions.find((s:any)=>s.key==='pi:alpha').evidence.messages.length,0,'unselected body stays unloaded');
+    assert.ok(!collector.data.sessions.some((s:any)=>files.some(file=>s.evidence.id===file)),'resolved placeholders must not become duplicate historical sessions');
+});
 test('collector joins exact session lineage, content, telemetry and private checkbox state', async () => {
     assert.equal(typeof runtime.Collector, 'function', 'foreground collector missing');
     const dir = await freshPrivateDirectory(path.join(os.tmpdir(), 'hat-collector-'));

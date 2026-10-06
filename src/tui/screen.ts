@@ -20,6 +20,7 @@ const checkoutBadge=(session:SessionView)=>`${pathName(session.git?.root??sessio
 function overview(session:SessionView,state:UiState,columns:number,now:number,data:DashboardData):ScreenRow[]{
   const rows:ScreenRow[]=[];const add=(id:string,text:string,definition?:string)=>rows.push({id,text,...(definition?{action:{type:'message' as const,text:definition}}:{})});
   const resource=session.resource,usage=session.usage,evidence=session.evidence;
+  if(data.server)add('server',`Server ${data.server.host}/${data.server.session}`,`Collecting server: ${data.server.host}\nHerdr session: ${data.server.session}\nAll displayed process, transcript and Git facts belong to this server. Saved-machine labels are assigned separately by the viewing client.`);
   const chartWidth=Math.max(3,columns-20);add('cpu',`CPU ${number(resource?.cpuPercent)}% ${spark(historyValues(session,'cpu',chartWidth,now),chartWidth,state.ascii)}`,'CPU: sampled user + kernel delta / monotonic elapsed; 100% = one logical core. First sample needs warmup. Scope includes verified owned processes only. History shows sampled bucket peaks; blanks are unavailable gaps and are never interpolated.');
   add('memory',`${resource?.memoryLabel==='working-set sum'?'WS sum':'RSS sum'} ${resident(resource?.memoryBytes)}  peak ${resident(session.history?.peakMemoryBytes)}`,'Resident-memory sum includes each process once but may count shared pages more than once. Windows uses working set. Peak is the highest observed aggregate sample, not a lifetime allocation figure.');
   add('memory-spark',`Memory history ${spark(historyValues(session,'memory',chartWidth,now),chartWidth,state.ascii)}`,'Memory history uses the same session/scope as the Processes table. Each column shows a sampled bucket peak; blank gaps are unavailable. The fixed window is supplied by the collector, never interpolated.');
@@ -110,7 +111,8 @@ function contentRows(session:SessionView,state:UiState,columns:number,now:number
 export function renderScreen(data:DashboardData,state:UiState,columns:number,height:number,now=Date.now()):RenderedScreen {
   columns=Math.max(1,Math.floor(columns));height=Math.max(1,Math.floor(height));const session=data.sessions.find(s=>s.key===state.selectedKey)??data.sessions[0];if(session&&!state.selectedKey)state.selectedKey=session.key;
   const numericTargets=new Map<number,string>();let rows:ScreenRow[]=[];
-  const header=session?`${data.demo?'[DEMO] ':''}${session.evidence.provider} · ${session.evidence.title??session.evidence.id} · ${session.evidence.model??session.usage?.model??'model unavailable'} ${state.pin?'[pin]':''}`:'Herdr Prism · no session';
+  const server=data.server?`${data.server.host}/${data.server.session} · `:'';
+  const header=server+(session?`${data.demo?'[DEMO] ':''}${session.evidence.provider} · ${session.evidence.title??session.evidence.id} · ${session.evidence.model??session.usage?.model??'model unavailable'} ${state.pin?'[pin]':''}`:'Herdr Prism · no session');
   const readerKey=`${session?.key??''}:${state.tab}:${state.view}`;if(state.detail===undefined&&!state.help&&state.readerKey!==readerKey){if(state.readerKey)state.readers.set(state.readerKey,{cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll});const saved=state.readers.get(readerKey);if(saved)Object.assign(state,saved);else if(state.readerKey){state.cursor=0;state.cursorId=undefined;state.scroll=0;}state.readerKey=readerKey;while(state.readers.size>96)state.readers.delete(state.readers.keys().next().value!);}
   let followEnd=false;
   if(session&&state.tab==='Messages'){

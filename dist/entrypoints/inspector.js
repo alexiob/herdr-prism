@@ -59,7 +59,7 @@ export async function main(argv = process.argv.slice(2)) {
             await store.init();
             const preferences = await store.read('preferences');
             const cache = new SnapshotCache(rpc);
-            collector = new Collector({ rpc, settings: context.settings, stateDir: context.serverStateDir });
+            collector = new Collector({ rpc, endpoint: context.endpoint, settings: context.settings, stateDir: context.serverStateDir });
             lease = await store.acquire();
             cleanup = async () => { ui.close(); cache.close(); rpc.close(); await lease.release(); await admission.release(); };
             let paneId = process.env.HERDR_PANE_ID;
@@ -172,7 +172,7 @@ export async function main(argv = process.argv.slice(2)) {
                 await collector.start();
                 data = collector.data;
                 if (!state.selectedKey || !data.sessions.some(session => session.key === state.selectedKey)) {
-                    state.selectedKey = data.sessions.find(session => session.attachment?.focused)?.key ?? data.sessions[0]?.key;
+                    state.selectedKey = data.sessions.find(session => session.key === collector.displayedSessionKey)?.key ?? data.sessions.find(session => session.attachment?.focused)?.key ?? data.sessions[0]?.key;
                     syncVisibility();
                     await collector.refresh();
                     data = collector.data;
@@ -225,7 +225,7 @@ export async function main(argv = process.argv.slice(2)) {
                     data = next;
                     ready = !data.stale;
                     if (!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey))
-                        state.selectedKey = data.sessions.find(s => s.attachment?.focused)?.key ?? data.sessions[0]?.key;
+                        state.selectedKey = data.sessions.find(s => s.key === collector.displayedSessionKey)?.key ?? data.sessions.find(s => s.attachment?.focused)?.key ?? data.sessions[0]?.key;
                     paint();
                     void follow();
                 });
@@ -261,7 +261,7 @@ export async function main(argv = process.argv.slice(2)) {
                     }
                     if (action.type === 'copy') {
                         await copyText(action.text ?? '');
-                        state.notice = 'Copied';
+                        state.notice = 'Copy requested';
                         return;
                     }
                     if (action.type === 'open-ref') {

@@ -1,5 +1,9 @@
 # Herdr Prism installation and complete removal
 
+For SSH-connected machines, install and activate on each Herdr server;
+[remote setup](remote.md) explains machine targeting, client-local sidebar
+configuration and the outstanding visibility API boundary.
+
 ## Standard Herdr commands
 
 The marketplace and GitHub source identifier is `alexiob/herdr-prism`; the stable

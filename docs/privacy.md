@@ -44,6 +44,13 @@ checking or normal collection.
 
 ## Permissions and lifetime
 
+Remote collection runs on each remote Herdr host. Hostname/session labels identify
+the collecting server; persisted server UUIDs scope native ranks, and diagnostic
+exports omit those labels/IDs. Messages rendered in a remote dashboard travel
+through Herdr's existing SSH terminal transport. Explicit clipboard writes use
+Herdr's foreground-client OSC 52 forwarding; failed remote file opens never
+fall back to a same-named local file. See [remote boundaries](remote.md).
+
 Unix plugin state directories are current-user-owned and mode 0700; private files
 are mode 0600. Symlink/non-regular state targets are refused. Windows newly created
 plugin directories/files get current-SID-only ACLs through explicit argv; existing

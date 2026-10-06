@@ -12,4 +12,7 @@ test('detail collection pauses for a closed pane or another displayed tab/worksp
  assert.equal(inspectorVisible({...snapshot,focused_workspace_id:'other'},'owner'),false);
  assert.equal(inspectorVisible({...snapshot,panes:[]},'owner','panel'),false);
  assert.equal(inspectorVisible(snapshot,'foreign','panel'),false,'pane id alone cannot override a replaced terminal identity');
+ const zoomed={...snapshot,layouts:[{tab_id:'tab',zoomed:true,focused_pane_id:'agent'}]};
+ assert.equal(inspectorVisible(zoomed,'owner'),false,'a panel hidden by zoom is not displayed');
+ assert.equal(inspectorVisible({...zoomed,layouts:[{tab_id:'tab',zoomed:true,focused_pane_id:'panel'}]},'owner'),true);
 });

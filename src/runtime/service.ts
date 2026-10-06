@@ -41,7 +41,7 @@ export async function finiteRefresh(options: Record<string, string | boolean> = 
     try {
         await store.init();
         lease = await store.acquire();
-        const collector = new Collector({ rpc, settings: context.settings, stateDir: context.serverStateDir });
+        const collector = new Collector({ rpc, endpoint: context.endpoint, settings: context.settings, stateDir: context.serverStateDir });
         try {
             await store.write('server', { endpoint: context.endpoint });
             await collector.init();

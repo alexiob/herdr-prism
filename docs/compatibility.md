@@ -33,7 +33,7 @@ release provenance. Linux does not require a native runtime helper.
 | Native sidebar | Real agent rows, ≤16 rows/tokens per row; ≤14 `hat_` keys in default template | No synthetic native nodes or per-field click handlers. Metadata shares the pane's retained-key budget. |
 | Native projection | One source-guarded owner | Radar/Pi-tree cannot concurrently own the same layout/projection; inspector-only mode is the fallback. |
 | Git | Explicit argv, porcelain-v2 NUL status and HEAD numstat | No network/fetch. Unborn line totals unavailable; binary/untracked files separate. Inaccessible/timed-out snapshots remain labeled. |
-| Remote sessions | Herdr attachment facts | Unavailable remote process/transcript/Git data is not substituted by matching local cwd. |
+| Remote sessions | Prism installed on each selected Herdr server; server-local socket, sampler, provider homes and Git | Server/session header, host-scoped ranks and client machine labels. No local PID/path fallback. Exact client-visible heavy-work gating needs a host API; see [remote support](remote.md). Windows hosts remain deferred. |
 
 Native overview dark/light/monochrome layouts have configuration fixtures and
 fallback built-in labels. Native rendering on each actual client/theme still
