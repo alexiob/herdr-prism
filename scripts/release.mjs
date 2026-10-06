@@ -13,9 +13,10 @@ async function copyTree(root,from,to,accept){
 }
 async function fileIndex(directory,prefix='',files={}){for(const entry of await readdir(join(directory,prefix),{withFileTypes:true})){const path=prefix?prefix+'/'+entry.name:entry.name;if(entry.isDirectory())await fileIndex(directory,path,files);else if(entry.isFile())files[path]=createHash('sha256').update(await readFile(join(directory,path))).digest('hex');else throw new Error('Non-regular staged release input');}return files;}
 /** Stages reviewed build output; never downloads or compiles anything. Output must not exist. */
-export async function stageRelease({root=rootDefault,output,platforms=[`${process.platform}-${process.arch}`]}={}){
+export async function stageRelease({root=rootDefault,output,platforms=[`${process.platform}-${process.arch}`],nodeBin}={}){
  if(!output)throw new Error('An explicit release --output directory is required');root=resolve(root);output=resolve(output);
  const targets=[...new Set(platforms.includes('all')?supportedPlatforms:platforms)];if(!targets.length||targets.some(target=>!supportedPlatforms.includes(target)))throw new Error('Unsupported release platform selection');
+ if(nodeBin!==undefined&&(typeof nodeBin!=='string'||!nodeBin.startsWith('/')||/[\x00-\x1f\x7f]/.test(nodeBin)||targets.some(target=>!target.startsWith('darwin-')&&!target.startsWith('linux-'))))throw new Error('Runtime binding requires an absolute Unix Node path and only Unix release targets');
  for(const source of ['dist','companion','docs','scripts','bin','native/sampler/artifacts']){const rel=relative(join(root,source),output);if(rel===''||!isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+(process.platform==='win32'?'\\':'/')))throw new Error('Release output may not overlap copied input directories');}
  if(output===root)throw new Error('Release output may not replace source root');
  try{await lstat(output);throw new Error('Release output exists; refusing overwrite');}catch(error){if(error.code!=='ENOENT')throw error;}
@@ -28,6 +29,12 @@ export async function stageRelease({root=rootDefault,output,platforms=[`${proces
   await copyTree(root,join(root,'dist'),join(staging,'dist'),path=>/\.(js|json)$/.test(path));
   await copyTree(root,join(root,'companion/pi/index.js'),join(staging,'companion/pi/index.js'));
   for(const file of [...documentation,...optionalDocs,'herdr-plugin.toml','scripts/check-install.mjs','scripts/live-install.mjs'])await copyTree(root,join(root,file),join(staging,file));
+  if(nodeBin!==undefined){
+   const manifest=await readFile(join(staging,'herdr-plugin.toml'),'utf8');let count=0;
+   const bound=manifest.replace(/^(command\s*=\s*\[\s*)"node"(?=\s*[,\]])/gm,(_,prefix)=>{count++;return prefix+JSON.stringify(nodeBin);});
+   if(!count||count!==(manifest.match(/^command\s*=/gm)?.length??0))throw new Error('Cannot bind every manifest command to the selected Node executable');
+   await writeFile(join(staging,'herdr-plugin.toml'),bound);
+  }
   await writeFile(join(staging,'package.json'),JSON.stringify({name:pkg.name,version:pkg.version,private:true,type:'module',engines:{node:'>=22.13.0'},scripts:{'check-install':'node scripts/check-install.mjs'}},null,2)+'\n');
   for(const target of targets){const [platform,arch]=target.split('-');if(platform==='darwin'||platform==='win32'){await copyTree(root,join(root,'native/sampler/artifacts',target),join(staging,'bin',target),path=>/\/(hat-sampler(?:\.exe)?|sha256\.json)$/.test(path.replaceAll('\\','/'))||/\/rust-licenses\/(COPYRIGHT-library\.html|licenses\/[A-Za-z0-9.-]+\.txt)$/.test(path.replaceAll('\\','/')));if(process.platform!=='win32')await chmod(join(staging,'bin',target,platform==='win32'?'hat-sampler.exe':'hat-sampler'),0o755);}}
   await writeFile(join(staging,'release.json'),JSON.stringify({version:1,name:pkg.name,releaseVersion:pkg.version,platforms:targets.sort(),protocol:22},null,2)+'\n');
@@ -39,6 +46,6 @@ export async function stageRelease({root=rootDefault,output,platforms=[`${proces
  }catch(error){await rm(staging,{recursive:true,force:true});throw error;}
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- const options={platforms:[]};for(let i=2;i<process.argv.length;i++){const arg=process.argv[i];if(!['--root','--output','--platform'].includes(arg)||!process.argv[i+1])throw new Error(`Unknown or incomplete option: ${arg}`);const value=process.argv[++i];if(arg==='--platform')options.platforms.push(value);else options[arg.slice(2)]=value;}
+ const options={platforms:[]};for(let i=2;i<process.argv.length;i++){const arg=process.argv[i];if(!['--root','--output','--platform','--node-bin'].includes(arg)||!process.argv[i+1])throw new Error(`Unknown or incomplete option: ${arg}`);const value=process.argv[++i];if(arg==='--platform')options.platforms.push(value);else options[arg==='--node-bin'?'nodeBin':arg.slice(2)]=value;}
  if(!options.platforms.length)delete options.platforms;console.log(JSON.stringify(await stageRelease(options),null,2));
 }

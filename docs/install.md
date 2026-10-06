@@ -6,6 +6,56 @@ configuration and the outstanding visibility API boundary.
 
 ## Standard Herdr commands
 
+### macOS and Linux setup
+
+Install dependencies and Prism with one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alexiob/herdr-prism/main/install.sh | sh
+```
+
+The POSIX shell script supports macOS and glibc Linux on x64/arm64. It reuses
+Node >=22.13.0 and Herdr >=0.9.3 when available. Missing Node is installed as
+checksum-pinned Node 24.21.0; missing Herdr is installed as checksum-pinned
+Herdr 0.9.3. Downloads live under
+`XDG_DATA_HOME`/`~/.local/share/herdr-prism/dependencies`. Node's license is
+included. No sudo, npm, Cargo or shell-profile edits are needed; Git is optional
+for checkout metrics.
+
+The script resolves `main` to an immutable GitHub commit, downloads its source
+archive over HTTPS, and stages the committed JavaScript and matching helper.
+It binds every manifest command to the selected absolute Node executable before
+generating release checksums. This lets an existing Herdr server activate Prism
+even when that server's PATH contains no Node. Dependency checksums detect
+corruption; GitHub HTTPS and your chosen revision establish the source trust.
+
+The managed live wrapper activates Prism, verifies readiness and prints a
+shell-quoted command for complete removal. It also adds `prefix+i` using the
+reversible configuration backup: **Ctrl+B, then `i`** with Herdr's default
+prefix. The binding works in inspector-only mode too. A conflicting key or
+unsupported key-table syntax is preserved and reported. An existing matching
+Prism binding is reused without taking ownership of it. Removal restores the
+owned shortcut and layout; shared Node/Herdr dependencies remain installed.
+
+A missing local Herdr server is started headlessly. Attach using the command
+printed by the installer. Existing servers are never restarted; an old server
+must be upgraded deliberately before installation. Existing Prism registrations
+are left in place; remove/deactivate them using their installation's documented
+lifecycle before updating.
+
+Pass options without saving the script:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alexiob/herdr-prism/main/install.sh | sh -s -- --session work --inspector-only
+```
+
+Use `--ref <tag-or-commit>` for a reviewed revision, `--no-start` to require a
+running server, or `--prepare-only` to set up dependencies only. `--node-bin`
+and `--herdr-bin` select explicit executables. `--source-dir` installs a reviewed
+local source tree; `--help` lists all options. For remote machines, run the
+script on each server itself. The bootstrap does not install remotely through
+a local client's `--machine` selector.
+
 ### Windows setup
 
 Use the PowerShell bootstrap when Node is missing from PATH. Herdr 0.9.3 or

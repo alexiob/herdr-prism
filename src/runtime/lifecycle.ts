@@ -40,6 +40,7 @@ export interface LifecycleRequest {
     requestId: string;
     operation: 'activate' | 'deactivate';
     mode?: 'overview' | 'inspector-only' | 'own-native' | 'remove';
+    shortcut?: boolean;
 }
 export async function managedRequest(root: string, operation: LifecycleRequest['operation']): Promise<LifecycleRequest | undefined> {
     const receiptText = await readOptional(path.join(root, '.hat-managed-install.json'));
@@ -52,7 +53,7 @@ export async function managedRequest(root: string, operation: LifecycleRequest['
     if (!text)
         return;
     const request = JSON.parse(text);
-    if (request.version !== 1 || request.pluginId !== pluginId || request.token !== receipt.token || typeof request.requestId !== 'string' || request.operation !== operation || request.mode !== undefined && !['overview', 'inspector-only', 'own-native', 'remove'].includes(request.mode))
+    if (request.version !== 1 || request.pluginId !== pluginId || request.token !== receipt.token || typeof request.requestId !== 'string' || request.operation !== operation || request.mode !== undefined && !['overview', 'inspector-only', 'own-native', 'remove'].includes(request.mode) || request.shortcut !== undefined && typeof request.shortcut !== 'boolean')
         throw new Error('Invalid lifecycle request');
     return request;
 }
@@ -84,7 +85,7 @@ export async function activate(context: LifecycleContext, rpc: Rpc, options: {
     await config.init();
     // A failed activation leaves the reversible ownership manifest available to cleanup.
     await state.write('lifecycle', { disabled: false });
-    changed = await configure(context.configPath, context.stateDir, { mode, ownNative: options.ownNative });
+    changed = await configure(context.configPath, context.stateDir, { mode, ownNative: options.ownNative, ...(options.request?.shortcut ? {pluginActionKey:{key:'prefix+i',command:pluginId+'.open',description:'Open Prism'},shortcutIfFree:true}: {}) });
     await config.write('settings', { ...await loadSettings(context.configDir), nativeMode: mode, autostart: true });
     if (options.request && options.root) {
         const owner = { version: 1, pluginId, token: options.request.token, installRoot: path.resolve(options.root) };
@@ -115,7 +116,7 @@ export async function activate(context: LifecycleContext, rpc: Rpc, options: {
                     stale: boolean;
                 }>('ping');
                 if (status.ready && !status.stale)
-                    return { activated: true, configDir: context.configDir, stateDir: context.stateDir, mode, conflicts: changed.conflicts };
+                    return { activated: true, configDir: context.configDir, stateDir: context.stateDir, mode, conflicts: changed.conflicts, ...(changed.shortcut?{shortcut:changed.shortcut}:{}) };
             }
             catch { /* Pane startup is asynchronous; wait for its authenticated ready signal. */ }
         }

@@ -551,3 +551,11 @@ are now complete: [run 37474269213](https://github.com/alexiob/herdr-prism/actio
 passed all ten jobs at `5e9f4b1`, including both Windows majors and all eight
 macOS/Linux jobs. Broader native-pixel, multi-client,
 paid-provider and soak acceptance remains outside this Windows delivery.
+
+## Unix dependency bootstrap and Prism shortcut — 2026-10-06
+
+`install.sh` now supplies verified user-local Node 24.21.0 and Herdr 0.9.3 when missing, resolves GitHub source to an immutable revision, stages an absolute-runtime manifest and uses authenticated live installation/removal. It does not restart existing servers or replace existing Prism registrations. A new empty headless session receives its initial workspace. The main README documents both installers and the keyboard map.
+
+The installer owns a reversible `prefix+i` binding (`Ctrl+B`, then `i` by default), including inspector-only mode. It preserves collisions, binding arrays, whitespace and unsupported opaque syntax. Existing matching bindings remain user-owned. The open action now awaits panel-open/focus RPCs before closing its client; real shortcut testing discovered this existing asynchronous cleanup defect.
+
+Actual isolated macOS arm64 and Podman Linux arm64 proofs cover no Node in the existing server PATH, checksum-pinned dependency setup, authenticated activation, real controlling-PTY shortcut dispatch, complete config/state/installation purge, original shortcut/layout restoration, dependency reuse and missing-server setup. See [durable evidence](evidence/unix-bootstrap-2026-10-06.json). Windows installer changes are pulled from the other machine and retain separate ownership. UI redesign requested by the user is the next feature phase, inspired primarily by btop and also htop, Radar and agent-panel; the existing crowded presentation is not claimed finished.

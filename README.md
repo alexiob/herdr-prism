@@ -14,14 +14,29 @@ is included with its checksum and matching toolchain notices. See
 
 ## Install and open
 
+macOS and Linux (x64 or arm64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alexiob/herdr-prism/main/install.sh | sh
+```
+
+The installer checks dependencies, supplies checksum-pinned Node and Herdr when
+missing, and activates Prism in your local Herdr session. It uses user-local
+directories and configures **Ctrl+B, then `i`** to open the panel when the
+shortcut is free. It prints the exact command for complete Prism removal.
+A running Herdr server needs no restart; a missing server is started headlessly.
+See [Unix installer options](docs/install.md#macos-and-linux-setup) for named
+sessions, inspector-only mode and dependency-only setup.
+
 Windows x64, in PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/install-windows.ps1 | iex
 ```
 
-The Windows installer configures **Ctrl+B, then I** to open Prism when the
-shortcut is free. Press **Q** in the focused Prism panel to close it.
+The Windows installer also configures **Ctrl+B, then `i`** when the shortcut is
+free. Its setup and activation details are in
+[Windows setup](docs/install.md#windows-setup).
 
 To uninstall on Windows and remove the installer-owned shortcut:
 
@@ -34,14 +49,6 @@ Install from GitHub with Herdr's standard command:
 ```sh
 herdr plugin install alexiob/herdr-prism
 herdr plugin action invoke activate-overview --plugin iob.herdr-prism
-```
-
-On Windows, use the [PowerShell installer](docs/install.md#windows-setup) to
-install Node automatically if it is missing from PATH, then install Prism through
-Herdr's standard commands.
-
-```powershell
-irm https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/install-windows.ps1 | iex
 ```
 
 The repository ships compiled JavaScript and macOS native helpers with
@@ -95,10 +102,28 @@ loads older sources. `Enter` opens the exact recorded source. `Escape` returns
 to the prior reader position; `B` reloads history from its newest page. Changed
 transcripts invalidate page cursors and label retained pages as stale.
 
-`Tab` changes views; arrows or `j`/`k` move; `Enter` activates the selected item;
-`Space` folds or expands; `/` filters; `?` shows help; `q` closes the inspector.
-`p` pins, `u` selects subtree scope, `w` switches Agents grouping, `s` jumps to a
-source, `y` copies, `x` toggles a To-do checkbox, `e` exports and `,` opens settings.
+## Keyboard shortcuts
+
+| Keys | Action |
+| --- | --- |
+| `Ctrl+B`, then `i` | Open Prism (installer binding; uses your configured Herdr prefix) |
+| `q` | Close the focused Prism panel |
+| `Tab` / `Shift+Tab` | Next / previous view |
+| Arrows or `j` / `k` | Move selection |
+| `Home` / `End`, `PageUp` / `PageDown` | Navigate the current reader |
+| `Enter` | Focus/open the selected item |
+| `Space` | Fold/expand; open a reference's source history |
+| `Escape` | Return from details or close help/filter |
+| `b` / `B` | Load older messages/refs / reload reference history |
+| `p` / `u` / `w` | Pin session / subtree scope / Agents worktree grouping |
+| `s` / `y` / `x` | Jump to source / copy / check or reopen To-do |
+| `/` / `?` / `,` / `e` | Filter / help / settings / diagnostic export |
+| Agent number, then `Enter` | Select that displayed agent target |
+
+An existing `prefix+i` assignment is preserved. The installer reports the
+conflict; Prism remains available through its Herdr action menu. The Unix
+installer removes its owned shortcut during complete removal.
+
 Numeric Agents selection preserves the target that was displayed when typing
 began. Selecting transcript-only descendants inspects them without inventing a
 native pane.

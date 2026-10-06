@@ -78,14 +78,14 @@ export async function main(argv = process.argv.slice(2)): Promise<unknown> {
                         paneId?: string;
                     }>('location');
                     if (current.paneId)
-                        return openPanel(rpc, { existingPaneId: current.paneId });
+                        return await openPanel(rpc, { existingPaneId: current.paneId });
                 }
                 catch { /* Validate/recover through doctor; do not kill an uncertain process. */ }
             }
-            return openPanel(rpc);
+            return await openPanel(rpc);
         }
         if (args.command === 'unconfigure')
-            return deactivate(context, rpc);
+            return await deactivate(context, rpc);
         if (args.command === 'set-goal') {
             if (!controller)
                 throw new Error('Open the dashboard before setting a session goal');

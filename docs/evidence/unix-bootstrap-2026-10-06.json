@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "date": "2026-10-06",
+  "kind": "Unix bootstrap delivery evidence",
+  "base": "1f6ca6b",
+  "runtime": {
+    "node": "24.21.0",
+    "herdr": "0.9.3"
+  },
+  "live": [
+    {
+      "platform": "darwin",
+      "arch": "arm64",
+      "checks": {
+        "liveInstall": {
+          "pipeline": true,
+          "pinnedNode": "24.21.0",
+          "nodeAbsentFromServerPath": true,
+          "allManifestCommandsAbsolute": true,
+          "authenticatedActive": true,
+          "existingServerPreserved": true,
+          "shortcutConfigured": true
+        },
+        "shortcutPTY": {
+          "ok": true,
+          "actualControllingPTY": true,
+          "rawInput": true,
+          "ownForegroundGroup": true,
+          "prefix": "ctrl+b",
+          "key": "i",
+          "prismOpened": true,
+          "capturedBytes": 26360
+        },
+        "completeRemoval": {
+          "registryRemoved": true,
+          "managedFilesRemoved": true,
+          "stateAndConfigRemoved": true,
+          "shortcutAndLayoutRestored": true,
+          "sharedNodeRetained": true,
+          "existingServerPreserved": true
+        },
+        "repeatDependencySetup": {
+          "verifiedPrivateNodeReused": true
+        },
+        "freshSetup": {
+          "officialHerdrDownloadVerified": true,
+          "pinnedHerdr": "0.9.3",
+          "headlessServerStarted": true,
+          "initialWorkspaceCreated": true,
+          "inspectorOnlyShortcutConfigured": true,
+          "completeRemoval": true,
+          "sharedDependenciesRetained": true
+        }
+      }
+    },
+    {
+      "platform": "linux",
+      "arch": "arm64",
+      "checks": {
+        "liveInstall": {
+          "pipeline": true,
+          "pinnedNode": "24.21.0",
+          "nodeAbsentFromServerPath": true,
+          "allManifestCommandsAbsolute": true,
+          "authenticatedActive": true,
+          "existingServerPreserved": true,
+          "shortcutConfigured": true
+        },
+        "shortcutPTY": {
+          "ok": true,
+          "actualControllingPTY": true,
+          "rawInput": true,
+          "ownForegroundGroup": true,
+          "prefix": "ctrl+b",
+          "key": "i",
+          "prismOpened": true,
+          "capturedBytes": 26656
+        },
+        "completeRemoval": {
+          "registryRemoved": true,
+          "managedFilesRemoved": true,
+          "stateAndConfigRemoved": true,
+          "shortcutAndLayoutRestored": true,
+          "sharedNodeRetained": true,
+          "existingServerPreserved": true
+        },
+        "repeatDependencySetup": {
+          "verifiedPrivateNodeReused": true
+        },
+        "freshSetup": {
+          "officialHerdrDownloadVerified": true,
+          "pinnedHerdr": "0.9.3",
+          "headlessServerStarted": true,
+          "initialWorkspaceCreated": true,
+          "inspectorOnlyShortcutConfigured": true,
+          "completeRemoval": true,
+          "sharedDependenciesRetained": true
+        }
+      }
+    }
+  ],
+  "targetedTests": {
+    "total": 49,
+    "passed": 49,
+    "failed": 0
+  },
+  "macosStrictSuite": {
+    "total": 299,
+    "passed": 282,
+    "failed": 0,
+    "skipped": 17
+  },
+  "checks": [
+    "POSIX syntax",
+    "shellcheck",
+    "TypeScript typecheck",
+    "release checksum verification",
+    "immutable GitHub revision/archive offline fixtures",
+    "corrupt Node and Herdr rejection",
+    "array/whitespace shortcut conflict regression",
+    "delayed RPC open/focus regression"
+  ],
+  "limits": [
+    "Actual live runs on macOS arm64 and Linux arm64 in Podman; x64 dependency archives and binary digests verified without claiming a new x64 live run.",
+    "Full public-source bootstrap smoke is run after the installer is available on GitHub.",
+    "Windows bootstrap is independently owned/tested on the other machine; this record does not certify its latest revision.",
+    "Native sidebar pixels and host visibility API boundaries remain outside this installer proof."
+  ],
+  "linuxStrictSuite": {
+    "total": 299,
+    "passed": 281,
+    "failed": 0,
+    "skipped": 18
+  }
+}

@@ -3,6 +3,7 @@ import { lstat, open, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { atomicWrite, privateDir, readOptional, restrict } from "./safe-file.js";
 import { scanToml, put, replaceValues } from "./toml.js";
+import { shortcutDecision } from "./shortcut.js";
 export { privateDir as ensurePrivateDir } from "./safe-file.js";
 const defaults = { nativeMode: 'overview', providerHomes: {}, todosEnabled: false, sampleIntervalMs: 2000, follow: true, ascii: false, monochrome: false };
 export async function loadSettings(configDir) { const text = await readOptional(join(configDir, 'settings.json')); if (!text)
@@ -59,23 +60,19 @@ catch (error) {
 } await atomicWrite(path, after, mode, async () => { await hook?.(); if (hash(await readOptional(path)) !== hash(before))
     throw new Error('Configuration changed concurrently; no replacement performed'); }); }
 export async function configure(configPath, stateDir, options = {}) {
-    if (options.mode === 'inspector-only')
+    if (options.mode === 'inspector-only' && !options.pluginActionKey)
         return { changed: false, conflicts: [] };
     return withLock(stateDir, async () => {
-        const path = resolve(configPath);
-        const before = await readOptional(path);
-        const doc = scanToml(before);
-        const old = await readManifest(stateDir);
+        const path = resolve(configPath), before = await readOptional(path), doc = scanToml(before), old = await readManifest(stateDir);
         if (old && old.configPath !== path)
             throw new Error('State belongs to a different configuration path');
-        const desired = new Map([['ui.sidebar.agents.rows', rowsToml(options.theme)]]);
-        for (const entry of doc.entries)
-            if (entry.path === 'ui.sidebar.agents.rows_by_agent' || entry.path.startsWith('ui.sidebar.agents.rows_by_agent.')) {
-                if (entry.path === 'ui.sidebar.agents.rows_by_agent')
-                    desired.set(entry.path, '{}');
-                else
-                    desired.set(entry.path, rowsToml(options.theme));
-            }
+        const desired = new Map();
+        if (options.mode !== 'inspector-only') {
+            desired.set('ui.sidebar.agents.rows', rowsToml(options.theme));
+            for (const entry of doc.entries)
+                if (entry.path === 'ui.sidebar.agents.rows_by_agent' || entry.path.startsWith('ui.sidebar.agents.rows_by_agent.'))
+                    desired.set(entry.path, entry.path === 'ui.sidebar.agents.rows_by_agent' ? '{}' : rowsToml(options.theme));
+        }
         for (const [key, action] of Object.entries(options.keybindings ?? {})) {
             if (!/^[A-Za-z0-9_-]+$/.test(key) || typeof action !== 'string' || action.includes('\0'))
                 throw new Error('Invalid optional keybinding');
@@ -84,8 +81,7 @@ export async function configure(configPath, stateDir, options = {}) {
         const values = (old?.values ?? []).filter(v => !desired.has(v.path));
         let after = before;
         for (const [target, written] of desired) {
-            const current = doc.entries.find(e => e.path === target)?.value;
-            const previous = old?.values.find(v => v.path === target);
+            const current = doc.entries.find(e => e.path === target)?.value, previous = old?.values.find(v => v.path === target);
             if (current !== undefined && current !== written && (!previous || current !== previous.written) && !options.ownNative)
                 throw new Error('Native sidebar/keybinding has existing ownership; choose ownNative explicitly or inspector-only');
             if (previous && current !== previous.written && current !== written)
@@ -94,31 +90,41 @@ export async function configure(configPath, stateDir, options = {}) {
             after = put(after, target, written);
         }
         const blocks = [...(old?.blocks ?? [])];
+        let shortcut;
         if (options.pluginActionKey) {
-            if (doc.entries.some(e => e.path === 'keys.command' || e.path.startsWith('keys.command.')) || doc.tables.some(t => t.path === 'keys.command'))
-                throw new Error('Unsupported existing TOML topology for keys.command');
             const binding = options.pluginActionKey;
             for (const field of [binding.key, binding.command, binding.description ?? 'Prism'])
                 if (typeof field !== 'string' || field.includes('\0') || field.length > 256)
                     throw new Error('Invalid plugin action key');
-            const block = '\n# iob.herdr-prism command begin\n[[keys.command]]\nkey = ' + JSON.stringify(binding.key) + '\ntype = "plugin_action"\ncommand = ' + JSON.stringify(binding.command) + '\ndescription = ' + JSON.stringify(binding.description ?? 'Prism') + '\n# iob.herdr-prism command end\n';
             const previous = blocks[0];
-            if (previous) {
-                if (!after.includes(previous))
-                    throw new Error('Plugin command binding was edited by user');
-                after = after.replace(previous, block);
-                blocks[0] = block;
+            if (previous && !after.includes(previous))
+                throw new Error('Plugin command binding was edited by user');
+            const decision = shortcutDecision(doc, binding.key, binding.command);
+            if (decision === 'conflict') {
+                if (!options.shortcutIfFree)
+                    throw new Error('Plugin shortcut conflicts with existing keys.command configuration');
+                shortcut = 'conflict';
             }
+            else if (decision === 'existing' && !previous)
+                shortcut = 'existing';
             else {
-                if (after.includes('# iob.herdr-prism command begin'))
-                    throw new Error('Foreign plugin command marker');
-                after += block;
-                blocks.push(block);
+                const block = '\n# iob.herdr-prism command begin\n[[keys.command]]\nkey = ' + JSON.stringify(binding.key) + '\ntype = "plugin_action"\ncommand = ' + JSON.stringify(binding.command) + '\ndescription = ' + JSON.stringify(binding.description ?? 'Prism') + '\n# iob.herdr-prism command end\n';
+                if (previous) {
+                    after = after.replace(previous, block);
+                    blocks[0] = block;
+                }
+                else {
+                    if (after.includes('# iob.herdr-prism command begin'))
+                        throw new Error('Foreign plugin command marker');
+                    after += block;
+                    blocks.push(block);
+                }
+                shortcut = 'configured';
+                scanToml(after);
             }
-            scanToml(after);
         }
         if (after === before)
-            return { changed: false, conflicts: [], ...(old ? { backupPath: old.backupPath } : {}) };
+            return { changed: false, conflicts: [], ...(old ? { backupPath: old.backupPath } : {}), ...(shortcut ? { shortcut } : {}) };
         const backupPath = old?.backupPath ?? join(stateDir, 'configuration-original.toml');
         if (!old)
             await atomicWrite(backupPath, before);
@@ -134,7 +140,7 @@ export async function configure(configPath, stateDir, options = {}) {
                 await unlink(manifestPath(stateDir)).catch(() => { });
             throw error;
         }
-        return { changed: true, conflicts: [], backupPath };
+        return { changed: true, conflicts: [], backupPath, ...(shortcut ? { shortcut } : {}) };
     });
 }
 export async function unconfigure(configPath, stateDir) { return withLock(stateDir, async () => { const managed = await readManifest(stateDir); if (!managed)

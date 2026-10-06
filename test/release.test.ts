@@ -23,3 +23,18 @@ test('installation checks finite startup and event hooks referenced by the manif
 test('source design and evidence documents referenced by README survive staging when present',async t=>{const root=await fixture(t);await mkdir(join(root,'docs/design'));await writeFile(join(root,'docs/design/herdr-prism.md'),'source design');await writeFile(join(root,'docs/implementation-progress.md'),'actual evidence');const output=join(root,'documented');await stageRelease({root,output,platforms:['linux-x64']});assert.equal(await readFile(join(output,'docs/design/herdr-prism.md'),'utf8'),'source design');assert.equal(await readFile(join(output,'docs/implementation-progress.md'),'utf8'),'actual evidence');});
 
 test('release bundles the live lifecycle wrapper alongside precompiled security helpers',async t=>{const root=await fixture(t),output=join(root,'lifecycle');await stageRelease({root,output,platforms:['linux-x64']});assert.ok((await readFile(join(output,'scripts/live-install.mjs'),'utf8')).includes('liveUninstall'));assert.ok(await readFile(join(output,'dist/config/safe-file.js'),'utf8'));});
+
+test('Unix bootstrap release binds every Node command before checksumming, with safe TOML path escaping',async t=>{
+ const root=await fixture(t),output=join(root,'bound');
+ const manifest='id = "iob.herdr-prism"\n[[build]]\ncommand = ["node", "scripts/check-install.mjs"]\n[[startup]]\ncommand = ["node", "dist/entrypoints/startup.js"]\n[[panes]]\ncommand = ["node", "dist/entrypoints/inspector.js"]\n';
+ await writeFile(join(root,'herdr-plugin.toml'),manifest);
+ const nodeBin='/tmp/prism "quote" \\ slash/日本語/node';
+ await stageRelease({root,output,platforms:['linux-arm64'],nodeBin});
+ const bound=await readFile(join(output,'herdr-plugin.toml'),'utf8');
+ const commands=bound.split('\n').filter(line=>line.startsWith('command = ')).map(line=>JSON.parse(line.slice(10)));
+ assert.equal(commands.length,3);assert.ok(commands.every(command=>command[0]===nodeBin));
+ assert.equal(await readFile(join(root,'herdr-plugin.toml'),'utf8'),manifest,'source checkout stays reusable');
+ assert.equal((await checkInstall({root:output,platform:'linux',arch:'arm64',nodeVersion:'24.21.0'})).ok,true);
+ await assert.rejects(stageRelease({root,output:join(root,'relative'),platforms:['linux-x64'],nodeBin:'node'}),/absolute.*Unix/i);
+ await assert.rejects(stageRelease({root,output:join(root,'foreign'),platforms:['all'],nodeBin}),/Unix/i);
+});
