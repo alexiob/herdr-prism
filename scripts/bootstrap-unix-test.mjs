@@ -7,9 +7,11 @@ import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 const exec=promisify(execFile),root=fileURLToPath(new URL('..',import.meta.url));
 async function until(probe,label){for(let i=0;i<100;i++){try{const result=await probe();if(result)return result;}catch{}await delay(100);}throw new Error('Timed out: '+label);}
-export async function bootstrapUnixTest({herdr,proof}){
+export async function bootstrapUnixTest({herdr,proof,publicRef}){
  if(!herdr||!proof)throw new Error('--herdr and --proof are required');
  herdr=await realpath(resolve(herdr));proof=resolve(proof);await mkdir(proof,{recursive:true});
+ if(publicRef!==undefined&&!/^[a-f0-9]{40}$/.test(publicRef))throw new Error('--public-ref must be an immutable commit');
+ const sourceArgs=publicRef?['--ref',publicRef]:['--source-dir',root];
  const directory=await mkdtemp('/tmp/prism-bootstrap-live-'),session='bootstrap';
  const configPath=join(directory,'c/herdr/config.toml'),settingsDir=join(directory,'c/herdr/plugins/config/iob.herdr-prism');
  await mkdir(settingsDir,{recursive:true,mode:0o700});
@@ -24,13 +26,13 @@ export async function bootstrapUnixTest({herdr,proof}){
  const log=await open(join(proof,'server.log'),'w',0o600);
  const server=spawn(herdr,['--session',session,'server'],{env,cwd:directory,stdio:['ignore',log.fd,log.fd]});
  const cli=async args=>{const result=await exec(herdr,['--session',session,...args],{env,cwd:directory,encoding:'utf8',timeout:30000,maxBuffer:2*1024*1024});return JSON.parse(result.stdout);};
- const evidence={kind:'actual-isolated-Unix-bootstrap',ok:false,platform:process.platform,arch:process.arch,checks:{},limits:['Headless server and terminal readback; native sidebar pixels are not certified.','Local reviewed source option exercises this exact working tree. Public immutable GitHub download is checked separately.']};
+ const evidence={kind:'actual-isolated-Unix-bootstrap',ok:false,platform:process.platform,arch:process.arch,source:publicRef?{kind:'actual-GitHub-download',commit:publicRef}:{kind:'reviewed-local-source'},checks:{},limits:['Headless server and terminal readback; native sidebar pixels are not certified.',...(publicRef?[]:['Live proof uses local reviewed source; immutable GitHub resolution/archive dataflow is covered by offline download fixtures.'])]};
  let managedDir,nodeBin,receipt,freshHerdr;
  try{
   await until(async()=>(await cli(['status','server','--json'])).running,'server ready');
   await cli(['workspace','create','--cwd',directory,'--label','Prism installer proof','--focus']);
-  const script=await readFile(join(root,'install.sh'),'utf8');
-  const install=exec('/bin/sh',['-s','--','--source-dir',root,'--herdr-bin',herdr,'--session',session,'--no-start'],{env,cwd:directory,encoding:'utf8',timeout:180000,maxBuffer:2*1024*1024});install.child.stdin.end(script);
+  const script=publicRef?(await exec('curl',['-fsSL',`https://raw.githubusercontent.com/alexiob/herdr-prism/${publicRef}/install.sh`],{timeout:30000})).stdout:await readFile(join(root,'install.sh'),'utf8');
+  const install=exec('/bin/sh',['-s','--',...sourceArgs,'--herdr-bin',herdr,'--session',session,'--no-start'],{env,cwd:directory,encoding:'utf8',timeout:180000,maxBuffer:2*1024*1024});install.child.stdin.end(script);
   const output=await install;await writeFile(join(proof,'install.log'),output.stdout+output.stderr,{mode:0o600});
   assert.match(output.stdout,/active in the selected/);assert.match(output.stdout,/Ctrl\+B, then i/);
   const registration=(await cli(['plugin','list','--plugin','iob.herdr-prism','--json'])).result.plugins[0];
@@ -55,14 +57,14 @@ export async function bootstrapUnixTest({herdr,proof}){
   for(const path of [managedDir,receipt.configDir,receipt.stateDir])await assert.rejects(access(path));
   assert.equal(await readFile(configPath,'utf8'),original);await access(nodeBin);assert.equal(server.exitCode,null);
   evidence.checks.completeRemoval={registryRemoved:true,managedFilesRemoved:true,stateAndConfigRemoved:true,shortcutAndLayoutRestored:true,sharedNodeRetained:true,existingServerPreserved:true};
-  const prepare=exec('/bin/sh',['-s','--','--source-dir',root,'--herdr-bin',herdr,'--prepare-only'],{env,cwd:directory,encoding:'utf8',timeout:30000});prepare.child.stdin.end(script);assert.match((await prepare).stdout,/prerequisites ready/);
+  const prepare=exec('/bin/sh',['-s','--',...sourceArgs,'--herdr-bin',herdr,'--prepare-only'],{env,cwd:directory,encoding:'utf8',timeout:180000});prepare.child.stdin.end(script);assert.match((await prepare).stdout,/prerequisites ready/);
   evidence.checks.repeatDependencySetup={verifiedPrivateNodeReused:true};
   // With both runtimes absent from PATH, reuse private Node and supply Herdr.
-  const prepareHerdr=exec('/bin/sh',['-s','--','--source-dir',root,'--prepare-only'],{env,cwd:directory,encoding:'utf8',timeout:180000});prepareHerdr.child.stdin.end(script);assert.match((await prepareHerdr).stdout,/prerequisites ready/);
+  const prepareHerdr=exec('/bin/sh',['-s','--',...sourceArgs,'--prepare-only'],{env,cwd:directory,encoding:'utf8',timeout:180000});prepareHerdr.child.stdin.end(script);assert.match((await prepareHerdr).stdout,/prerequisites ready/);
   freshHerdr=join(directory,'d/herdr-prism/dependencies',`herdr-v0.9.3-${process.platform}-${process.arch}`,'herdr');
   assert.equal((await exec(freshHerdr,['--version'],{env})).stdout.trim(),'herdr 0.9.3');
   await mkdir(settingsDir,{recursive:true,mode:0o700});await writeFile(join(settingsDir,'settings.json'),JSON.stringify({providerHomes}),{mode:0o600});
-  const fresh=exec('/bin/sh',['-s','--','--source-dir',root,'--session','fresh','--inspector-only'],{env,cwd:directory,encoding:'utf8',timeout:180000});fresh.child.stdin.end(script);const freshOutput=await fresh;
+  const fresh=exec('/bin/sh',['-s','--',...sourceArgs,'--session','fresh','--inspector-only'],{env,cwd:directory,encoding:'utf8',timeout:180000});fresh.child.stdin.end(script);const freshOutput=await fresh;
   assert.match(freshOutput.stdout,/active in the selected/);assert.match(freshOutput.stdout,/Attach with/);
   const freshCli=async args=>JSON.parse((await exec(freshHerdr,['--session','fresh',...args],{env,cwd:directory,encoding:'utf8',timeout:30000})).stdout);
   managedDir=(await freshCli(['plugin','list','--plugin','iob.herdr-prism','--json'])).result.plugins[0].plugin_root;
@@ -84,6 +86,6 @@ export async function bootstrapUnixTest({herdr,proof}){
  }
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
- const options={};for(let i=2;i<process.argv.length;i++){const arg=process.argv[i];if(!['--herdr','--proof'].includes(arg)||!process.argv[i+1])throw new Error('Unknown option: '+arg);options[arg.slice(2)]=process.argv[++i];}
+ const options={};for(let i=2;i<process.argv.length;i++){const arg=process.argv[i];if(!['--herdr','--proof','--public-ref'].includes(arg)||!process.argv[i+1])throw new Error('Unknown option: '+arg);options[arg==='--public-ref'?'publicRef':arg.slice(2)]=process.argv[++i];}
  await bootstrapUnixTest(options);console.log('Unix bootstrap live proof passed');
 }

@@ -134,6 +134,9 @@ main() {
         tar -xzf "$prism_temp/prism.tar.gz" --strip-components=1 -C "$prism_source" </dev/null
     fi
     [ -f "$prism_source/scripts/bootstrap-unix.mjs" ] || fail 'source revision lacks the Unix bootstrap; select a newer revision'
+    # Node resolves module filenames physically; use that same spelling on macOS
+    # (/tmp and /var are symlinks) and with explicitly symlinked source trees.
+    prism_source=$("$prism_node" -e 'console.log(require("node:fs").realpathSync(process.argv[1]))' "$prism_source" </dev/null)
     "$prism_node" "$prism_source/scripts/bootstrap-unix.mjs" "$@" </dev/null
 }
 

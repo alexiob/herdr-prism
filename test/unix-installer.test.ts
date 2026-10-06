@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,chmod,lstat,realpath} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,chmod,lstat,realpath,symlink} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
@@ -69,6 +69,12 @@ test('POSIX entry point works through a pipe with spaces in explicit executable/
  const child=exec('/bin/sh',['-s','--','--source-dir',f.root,'--herdr-bin',f.herdrBin,'--node-bin',process.execPath,'--prepare-only'],{env:{...process.env,XDG_DATA_HOME:join(f.directory,'data')},timeout:30000});
  child.child.stdin?.end(script);const result=await child;
  assert.match(result.stdout,/prerequisites ready/i);assert.doesNotMatch(await readFile(f.calls,'utf8'),/plugin|status/);
+});
+
+test('POSIX bootstrap executes from a symlinked source directory instead of silently skipping main',unix,async t=>{
+ const f=await fixture(t),source=join(f.directory,'source-link');await symlink(f.root,source,'dir');
+ const child=exec('/bin/sh',['-s','--','--source-dir',source,'--herdr-bin',f.herdrBin,'--node-bin',process.execPath,'--prepare-only'],{timeout:30000});
+ child.child.stdin?.end(await readFile('install.sh'));assert.match((await child).stdout,/prerequisites ready/i);
 });
 
 test('POSIX entry point resolves the requested ref once and downloads that immutable GitHub archive',unix,async t=>{
