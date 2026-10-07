@@ -1,3 +1,4 @@
+import {inspectionParentKey} from '../runtime/follow.ts';
 import {agentRows} from './agents.ts';
 import {renderNotes} from './notes.ts';
 import {orderedTabs} from './types.ts';
@@ -101,6 +102,7 @@ export function renderScreen(data:DashboardData,state:UiState,columns:number,hei
 
 export function handleRowClick(state:UiState,x:number,y:number,data:DashboardData,screen:RenderedScreen):UiAction|undefined {
   if(!Number.isInteger(x)||!Number.isInteger(y)||x<1)return;
+  const navigation=screen.navigationRegions?.find(region=>region.y===y&&x>=region.x&&x<region.x+region.width);if(navigation)return state.processConfirmation?undefined:navigation.action;
   const tab=screen.tabRegions?.find(region=>region.y===y&&x>=region.x&&x<region.x+region.width);if(tab)return state.processConfirmation?undefined:changeTab(state,tab.tab);
   const region=screen.rowRegions?.find(region=>region.y===y&&x>=region.x-1&&x<region.x+region.width);if(!region)return;
   const row=screen.rows[region.index];if(!row)return;const changed=state.cursor!==region.index;state.cursor=region.index;state.cursorId=row.id;state.numberPrefix='';
@@ -153,6 +155,7 @@ export function handleKey(state:UiState,key:string,data:DashboardData,screen:Ren
   }
   if(state.tab==='Notes'&&!state.notes?.editing&&!state.help&&state.detail===undefined){const move:Record<string,number>={up:-1,down:1,pageup:-screen.bodyHeight,pagedown:screen.bodyHeight};if(key in move){state.notesScroll=Math.max(0,(state.notesScroll??0)+move[key]!);return;}if(key==='home'||key==='end'){state.notesScroll=key==='home'?0:Number.MAX_SAFE_INTEGER;return;}}
   if(state.editingFilter){if(key==='enter'||key==='escape'){state.editingFilter=false;state.cursor=0;state.cursorId=undefined;}else if(key==='backspace')state.filter=[...state.filter].slice(0,-1).join('');else if(key.length===1)state.filter+=key;return;}
+  if((key==='backspace'||key==='escape')&&!state.help&&state.detail===undefined&&!state.refSources&&!state.numberPrefix){const parent=inspectionParentKey(data,state);if(parent&&!state.notes?.editing){return{type:parent===state.boundSessionKey?'follow-bound':'select',sessionKey:parent};}if(key==='backspace')return;}
   if(key==='escape'){if(state.help)closeHelp(state);else closeDetail(state);state.numberPrefix='';state.notice=undefined;return;}
   if(key==='?'||key==='help'){if(state.help)closeHelp(state);else{state.helpReader={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};state.helpText=screen.rows[state.cursor]?.help??'Scroll to read recorded content; Escape returns to the previous entry.';if(state.boundSessionKey&&state.selectedKey!==state.boundSessionKey&&!state.pin)state.helpText+='\n\nYou are inspecting another agent. Escape closes this help; Shift+F then returns to following this panel’s bound agent.';state.readerSequence=(state.readerSequence??0)+1;state.helpViewId=state.readerSequence;state.help=true;state.cursor=0;state.cursorId=undefined;state.scroll=0;}return;}
   if(key==='q'||key==='ctrl+c')return {type:'quit'};

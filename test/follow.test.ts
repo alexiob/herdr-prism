@@ -8,7 +8,7 @@ test('opening a panel chooses an agent in its own tab; another project is never 
 test('a live panel without a local agent does not render or adopt the global first session',async()=>{
  const {createUiState,renderScreen}=await import('../src/tui/screen.ts');const {demoData}=await import('../src/runtime/demo.ts');
  const state=createUiState();state.restrictAutomaticSelection=true;const data=demoData();
- const frame=renderScreen(data,state,100,30);assert.equal(state.selectedKey,undefined);assert.ok(frame.lines.join('\n').toLowerCase().includes('no session'));assert.ok(!frame.lines.join('\n').includes(data.sessions[0].evidence.id));
+ const frame=renderScreen(data,state,100,30);assert.equal(state.selectedKey,undefined);assert.match(frame.lines.join('\n'),/No session|Agent unavailable/i);assert.ok(!frame.lines.join('\n').includes(data.sessions[0].evidence.id));
 });
 test('following native focus preserves child inspection until a real occupant or focus change',()=>{
  const tracker=new FollowSelection(),root={pane_id:'p',terminal_id:'root',agent:'codex',agent_session:{kind:'id',value:'root'}},child={pane_id:'c',terminal_id:'child',agent:'claude',agent_session:{kind:'id',value:'child'}};

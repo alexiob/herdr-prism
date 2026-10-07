@@ -7,7 +7,7 @@ import path from 'node:path';
 import { parseArguments } from '../runtime/actions.ts';
 import { serviceContext } from '../runtime/service.ts';
 import { acquireAdmission } from '../runtime/admission.ts';
-import { FollowSelection,clearInspectionOverlays,resumeBoundSelection,boundNoteAdoption, inspectorVisible, localSelection as selectLocal } from '../runtime/follow.ts';
+import { FollowSelection,clearInspectionOverlays,resumeBoundSelection,boundNoteAdoption,resolveNotesSessionKey, inspectorVisible, localSelection as selectLocal } from '../runtime/follow.ts';
 import { RemoteCollector } from '../runtime/remote-collector.ts';
 import {ViewFailureReporter} from '../runtime/view-failure.ts';
 import {panelViewStore,waitForPanelRecord} from '../runtime/panel-views.ts';
@@ -44,7 +44,7 @@ export async function main(argv = process.argv.slice(2)) {
     let inputQueue=Promise.resolve();
     let startupPhase='context';let failureReporter:ViewFailureReporter|undefined;
     const recordFailure=async(error:unknown,phase=startupPhase)=>{await failureReporter?.record(phase==='remote-start'?'remote:'+collector?.startupPhase:phase,error).catch(()=>{});};
-    const ensureNotes=async(reload=false)=>{if(state.tab!=='Notes'||!state.selectedKey||notes?.value?.editing||!panelVisible())return;const session=data.sessions.find(s=>s.key===state.selectedKey);if(!session||!notes)return;const changed=notes.value?.sessionKey!==session.key;if(changed&&notesStore&&ownNotesTerminalId){const identity=boundNoteAdoption(session,state.selectedKey,state.boundSessionKey,ownNotesTerminalId);if(identity)await notesStore.adoptOwnPlaceholder(identity);}await notes.open(session.key,session.evidence.title??session.evidence.id,reload);if(changed)state.notesScroll=0;state.notes=notes.value;};
+    const ensureNotes=async(reload=false)=>{const key=resolveNotesSessionKey(state);if(state.tab!=='Notes'||!key||notes?.value?.editing||!panelVisible())return;const session=data.sessions.find(s=>s.key===key);if(!session||!notes)return;const changed=notes.value?.sessionKey!==session.key;if(changed&&notesStore&&ownNotesTerminalId){const identity=boundNoteAdoption(session,key,state.boundSessionKey,ownNotesTerminalId);if(identity)await notesStore.adoptOwnPlaceholder(identity);}await notes.open(session.key,session.evidence.title??session.evidence.id,reload);if(changed)state.notesScroll=0;state.notes=notes.value;};
     const connectNotes=(dir:string)=>{notesStore=new NotesStore(dir);notes=new NotesController(notesStore);notes.on('change',()=>{state.notes=notes!.value;if(!closing)paint();});};
     const editorInput=async(event:any)=>{
         if(!notes?.value?.editing)return false;
@@ -114,7 +114,7 @@ export async function main(argv = process.argv.slice(2)) {
             syncVisibility = () => {
                 syncBoundSelection();
                 const visible=panelVisible();
-                collector!.setVisibleSession(state.selectedKey,visible);
+                collector!.setVisibleSession(state.tab==='Notes'?resolveNotesSessionKey(state):state.selectedKey,visible);
                 collector!.setProcessesExpanded(visible&&state.tab==='Processes');
             };
             if(preferences){
@@ -232,7 +232,7 @@ export async function main(argv = process.argv.slice(2)) {
                         }finally{referenceRequest=false;}return;
                     }
                     if(action.type==='tab'){contentRequest++;await notes?.end();await ensureNotes();return;}
-                    if(action.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});state.notice=undefined;return;}
+                    if(action.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===resolveNotesSessionKey(state))notes.begin({columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});state.notice=undefined;return;}
                     if(action.type==='select'){await notes?.end();contentRequest++;const selected=data.sessions.find(session=>session.key===action.sessionKey);if(selected){clearInspectionOverlays(state);state.selectedKey=selected.key;state.tab='Overview';state.cursor=0;state.cursorId=undefined;state.scroll=0;syncVisibility();collector!.invalidate();}return;}
                     if (action.type === 'focus') {
                         await notes?.end();
@@ -268,7 +268,7 @@ export async function main(argv = process.argv.slice(2)) {
                     }
                 };
                 const processInput=async (event:any)=>{try{
-                    if(await editorInput(event)){paint();if(!state.notes?.editing)await follow();return;}
+                    if(await editorInput(event)){if(!state.notes?.editing)await ensureNotes();paint();if(!state.notes?.editing)await follow();return;}
                     if (event.type === 'mouse') {
                         if (event.release)
                             return;
@@ -328,7 +328,7 @@ export async function main(argv = process.argv.slice(2)) {
             {state.selectedKey = action.sessionKey;if(action.type==='select')state.tab='Overview';}
         else if(action?.type==='terminate-process')state.notice=`Demo: simulated termination of PID ${action.processTarget!.pid}; no OS signal sent`;
         else if(action?.type==='tab')await ensureNotes();
-        else if(action?.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});}
+        else if(action?.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===resolveNotesSessionKey(state))notes.begin({columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});}
         else if (action?.type === 'message'){
             const target=action.document?.processTarget;
             const document=target?withProcessOutput(action.document!,{availability:'known',scope:'shared-terminal',pid:target.pid,owner:target.owner,processKey:target.key,capturedAt:Date.now(),text:'[DEMO] Shared harness terminal\n$ build\nCompiling project…\nBuild completed.\nThis fixture does not capture a real process.'}):action.document;

@@ -75,6 +75,26 @@ export function resumeBoundSelection(state:UiState,key=state.boundSessionKey):bo
  state.readers.set(`${key}:Overview:${state.view}`,{cursor:0,scroll:0});return true;
 }
 
+/** Back walks the inspected lineage only when it reaches this panel's owner. */
+export function inspectionParentKey(data:DashboardData,state:Pick<UiState,'boundSessionKey'|'selectedKey'>):string|undefined {
+ const bound=state.boundSessionKey;
+ if(!bound||state.selectedKey===bound)return;
+ const byKey=new Map(data.sessions.map(session=>[session.key,session]));
+ const selected=state.selectedKey?byKey.get(state.selectedKey):undefined;
+ const parent=selected?.parentKey?byKey.get(selected.parentKey):undefined;
+ const seen=new Set([state.selectedKey]);let cursor=parent;
+ while(cursor&&!seen.has(cursor.key)){
+  if(cursor.key===bound)return parent!.key;
+  seen.add(cursor.key);cursor=cursor.parentKey?byKey.get(cursor.parentKey):undefined;
+ }
+ return bound;
+}
+
+/** Notes stay with the panel owner; an active editor keeps its captured draft. */
+export function resolveNotesSessionKey(state:Pick<UiState,'boundSessionKey'|'selectedKey'|'notes'>):string|undefined {
+ return state.notes?.editing?state.notes.sessionKey:state.boundSessionKey??state.selectedKey;
+}
+
 /** Placeholder Notes belong only to this bound terminal's verified root conversation. */
 export function boundNoteAdoption(session:SessionView|undefined,key:string|undefined,boundKey:string|undefined,terminalId:string):{provider:string;terminalId:string;canonicalKey:string}|undefined {
  if(!session||!key||key!==boundKey||session.key!==key||session.parentKey||session.evidence.parentId||session.evidence.availability==='unavailable'||session.evidence.id.startsWith('pane-'))return;

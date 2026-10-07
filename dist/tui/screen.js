@@ -1,3 +1,4 @@
+import { inspectionParentKey } from "../runtime/follow.js";
 import { agentRows } from "./agents.js";
 import { renderNotes } from "./notes.js";
 import { orderedTabs } from "./types.js";
@@ -315,6 +316,9 @@ export function renderScreen(data, state, columns, height, now = Date.now()) {
 export function handleRowClick(state, x, y, data, screen) {
     if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1)
         return;
+    const navigation = screen.navigationRegions?.find(region => region.y === y && x >= region.x && x < region.x + region.width);
+    if (navigation)
+        return state.processConfirmation ? undefined : navigation.action;
     const tab = screen.tabRegions?.find(region => region.y === y && x >= region.x && x < region.x + region.width);
     if (tab)
         return state.processConfirmation ? undefined : changeTab(state, tab.tab);
@@ -470,6 +474,14 @@ export function handleKey(state, key, data, screen) {
         else if (key.length === 1)
             state.filter += key;
         return;
+    }
+    if ((key === 'backspace' || key === 'escape') && !state.help && state.detail === undefined && !state.refSources && !state.numberPrefix) {
+        const parent = inspectionParentKey(data, state);
+        if (parent && !state.notes?.editing) {
+            return { type: parent === state.boundSessionKey ? 'follow-bound' : 'select', sessionKey: parent };
+        }
+        if (key === 'backspace')
+            return;
     }
     if (key === 'escape') {
         if (state.help)

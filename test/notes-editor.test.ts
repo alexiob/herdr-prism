@@ -23,3 +23,16 @@ test('a small or resized Notes pane visibly pauses editing without accepting hid
  const {createUiState,renderScreen}=await import('../src/tui/screen.ts'),{demoData}=await import('../src/runtime/demo.ts');const data=demoData(),state=createUiState();state.tab='Notes';state.selectedKey=data.sessions[0]!.key;state.notes=controller.value;const frame=renderScreen(data,state,36,8);assert.match(frame.lines.join('\n'),/Editing paused/);assert.equal(frame.terminalCursor,undefined);assert.equal(frame.rows.some(row=>row.action?.type==='notes-edit'),false);
  await controller.end();assert.equal((await store.load('codex:one')).text,'Original');controller.begin({columns:36,height:8});assert.equal(controller.value.editing,false);
 });
+
+test('Notes distinguish an absent notebook from a deliberately saved empty notebook',async t=>{
+ const {createUiState}=await import('../src/tui/screen.ts');const {renderNotes}=await import('../src/tui/notes.ts');
+ const dir=await freshPrivateDirectory(join(tmpdir(),'prism-editor-persisted-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const store=new NotesStore(dir),controller=new editor.NotesController(store,10000);t.after(()=>controller.close());
+ await controller.open('codex:owner','Owner');assert.equal(controller.value.persisted,false);assert.equal(controller.value.status,'saved');
+ const state=createUiState();state.tab='Notes';state.selectedKey='codex:owner';state.notes=controller.value;
+ const data={sessions:[],updatedAt:0,stale:false,diagnostics:[]};let frame=renderNotes(data,state,50,18,0);
+ assert.match(frame.lines.at(-2)!,/^Empty/);assert.doesNotMatch(frame.lines.at(-2)!,/Saved/);assert.match(frame.rows[0]!.text,/Open editor/);
+ controller.begin();controller.key('a');controller.key('backspace');await controller.flush();assert.equal(controller.value.persisted,true);
+ await controller.end();state.notes=controller.value;frame=renderNotes(data,state,50,18,0);assert.match(frame.lines.at(-2)!,/^Saved/);
+ await controller.open('codex:owner','Owner',true);assert.equal(controller.value.persisted,true);assert.equal(controller.value.text,'');
+});

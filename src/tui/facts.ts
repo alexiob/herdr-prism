@@ -1,3 +1,5 @@
+import {sessionName} from './identity.ts';
+import {resolveNotesSessionKey} from '../runtime/follow.ts';
 import {outputHelp} from '../process/output.ts';
 import {accountRows} from './account.ts';
 import type {DashboardData,SessionView,UiState,ScreenRow,DetailDocument,DetailSection,DetailField,UiRef} from './types.ts';
@@ -126,11 +128,17 @@ export function overviewRows(session:SessionView,state:UiState,now:number,data:D
  if(e.task)add('task','Task',e.task,workDocument(session,'task',data,now),'Work',1);
  add('process-uptime','Timing',`Harness uptime ${duration(t.uptime)} · current turn ${duration(t.elapsed)}`,timingDocument(session,now),'Work',1,'duration');
  rows.at(-1)!.value=`${age(e.startedAt,now)} session · ${duration(t.elapsed)} turn`;
+ const recordedWorker=state.boundSessionKey&&session.key!==state.boundSessionKey&&!session.attachment&&!session.attachments?.length&&!r?.processes.length;
+ if(recordedWorker){
+  const owner=data.sessions.find(value=>value.key===state.boundSessionKey);
+  rows.push({id:'resource-owner',section:'Resources',column:0,label:'Processes',value:'No live process · return to '+sessionName(owner),text:'No live process · return to '+sessionName(owner),role:'warning',help:'This is a recorded worker with no live process. Its CPU and RSS cannot be measured. Enter returns to the owning agent and its live resources. Esc or Backspace returns to the parent; Shift+F returns directly to the owning agent. These actions do not focus another native pane.',action:{type:'follow-bound',sessionKey:state.boundSessionKey}});
+ }else{
  const cpuValue=aggregateCpu(session),memoryValue=resident(r?.memoryBytes),metricWidth=Math.max(8,cellWidth(cpuValue),cellWidth(memoryValue));
  add('cpu','CPU',`${pad(cpuValue,metricWidth)} ${resourceHistory(session,'cpu',8,state.ascii,now).chart}`,resourceDocument(session,'cpu',state,now),'Resources',0,'quantity');
  add('memory',r?.memoryLabel==='working-set sum'?'WS sum':'RSS sum',`${pad(memoryValue,metricWidth)} ${resourceHistory(session,'memory',8,state.ascii,now).chart}`,resourceDocument(session,'memory',state,now),'Resources',0,'quantity');
  rows.at(-1)!.gapBefore=1;
  link('coverage','Processes',r?.coverage?`${r.coverage.readable}/${r.coverage.total} readable`:'—','Processes','Resources',0);
+ }
  add('context','Context',u?.contextPercent===undefined?'—':percent(u.contextPercent)+' '+meter(u.contextPercent,8,state.ascii),usageDocument(session,now),'Usage',0,'quantity');
  add('tokens','Tokens',`in ${number(u?.input)} · out ${number(u?.output)}`,usageDocument(session,now),'Usage',0,'quantity');
  const turn=u?.turnUsage;if(turn)add('turn-tokens',e.activeTurn?.id===turn.turnId?'Current turn':'Last recorded turn',`in ${number(turn.input)} · out ${number(turn.output)}`,usageDocument(session,now),'Usage',0,'quantity');
@@ -144,6 +152,8 @@ export function overviewRows(session:SessionView,state:UiState,now:number,data:D
  const interAgent=e.messages.filter(m=>m.kind==='inter-agent').length;if(interAgent)link('inter-agent-messages','Agent chat',`${interAgent} retained`,'Messages','Activity');
  link('refs','Refs',`${session.refs?.length??'—'} targets · ${session.refCoverage??'retained'}`,'Refs','Activity');
  link('todo','To-do',`${['reported','empty'].includes(session.todoStatus??'')?session.todos?.filter(todo=>!todo.checked).length??0:'—'} pending · ${session.todoStatus??'not reported'}`,'To-do','Activity');
- link('notes','Notes',state.notes?.sessionKey===session.key?state.notes.status:'Open editor','Notes','Activity');
+ const notebookKey=resolveNotesSessionKey(state),notebook=data.sessions.find(value=>value.key===notebookKey),notebookStatus=state.notes&&state.notes.sessionKey===notebookKey?(state.notes.persisted===false&&state.notes.status==='saved'?'Open editor':state.notes.status):'Open editor';
+ link('notes','Notes',notebookStatus+(notebookKey!==session.key?' · '+sessionName(notebook):''),'Notes','Activity');
+ rows.at(-1)!.help='Notes belong to '+sessionName(notebook)+', the owning agent for this panel. Inspecting workers does not switch its notebook. Notes survive updates and panel restarts. Enter opens the notebook; Enter there edits; Ctrl+S saves immediately; text also autosaves.';
  return rows;
 }

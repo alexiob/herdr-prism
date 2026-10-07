@@ -58,3 +58,31 @@ test('free scrolling an editor with a visible caret preserves its exact source p
   assert.equal(frame.terminalCursor?.line,region.y+1);
   assert.equal(frame.terminalCursor?.column,7);
 });
+
+test('Notes explain their bound owner and edit that owner while a child is inspected',()=>{
+  const state=reader('OWNER NOTE');state.boundSessionKey='notes-agent';state.selectedKey='child-agent';
+  const ownerData:DashboardData={...data,sessions:[{key:'notes-agent',depth:0,children:['child-agent'],evidence:{id:'root',title:'Primary agent',provider:'codex',messages:[],tools:[],usage:[],goals:[],availability:'known'}},{key:'child-agent',depth:1,parentKey:'notes-agent',children:[],evidence:{id:'child',title:'Completed child',state:'done',provider:'codex',messages:[],tools:[],usage:[],goals:[],availability:'known'}}]};
+  const frame=renderNotes(ownerData,state,60,18,0);
+  assert.equal(frame.rows[0]!.action?.sessionKey,'notes-agent');
+  assert.ok(frame.lines.some(line=>line.includes('Notes for Primary agent')));
+  assert.doesNotMatch(frame.lines.at(-2)!,/Transcript only|Completed child/);
+  assert.match(frame.lines.at(-1)!,/back to agent/);
+  assert.equal(state.notes!.sessionKey,'notes-agent');
+});
+
+test('Notes hide the previous owner source while another bound owner is loading',()=>{
+  const state=reader('PREVIOUS OWNER SOURCE');state.boundSessionKey='new-owner';state.selectedKey='child-agent';
+  const frame=renderNotes(data,state,50,18,0);
+  assert.equal(frame.rows[0]!.action?.sessionKey,'new-owner');
+  assert.doesNotMatch(frame.lines.join('\n'),/PREVIOUS OWNER SOURCE/);
+  assert.match(frame.lines.at(-2)!,/Loading/);
+  assert.equal(state.notes!.text,'PREVIOUS OWNER SOURCE');
+});
+
+test('an editing notebook retains its captured owner when binding and selection change',()=>{
+  const state=reader('CAPTURED OWNER SOURCE',true);state.boundSessionKey='new-owner';state.selectedKey='child-agent';
+  const frame=renderNotes(data,state,50,18,0);
+  assert.equal(frame.rows[0]!.action?.sessionKey,'notes-agent');
+  assert.match(frame.lines.join('\n'),/CAPTURED OWNER SOURCE/);
+  assert.equal(state.notes!.sessionKey,'notes-agent');
+});

@@ -32,3 +32,23 @@ test('placeholder Notes adoption requires the exact bound verified root and neve
  assert.equal(boundNoteAdoption({...session,key:'codex:pane-own',evidence:{...session.evidence,id:'pane-own'}},'codex:pane-own','codex:pane-own','own'),undefined);
  assert.equal(boundNoteAdoption({...session,evidence:{...session.evidence,id:'foreign'}},'codex:verified','codex:verified','own'),undefined);
 });
+test('Notes resolve the panel owner while inspected workers retain their own reader selection',async()=>{
+ const {resolveNotesSessionKey}=await import('../src/runtime/follow.ts') as any;assert.equal(typeof resolveNotesSessionKey,'function');
+ const state=createUiState();state.selectedKey='codex:worker';state.boundSessionKey='codex:owner';assert.equal(resolveNotesSessionKey(state),'codex:owner');assert.equal(state.selectedKey,'codex:worker');
+ state.boundSessionKey=undefined;assert.equal(resolveNotesSessionKey(state),'codex:worker','unbound demo readers retain their selected notebook');state.selectedKey=undefined;assert.equal(resolveNotesSessionKey(state),undefined);
+});
+test('an editing owner notebook holds its captured identity until the draft is saved',async()=>{
+ const {resolveNotesSessionKey}=await import('../src/runtime/follow.ts') as any;assert.equal(typeof resolveNotesSessionKey,'function');
+ const state=createUiState();state.selectedKey='codex:worker';state.boundSessionKey='codex:new-owner';state.notes={sessionKey:'codex:old-owner',title:'Fixture',text:'Unsaved fixture',cursor:0,editing:true,status:'dirty'};
+ assert.equal(resolveNotesSessionKey(state),'codex:old-owner');assert.equal(state.notes.sessionKey,'codex:old-owner');assert.equal(state.notes.text,'Unsaved fixture');state.notes.editing=false;assert.equal(resolveNotesSessionKey(state),'codex:new-owner');
+});
+test('inspection parent navigation climbs within the bound owner tree before returning to its owner',async()=>{
+ const {inspectionParentKey}=await import('../src/runtime/follow.ts') as any;assert.equal(typeof inspectionParentKey,'function');
+ const data:any={sessions:[{key:'owner'},{key:'worker',parentKey:'owner'},{key:'nested',parentKey:'worker'}]},state=createUiState();state.boundSessionKey='owner';state.selectedKey='nested';assert.equal(inspectionParentKey(data,state),'worker');state.selectedKey='worker';assert.equal(inspectionParentKey(data,state),'owner');state.selectedKey='owner';assert.equal(inspectionParentKey(data,state),undefined);
+});
+test('inspection parent navigation falls back to its owner for missing parents, cycles and pinned foreign roots',async()=>{
+ const {inspectionParentKey}=await import('../src/runtime/follow.ts') as any;assert.equal(typeof inspectionParentKey,'function');
+ const state=createUiState();state.boundSessionKey='owner';state.selectedKey='worker';const data:any={sessions:[{key:'owner'},{key:'worker',parentKey:'missing'}]};assert.equal(inspectionParentKey(data,state),'owner');
+ data.sessions=[{key:'owner'},{key:'worker',parentKey:'loop'},{key:'loop',parentKey:'worker'}];assert.equal(inspectionParentKey(data,state),'owner');
+ data.sessions=[{key:'owner'},{key:'foreign-root'},{key:'foreign-worker',parentKey:'foreign-root'}];state.pin=true;state.selectedKey='foreign-worker';assert.equal(inspectionParentKey(data,state),'owner');state.selectedKey='foreign-root';assert.equal(inspectionParentKey(data,state),'owner');state.boundSessionKey=undefined;assert.equal(inspectionParentKey(data,state),undefined);
+});

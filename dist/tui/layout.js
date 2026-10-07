@@ -1,3 +1,5 @@
+import { resolveNotesSessionKey, inspectionParentKey } from "../runtime/follow.js";
+import { sessionName } from "./identity.js";
 import { orderedTabs, tabLabel } from "./types.js";
 import { span, pad, summary, readableWrap, valueSpans, asciiText, fitSpans } from "./widgets.js";
 import { cellWidth, truncate, age } from "./text.js";
@@ -20,11 +22,38 @@ export function groupRows(rows, fallback) {
 export function renderLayout(data, state, sections, columns, height, now, numericTargets = new Map(), document, minimumBodyRows = 1) {
     columns = Math.max(1, Math.floor(columns));
     height = Math.max(1, Math.floor(height));
-    const session = data.sessions.find(s => s.key === state.selectedKey) ?? (!state.restrictAutomaticSelection && !state.notes?.editing ? data.sessions[0] : undefined);
-    const name = session?.evidence.title ?? session?.evidence.id ?? state.notes?.title ?? 'No session', provider = session?.evidence.provider ?? '—', model = session?.evidence.model ?? session?.usage?.model ?? 'model —';
-    const inspecting = Boolean(state.boundSessionKey && state.selectedKey !== state.boundSessionKey && !state.pin), transcriptOnly = inspecting && session && !session.attachment && !session.attachments?.length;
-    const mode = state.pin ? 'Pinned' : inspecting ? 'Inspecting · Shift+F follow' : 'Follow', server = data.server ? data.server.host + '/' + data.server.session : 'Server —', scope = state.subtree ? 'Subtree' : 'Self + jobs';
-    const header = [[span(`${data.demo ? '[DEMO] ' : ''}Prism · ${name}`, 'accent')], [span(`${provider} · ${model} · ${session?.evidence.state ?? 'unknown'}`, 'identity')], [span(inspecting ? `${mode} · ${server} · ${scope}` : `${server} · ${scope} · ${mode}`, inspecting ? 'warning' : 'secondary')]];
+    const notebook = state.tab === 'Notes' && !state.help && state.detail === undefined;
+    const displayedKey = notebook ? resolveNotesSessionKey(state) : state.selectedKey;
+    const session = data.sessions.find(s => s.key === displayedKey) ?? (!notebook && !state.restrictAutomaticSelection && !state.notes?.editing ? data.sessions[0] : undefined);
+    const name = session ? sessionName(session) : notebook && state.notes && state.notes.sessionKey === displayedKey ? state.notes.title : 'Agent unavailable', provider = session?.evidence.provider ?? '—', model = session?.evidence.model ?? session?.usage?.model ?? 'model —';
+    const inspecting = Boolean(!notebook && state.boundSessionKey && displayedKey !== state.boundSessionKey), transcriptOnly = inspecting && session && !session.attachment && !session.attachments?.length;
+    const header = [[span(`${data.demo ? '[DEMO] ' : ''}${name}`, 'accent')], [span(`${provider} · ${model} · ${session?.evidence.state ?? 'unknown'}${state.pin && !notebook ? ' · Pinned' : ''}`, 'identity')]];
+    const navigationRegions = [];
+    if (inspecting) {
+        const parentKey = inspectionParentKey(data, state), parent = data.sessions.find(s => s.key === parentKey), owner = data.sessions.find(s => s.key === state.boundSessionKey);
+        const descriptor = transcriptOnly ? 'Recorded worker' : 'Worker view';
+        const prefix = columns >= 50 ? descriptor + ' ' : columns >= 20 ? 'Worker ' : '';
+        const line = [span(prefix, 'warning')];
+        let used = cellWidth(prefix);
+        const buttons = [];
+        if (parentKey && parentKey !== state.boundSessionKey)
+            buttons.push({ label: '← Parent: ' + sessionName(parent), short: '← Parent', action: { type: 'select', sessionKey: parentKey } });
+        buttons.push({ label: '↑ Owning agent: ' + sessionName(owner), short: '↑ Owner', action: { type: 'follow-bound', sessionKey: state.boundSessionKey } });
+        for (const [i, button] of buttons.entries()) {
+            const remaining = columns - used - (buttons.length - i - 1), width = Math.max(0, Math.floor(remaining / (buttons.length - i)));
+            if (!width)
+                continue;
+            const label = summary(columns >= 50 ? button.label : button.short, width);
+            navigationRegions.push({ x: used + 1, y: header.length + 1, width: cellWidth(label), action: button.action });
+            line.push({ ...span(label, 'accent'), surface: 'tab', bold: true });
+            used += cellWidth(label);
+            if (used < columns) {
+                line.push(span(' '));
+                used++;
+            }
+        }
+        header.push(line);
+    }
     let tabLine = [], used = 0;
     const tabRegions = [];
     const order = orderedTabs(state), labels = order.map(tab => tabLabel(tab, columns < 50));
@@ -45,7 +74,8 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
     if (tabLine.length)
         finish();
     const footerRows = Math.min(2, Math.max(0, height - 1)), headerBudget = Math.max(0, height - footerRows - Math.min(Math.max(1, minimumBodyRows), height - footerRows));
-    const removeHeader = (at) => { header.splice(at, 1); for (const region of tabRegions)
+    const removeHeader = (at) => { header.splice(at, 1); for (const region of navigationRegions)
+        region.y = region.y === at + 1 ? 0 : region.y > at + 1 ? region.y - 1 : region.y; for (const region of tabRegions)
         region.y = region.y === at + 1 ? 0 : region.y > at + 1 ? region.y - 1 : region.y; };
     // Keep the active tab and at least one content line, even in a one-cell terminal.
     for (let n = 0; n < 2 && header.length > headerBudget; n++)
@@ -269,10 +299,14 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
     while (readers.size > 96)
         readers.delete(readers.keys().next().value);
     const messageReader = session && state.tab === 'Messages' ? state.messageReaders.get(session.key) : undefined;
-    const status = state.notice ?? `${inspecting ? transcriptOnly ? 'Transcript only · Shift+F follow bound agent · ' : 'Inspecting · Shift+F follow bound agent · ' : ''}${data.stale ? 'STALE · ' : ''}${messageReader?.newCount ? `${messageReader.newCount} new · ` : messageReader?.following ? 'Following end · ' : ''}${document?.capturedAt !== undefined ? 'Snapshot ' + age(document.capturedAt, now) : 'Evidence ' + age(data.updatedAt, now)} ago`;
+    const status = state.notice ?? `${data.server ? data.server.host + '/' + data.server.session + ' · ' : ''}${inspecting ? transcriptOnly ? 'Recorded worker · Esc parent · Shift+F owning agent · ' : 'Worker view · Esc parent · Shift+F owning agent · ' : notebook ? '' : 'Following ' + name + ' · '}${data.stale ? 'STALE · ' : ''}${messageReader?.newCount ? `${messageReader.newCount} new · ` : messageReader?.following ? 'Following end · ' : ''}${document?.capturedAt !== undefined ? 'Snapshot ' + age(document.capturedAt, now) : 'Evidence ' + age(data.updatedAt, now)} ago`;
     let controls = state.processConfirmation && !state.help ? 'Enter choose · y confirm · Esc cancel · ? help' : state.editingFilter ? 'Filter: ' + state.filter : state.numberPrefix ? 'Prism agent: ' + state.numberPrefix + ' · Enter' : state.help ? '↑↓ scroll · Esc back · ? help' : document?.processTarget ? '←→ panel · r output · Shift+K terminate · Esc · ? help' : document ? '←→ panel · ↑↓ entries · Pg scroll · Esc · ?' : state.tab === 'Processes' ? '←→ panel · Enter · Shift+K terminate · ?' : state.tab === 'Agents' ? 'Enter inspect · f focus · ←→ panel · ?' : '←→ panel · ↑↓ entries · Pg scroll · Enter · ?';
-    if (inspecting && !state.help && !state.editingFilter)
-        controls += ' · Shift+F follow';
+    if (inspecting && !state.help && !state.editingFilter && !state.processConfirmation) {
+        const back = document || state.refSources ? 'Esc back' : 'Esc parent';
+        controls += ' · ' + back + ' · Shift+F owner';
+        if (cellWidth(controls) > columns && !document?.processTarget)
+            controls = back + ' · Shift+F owner';
+    }
     if (document?.processTarget && !state.help && cellWidth(controls) > columns)
         controls = inspecting ? 'r output · Shift+K · Esc · Shift+F' : 'r output · Shift+K · Esc · ?';
     const spans = [...header, ...body, ...footerRows === 2 ? [[span(status, data.stale || transcriptOnly ? 'warning' : 'secondary')], [span(controls, 'secondary')]] : footerRows === 1 ? [[span(controls, 'secondary')]] : []];
@@ -283,5 +317,5 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
         spans[i] = fitSpans(spans[i], columns);
     }
     const selectedRegion = rowRegions.find(region => region.index === state.cursor), lines = spans.map(line => line.map(part => part.text).join(''));
-    return { lines, spans, rows, selectedLine: rows[state.cursor]?.selectable === false ? undefined : selectedRegion ? selectedRegion.y - 1 : undefined, bodyStart, bodyHeight, numericTargets, rowRegions, tabRegions: tabRegions.filter(region => region.y > 0), sectionRegions, theme: state.monochrome ? 'mono' : state.theme ?? 'dark' };
+    return { lines, spans, rows, selectedLine: rows[state.cursor]?.selectable === false ? undefined : selectedRegion ? selectedRegion.y - 1 : undefined, bodyStart, bodyHeight, numericTargets, rowRegions, tabRegions: tabRegions.filter(region => region.y > 0), navigationRegions: navigationRegions.filter(region => region.y > 0), sectionRegions, theme: state.monochrome ? 'mono' : state.theme ?? 'dark' };
 }

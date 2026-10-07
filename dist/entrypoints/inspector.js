@@ -7,7 +7,7 @@ import path from 'node:path';
 import { parseArguments } from "../runtime/actions.js";
 import { serviceContext } from "../runtime/service.js";
 import { acquireAdmission } from "../runtime/admission.js";
-import { FollowSelection, clearInspectionOverlays, resumeBoundSelection, boundNoteAdoption, inspectorVisible, localSelection as selectLocal } from "../runtime/follow.js";
+import { FollowSelection, clearInspectionOverlays, resumeBoundSelection, boundNoteAdoption, resolveNotesSessionKey, inspectorVisible, localSelection as selectLocal } from "../runtime/follow.js";
 import { RemoteCollector } from "../runtime/remote-collector.js";
 import { ViewFailureReporter } from "../runtime/view-failure.js";
 import { panelViewStore, waitForPanelRecord } from "../runtime/panel-views.js";
@@ -52,10 +52,10 @@ export async function main(argv = process.argv.slice(2)) {
     let startupPhase = 'context';
     let failureReporter;
     const recordFailure = async (error, phase = startupPhase) => { await failureReporter?.record(phase === 'remote-start' ? 'remote:' + collector?.startupPhase : phase, error).catch(() => { }); };
-    const ensureNotes = async (reload = false) => { if (state.tab !== 'Notes' || !state.selectedKey || notes?.value?.editing || !panelVisible())
-        return; const session = data.sessions.find(s => s.key === state.selectedKey); if (!session || !notes)
+    const ensureNotes = async (reload = false) => { const key = resolveNotesSessionKey(state); if (state.tab !== 'Notes' || !key || notes?.value?.editing || !panelVisible())
+        return; const session = data.sessions.find(s => s.key === key); if (!session || !notes)
         return; const changed = notes.value?.sessionKey !== session.key; if (changed && notesStore && ownNotesTerminalId) {
-        const identity = boundNoteAdoption(session, state.selectedKey, state.boundSessionKey, ownNotesTerminalId);
+        const identity = boundNoteAdoption(session, key, state.boundSessionKey, ownNotesTerminalId);
         if (identity)
             await notesStore.adoptOwnPlaceholder(identity);
     } await notes.open(session.key, session.evidence.title ?? session.evidence.id, reload); if (changed)
@@ -169,7 +169,7 @@ export async function main(argv = process.argv.slice(2)) {
             syncVisibility = () => {
                 syncBoundSelection();
                 const visible = panelVisible();
-                collector.setVisibleSession(state.selectedKey, visible);
+                collector.setVisibleSession(state.tab === 'Notes' ? resolveNotesSessionKey(state) : state.selectedKey, visible);
                 collector.setProcessesExpanded(visible && state.tab === 'Processes');
             };
             if (preferences) {
@@ -401,7 +401,7 @@ export async function main(argv = process.argv.slice(2)) {
                     }
                     if (action.type === 'notes-edit') {
                         await ensureNotes(true);
-                        if (notes && notes.value?.sessionKey === state.selectedKey)
+                        if (notes && notes.value?.sessionKey === resolveNotesSessionKey(state))
                             notes.begin({ columns: ui.columns, height: ui.rows, tabOrder: state.tabOrder });
                         state.notice = undefined;
                         return;
@@ -462,6 +462,8 @@ export async function main(argv = process.argv.slice(2)) {
                 const processInput = async (event) => {
                     try {
                         if (await editorInput(event)) {
+                            if (!state.notes?.editing)
+                                await ensureNotes();
                             paint();
                             if (!state.notes?.editing)
                                 await follow();
@@ -557,7 +559,7 @@ export async function main(argv = process.argv.slice(2)) {
                     await ensureNotes();
                 else if (action?.type === 'notes-edit') {
                     await ensureNotes(true);
-                    if (notes && notes.value?.sessionKey === state.selectedKey)
+                    if (notes && notes.value?.sessionKey === resolveNotesSessionKey(state))
                         notes.begin({ columns: ui.columns, height: ui.rows, tabOrder: state.tabOrder });
                 }
                 else if (action?.type === 'message') {

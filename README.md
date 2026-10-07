@@ -269,7 +269,8 @@ shortcuts; it does not reload Prism's `settings.json`.**
 | `Shift+F` | Return an inspected session to this panel's bound agent |
 | `f` in Agents | Explicitly focus the selected live Herdr pane |
 | `Space` | Fold/expand; open a reference's source history |
-| `Escape` | Return from details or close help/filter |
+| `Escape` | Return from details or close help/filter; otherwise return to the inspected worker's parent |
+| `Backspace` outside editors, filters and details | Return to the inspected worker's parent |
 | `b` / `B` | Load older messages/refs / reload reference history |
 | `p` / `u` / `w` | Pin session / subtree scope / Agents worktree grouping |
 | `s` / `y` / `x` | Jump to source / copy / check or reopen To-do |
@@ -295,13 +296,22 @@ share a left edge and have a blank line between them.
 
 Agents shows this panel’s owner and only its recorded sub-agent tree. Each worker
 has a concise status and reported task or goal; unrelated host sessions are excluded.
-Enter inspects a worker, d opens its identity, f explicitly focuses a live pane, and
-Shift+F returns to the panel owner. Worktree grouping also stays within this tree.
+Enter inspects a worker inside Prism. Its name replaces the owner’s name, and a
+**Worker view** banner provides clickable **Parent** (for nested workers) and
+**Owning agent** controls. `Escape` or `Backspace` returns one level outside
+details/help/editors; `Shift+F` returns directly to the owner’s Overview. These
+controls change only Prism’s view. `d` opens complete identity; `f` explicitly
+focuses a live pane. Worktree grouping also stays within this tree.
 
 Fact details align quiet labels with colored quantities, identities, paths,
 durations and Git changes. Long rows show a concise summary; Enter retains full
 wrapped content. Dark, light and monochrome themes are supported through
 `inspector --theme dark|light|mono` or the persisted `theme` setting.
+
+Notes always belong to the panel’s owning agent, even while inspecting a worker.
+The Notes header names that owner; worker navigation never switches notebooks.
+An unwritten notebook is labeled **Empty**, rather than **Saved**. Updates retain
+Markdown in Prism’s private server state outside the plugin checkout.
 
 In Notes edit mode, `q`, `p`, `/`, `?`, numbers and spaces are literal text.
 Arrows, Home/End, Backspace/Delete and bracketed paste edit the source. A pane
@@ -342,9 +352,13 @@ same agent reuses that agent's panel. Follow tracks that bound pane's conversati
 so focusing a neighboring agent does not move an existing inspector. Explicit
 child/history inspection stays selected until the bound conversation changes.
 Pinning and Notes editing hold the selected conversation.
-The header distinguishes **Follow**, **Inspecting** and **Pinned**. Press
-`Shift+F` to return to the bound agent after inspecting a child or historical
-session. A transcript-only session has no verified live process to sample.
+The normal header shows the agent’s name, then its harness, model and activity.
+Server identity and sample age appear in the footer. Worker inspection adds the
+return controls described above; pinning is labeled **Pinned**. A **Recorded worker**
+has retained transcript evidence but no verified live process. Its Overview explains
+that limitation and offers a return to the owning agent instead of empty resource
+charts. Live CPU and RSS remain cumulative over the selected agent and its verified
+owned processes.
 
 New panels aim for **60 columns**, constrained by the available split
 space. Resize a panel using Herdr's normal pane-resize controls; Prism saves that

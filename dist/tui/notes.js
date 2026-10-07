@@ -4,6 +4,8 @@ import { noteLimit } from "../state/notes.js";
 import { sanitize, cellWidth, truncate } from "./text.js";
 import { span, pad, fitSpans, asciiText } from "./widgets.js";
 import { renderLayout } from "./layout.js";
+import { resolveNotesSessionKey } from "../runtime/follow.js";
+import { sessionName } from "./identity.js";
 export function notesEditorFits(viewport) {
     let lines = 1, used = 0;
     for (const tab of viewport.tabOrder ?? tabs) {
@@ -41,7 +43,7 @@ export class NotesController extends EventEmitter {
         const note = await this.store.load(sessionKey);
         this.revision = note.revision;
         this.recovery = undefined;
-        this.value = { sessionKey, title, text: note.text, cursor: 0, editing: false, status: 'saved' };
+        this.value = { sessionKey, title, text: note.text, cursor: 0, editing: false, persisted: note.revision !== null, status: 'saved' };
         this.changed();
     }
     begin(viewport) { if (viewport && !notesEditorFits(viewport))
@@ -135,6 +137,7 @@ export class NotesController extends EventEmitter {
                     }
                     else
                         this.revision = saved.revision;
+                    value.persisted = true;
                     value.savedAt = Date.now();
                     value.status = this.dirty ? 'dirty' : saved.conflict ? 'conflict' : 'saved';
                     value.error = saved.conflict ? 'External edit preserved; this draft is saved separately.' : undefined;
@@ -166,11 +169,11 @@ export class NotesController extends EventEmitter {
 export function renderNotes(data, state, columns, height, now) {
     columns = Math.max(1, Math.floor(columns));
     height = Math.max(1, Math.floor(height));
-    const note = state.notes, editing = note?.editing === true;
-    const inspecting = Boolean(state.boundSessionKey && state.selectedKey !== state.boundSessionKey && !state.pin && !editing), session = data.sessions.find(session => session.key === state.selectedKey);
-    const inspection = inspecting ? (session && !session.attachment && !session.attachments?.length ? 'Transcript only' : 'Inspecting') : undefined;
+    const notesKey = resolveNotesSessionKey(state), note = state.notes?.sessionKey === notesKey ? state.notes : undefined, editing = note?.editing === true;
+    const owner = data.sessions.find(session => session.key === notesKey), ownerName = owner ? sessionName(owner) : note?.title ?? 'this agent';
+    const title = `Notes for ${ownerName}`, inspecting = Boolean(state.boundSessionKey && state.selectedKey !== state.boundSessionKey && !state.pin && !editing);
     const returnHint = inspecting && !state.editingFilter;
-    const action = { id: 'notes-edit', text: 'Edit Markdown notes', help: 'Enter edits. Text autosaves after 500 ms. Escape returns to reading; Ctrl+S flushes. Follow is held while editing. Tab leaves after saving. Complete Prism removal deletes notes.', action: { type: 'notes-edit', sessionKey: state.selectedKey } };
+    const action = { id: 'notes-edit', text: note?.persisted === false ? 'Open editor' : 'Edit Markdown notes', help: `${title}. Enter edits this agent's notebook. Text autosaves after 500 ms. Escape returns to reading; Ctrl+S flushes. Follow is held while editing. Tab leaves after saving. Complete Prism removal deletes notes.`, action: { type: 'notes-edit', sessionKey: notesKey } };
     if (note?.recoveryPath)
         action.help += ' Recovery draft: ' + note.recoveryPath;
     const requestedScroll = state.notesScroll ?? state.scroll;
@@ -186,7 +189,7 @@ export function renderNotes(data, state, columns, height, now) {
         }
         return small;
     }
-    const frame = renderLayout(data, state, [{ id: 'notes', title: 'Markdown notes', rows: [action] }], columns, height, now, new Map(), undefined, 3);
+    const frame = renderLayout(data, state, [{ id: 'notes', title, rows: [action] }], columns, height, now, new Map(), undefined, 3);
     const sourceAction = frame.rowRegions?.find(region => region.index === 0), actionParts = sourceAction ? frame.spans[sourceAction.y - 1] : undefined;
     const framed = frame.bodyHeight >= 4, showAction = frame.bodyHeight >= 2;
     const first = frame.bodyStart + (framed ? 1 : 0) + (showAction ? 1 : 0), visible = frame.bodyHeight - (framed ? 2 : 0) - (showAction ? 1 : 0);
@@ -228,7 +231,7 @@ export function renderNotes(data, state, columns, height, now) {
     frame.rows = [action, ...lines.map((line, index) => ({ id: `notes-line:${index}`, section: 'notes', text: line.text, selectable: false, band: false, help: action.help }))];
     frame.rowRegions = [];
     if (framed) {
-        const heading = '┌ ' + truncate('Markdown notes', Math.max(1, columns - 4)) + ' ';
+        const heading = '┌ ' + truncate(title, Math.max(1, columns - 4)) + ' ';
         setLine(frame.bodyStart, [span(heading, 'accent'), span('─'.repeat(Math.max(0, columns - cellWidth(heading) - 1)) + '┐', 'border')]);
     }
     if (showAction) {
@@ -240,7 +243,7 @@ export function renderNotes(data, state, columns, height, now) {
     else
         frame.selectedLine = undefined;
     for (let offset = 0; offset < visible; offset++) {
-        const index = scroll + offset, line = lines[index], raw = line?.text ?? (!text && offset === 0 ? 'No notes yet. Enter to write.' : '');
+        const index = scroll + offset, line = lines[index], raw = offset === 0 && !note ? 'Loading notes…' : index === 0 && !text ? 'No notes yet. Open editor to write.' : line?.text ?? '';
         setLine(first + offset, inset ? [span('│ ', 'border'), span(pad(raw, room), /^#{1,6} /.test(raw) ? 'accent' : 'text'), span(' │', 'border')] : [span(raw, /^#{1,6} /.test(raw) ? 'accent' : 'text')]);
         if (line)
             frame.rowRegions.push({ index: index + 1, x: inset + 1, y: first + offset + 1, width: room, display: line.text });
@@ -249,10 +252,10 @@ export function renderNotes(data, state, columns, height, now) {
         setLine(frame.bodyStart + frame.bodyHeight - 1, [span('└' + '─'.repeat(Math.max(0, columns - 2)) + '┘', 'border')]);
     const indices = lines.map((_, index) => index + 1);
     frame.sectionRegions = [{ id: 'notes', x: 1, y: first + 1, width: columns, height: visible, contentHeight: visible, total: lines.length, scroll, indices, lineIndices: indices }];
-    const status = state.notice ?? note?.error ?? (note ? `${editing ? 'Editing · ' : ''}${note.status === 'saved' ? 'Saved' : note.status === 'conflict' ? 'Draft saved · external edit preserved' : note.status}${inspection ? ' · ' + inspection : ''}${note.savedAt ? ' · ' + new Date(note.savedAt).toLocaleTimeString() : ''}` : `Loading notes…${inspection ? ' · ' + inspection : ''}`);
+    const status = state.notice ?? note?.error ?? (note ? `${editing ? 'Editing · ' : ''}${note.status === 'saved' ? note.persisted === false ? 'Empty' : 'Saved' : note.status === 'conflict' ? 'Draft saved · external edit preserved' : note.status}${note.savedAt ? ' · ' + new Date(note.savedAt).toLocaleTimeString() : ''}` : 'Loading notes…');
     if (height >= 3)
-        setLine(height - 2, [span(status, note?.status === 'error' || note?.status === 'conflict' || inspection === 'Transcript only' ? 'warning' : 'secondary')]);
-    const controls = editing ? 'Ctrl+S save · Esc read · Tab leave' : 'Enter edit · ↑↓ scroll · ? help · q', readingControls = returnHint ? (cellWidth('Shift+F follow · ' + controls) <= columns ? 'Shift+F follow · ' + controls : 'Shift+F follow · Enter · ?') : controls;
+        setLine(height - 2, [span(status + (data.server ? ' · ' + data.server.host + '/' + data.server.session : ''), note?.status === 'error' || note?.status === 'conflict' ? 'warning' : 'secondary')]);
+    const controls = editing ? 'Ctrl+S save · Esc read · Tab leave' : 'Enter edit · ↑↓ scroll · ? help · q', readingControls = returnHint ? (cellWidth('Shift+F back to agent · ' + controls) <= columns ? 'Shift+F back to agent · ' + controls : 'Shift+F back to agent · Enter · ?') : controls;
     if (height >= 2)
         setLine(height - 1, [span(readingControls, 'secondary')]);
     if (editing && cursorLine >= scroll && cursorLine < scroll + visible) {

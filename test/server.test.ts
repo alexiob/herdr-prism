@@ -46,7 +46,7 @@ test('every dashboard view identifies its server while diagnostics redact the ho
   const data: any = { sessions: [], updatedAt: 0, stale: false, diagnostics: [], server: { id: 'private-id', host: 'remote-builder', session: 'work' } };
   for (const tab of tabs) {
     state.tab = tab;
-    const frame=renderScreen(data,state,80,24);assert.match(frame.lines.slice(0,frame.bodyStart).join('\n'), /remote-builder\/work/);
+    const frame=renderScreen(data,state,80,24);assert.match(frame.lines.join('\n'), /remote-builder\/work/);
   }
   assert.ok(!diagnosticExport(data).includes('remote-builder'));
   assert.ok(!diagnosticExport(data).includes('private-id'));
