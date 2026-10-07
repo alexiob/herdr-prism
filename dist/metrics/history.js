@@ -16,7 +16,7 @@ export class SampleHistory {
         const key = JSON.stringify([session, scope]);
         const raw = (this.series.get(key) ?? []).filter(p => p.at >= now - this.windowMs && p.at <= now);
         const points = [];
-        let peakMemoryBytes, peakCpuPercent;
+        let peakMemoryBytes, peakCpuPercent, peakCpuLowerBound;
         for (const p of raw) {
             const last = points.at(-1);
             if (last && p.at - last.at > this.gapMs)
@@ -28,8 +28,10 @@ export class SampleHistory {
             }
             if (p.cpuPercent !== undefined)
                 peakCpuPercent = Math.max(peakCpuPercent ?? 0, p.cpuPercent);
+            if (p.cpuLowerBound !== undefined)
+                peakCpuLowerBound = Math.max(peakCpuLowerBound ?? 0, p.cpuLowerBound);
         }
-        return { points, cpu: points.map(p => p.cpuPercent), memory: points.map(p => p.memoryBytes), peakMemoryBytes: peakMemoryBytes?.toString(), peakCpuPercent, observedFrom: raw[0]?.at, observedTo: raw.at(-1)?.at, windowMs: this.windowMs };
+        return { points, cpu: points.map(p => p.cpuPercent), memory: points.map(p => p.memoryBytes), peakMemoryBytes: peakMemoryBytes?.toString(), peakCpuPercent, peakCpuLowerBound, observedFrom: raw[0]?.at, observedTo: raw.at(-1)?.at, windowMs: this.windowMs };
     }
     clear(session) { if (session === undefined)
         this.series.clear();

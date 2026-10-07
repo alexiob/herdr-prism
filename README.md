@@ -194,7 +194,7 @@ source/revision with `herdr plugin list --plugin iob.herdr-prism --json`.
 | Notes | Persistent per-agent Markdown, autosave and recovered conflict drafts |
 | To-do | Complete ACTION lists enabled by default, with local checked state and source provenance |
 | Git | Exact checkout, colored line changes, tracking and snapshot facts |
-| Agents | Verified arbitrary-depth lineage and checkout grouping |
+| Agents | Panel owner and its recorded sub-agents, with status, reported tasks and checkout grouping |
 | Processes | Readable process identities, ownership, resource coverage and retained terminal output |
 | Refs | Assistant links/files, explicit edit markers, exact source history and deliberate open/copy |
 | Messages | Separate message and tool readers, inline expansion and full detail |
@@ -264,8 +264,8 @@ shortcuts; it does not reload Prism's `settings.json`.**
 | `Enter` | Open the selected detail or corresponding tab; inspect an agent inside Prism |
 | `Shift+K` in Processes or process details | Ask to terminate the selected process; Cancel is selected initially |
 | `r` in process details | Refresh the retained Output snapshot |
-| Left / right in Messages or process details | Switch between the independent readers |
-| Mouse wheel in Messages or process details | Scroll the reader under the pointer independently |
+| Left / right | Switch between independent subpanels; short panels show the active subpanel |
+| Mouse wheel | Scroll the subpanel under the pointer independently, including Notes |
 | `Shift+F` | Return an inspected session to this panel's bound agent |
 | `f` in Agents | Explicitly focus the selected live Herdr pane |
 | `Space` | Fold/expand; open a reference's source history |
@@ -285,10 +285,18 @@ Entries that open another view carry a right arrow. Overview Processes, Git,
 Agents, Messages, Refs, To-do and Notes entries open their matching tabs. At wide
 widths, Overview uses two columns; left/right moves between visible columns.
 The tab strip has a dedicated background; the active tab has its own contrasting
-background and bold label. Messages and Tool activity keep separate scroll
-positions. Each message forms one block with a subtle alternating background;
-selection uses a stronger, separate highlight. Expanding a message scrolls only
-its reader.
+background and bold label. All subpanels stay inside the available terminal
+and keep separate scroll positions. When space cannot fit them together, left/right
+cycles through each subpanel. List entries alternate subtle backgrounds; selection
+uses a stronger, separate highlight. A multiline entry moves and highlights as one
+item, with one right arrow. Click its body to select; Enter or its arrow opens it.
+Wheels and paging read long entries within their subpanel. CPU and memory charts
+share a left edge and have a blank line between them.
+
+Agents shows this panel’s owner and only its recorded sub-agent tree. Each worker
+has a concise status and reported task or goal; unrelated host sessions are excluded.
+Enter inspects a worker, d opens its identity, f explicitly focuses a live pane, and
+Shift+F returns to the panel owner. Worktree grouping also stays within this tree.
 
 Fact details align quiet labels with colored quantities, identities, paths,
 durations and Git changes. Long rows show a concise summary; Enter retains full
@@ -353,7 +361,9 @@ Closing all panels or changing the server's active workspace/tab pauses that wor
 other agents retain lightweight inventory and
 explicitly stale cached detail summaries. Native cards refresh checkout identity
 without status/diff scans (30-second cache), and on macOS/Linux sample only the
-verified harness PIDs every five seconds, including after plugin restarts. Reopening warms up CPU measurements and catches
+one shared host process batch every five seconds, including after plugin restarts.
+Native cards sum each agent’s verified harness and owned jobs without reading
+background transcripts or running Git status/diff scans. Reopening warms up CPU measurements and catches
 up selected content. Herdr 0.9.3 exposes no attached-client visibility query, so
 last-client disconnect and background-machine pause remain an outstanding gate.
 Verified roots of other agents remain process attribution boundaries.
@@ -396,7 +406,7 @@ transcripts, processes and Git state. The dashboard identifies its server and
 native rows retain Herdr's machine label. See [remote setup and limitations](docs/remote.md).
 
 `—` means unavailable; `0` means measured zero. Stale values include freshness
-information. CPU 100% represents one logical core. Resident memory is summed
+information. CPU 100% represents one logical core. Resident memory is cumulative across the selected agent and verified owned jobs:
 RSS on Unix and working set on Windows. Git line counts measure **working tree
 vs HEAD**; untracked and binary files have separate counts, and unborn branches
 have no invented line totals. Provider counters retain their documented cache
@@ -490,10 +500,12 @@ conflicting identities.
 The native card starts with status, a compact session name, the tab label and
 the harness (`codex`, `claude`, `pi`, etc.) in muted text.
 The next rows show CPU and RSS (Windows: WS), then machine, branch and colored
-Git changes. On macOS/Linux, `H CPU` means the harness process alone; the right
-panel measures the harness and its owned jobs. The first harness sample gives
-RSS; CPU needs two samples. Windows retains cached inspector resource summaries
-until a target-only Windows sampler is implemented. Memory uses human sizes such as `3.2kB` or `1.2GB`; values have at
+Git changes. CPU and RSS/WS sum the verified harness and all its owned jobs,
+matching the right panel’s default **Self + jobs** scope. CPU needs two samples;
+`≥` means a measured lower bound while some processes are warming up or unreadable.
+The optional right-panel Subtree scope also includes recorded sub-agent sessions.
+Detached or shared processes without a unique verified owner are excluded or labeled.
+A fallback marked `H CPU` explicitly counts only the harness. Memory uses human sizes such as `3.2kB` or `1.2GB`; values have at
 most one decimal. `~` marks a cached resource sample. Full names, branches,
 Goals and descendant counts remain in the right panel.
 
@@ -524,6 +536,9 @@ temporarily use another directory do not change that identity. Change counts
 remain cached from the inspector and are discarded if checkout or HEAD changes. Group labels belong to the first real card in each group;
 Herdr cannot insert independent expandable group headers. Tab names follow
 Herdr's labels (Herdr omits an unnamed single tab).
+
+Herdr 0.9.3 cannot set alternating backgrounds on native left-sidebar cards;
+Prism uses alternating bands in its own right-panel lists.
 
 Native mode owns the Agents rows and `theme.custom.active_row_bg` in Herdr's
 `config.toml`: dark/mono uses a dark selection background and light uses pale

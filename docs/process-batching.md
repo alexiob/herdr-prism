@@ -8,7 +8,13 @@ Herdr Prism's Rust helper already collects the host process list in one OS batch
 
 After attribution, one pass creates a private index per owner with processes, unreadable PIDs, readable counts, complete CPU counts and RSS sums. Panel views visit the requested owner indices rather than repeatedly filtering every owned process and reparsing RSS counters. Subtree owner sets are deduplicated; processes retain batch ordering. Returned process snapshots are copies, so a consumer cannot modify the next CPU baseline.
 
-CPU still requires two readable observations of each required process, compatible boot and helper clock epoch, increasing monotonic time and nondecreasing CPU counters. A new compiler process can make current aggregate CPU unavailable while every RSS reading is present. An available subset is not presented as a complete CPU total. History retains earlier measured samples independently of current availability.
+CPU still requires two readable observations of each required process, compatible boot and helper clock epoch, increasing monotonic time and nondecreasing CPU counters. A new compiler process can make the complete aggregate unavailable while every RSS reading is present. If some owned processes already have valid CPU deltas, `cpuLowerBound` records their sum and the UI displays `≥`; a first sample with no measured deltas stays unavailable. History retains lower bounds separately from complete measurements and labels partial observations. RSS/working-set totals include the harness and every verified owned process.
+
+## Shared native-card collection
+
+The collector reuses one host batch for visible-panel telemetry and a separate native-card tracker. Native cards show each live agent’s Self + jobs total, rather than only its harness. Independent baselines keep opening, hiding or switching a right panel from resetting native CPU measurements. When no inspector is visible, the process batch runs at most every five seconds; no background transcript bodies or Git status/diff scans are loaded. Native root proofs expire within five seconds and still require exact occupant, boot and birth identities.
+
+Read-only measurements during concurrent compilation on macOS found a Claude harness at 4.70% while its verified jobs totaled at least 102.57%, and another at 2.42% versus 192.36%. The same host batch collected 1,033 processes in 6.25 ms plus 0.67 ms encoding; another collection took 3.42 ms plus 0.63 ms. These are observed intervals, not performance guarantees or host-wide attribution claims. Unassociated compiler trees stay unattributed.
 
 ## Native timings and recovery
 

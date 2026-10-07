@@ -100,3 +100,11 @@ test('resuming sampling warms CPU once while retaining detached ownership and bo
  tracker.update(b([p(11,1,'7')],'13000000000','new-boot'),roots,{resetCpuBaseline:true});
  assert.equal(tracker.view('a').processes.length,0,'baseline reset must not carry remembered ownership across boots');
 });
+test('a newborn job preserves measured CPU as a lower bound without presenting a complete total',()=>{
+ const tracker=new ProcessTracker(),roots=[{sessionKey:'a',pid:10,startTime:'5'},{sessionKey:'shared',pid:10,startTime:'5'}];
+ tracker.update(b([p(10,1,'5')]),roots);assert.equal(tracker.view('a').cpuLowerBound,undefined);
+ tracker.update(b([p(10,1,'5','1200000000'),p(11,10,'6','999000000000')],'2000000000'),roots);
+ const partial=tracker.view('a');assert.equal(partial.cpuPercent,undefined);assert.equal(partial.cpuLowerBound,120);assert.deepEqual(partial.cpuCoverage,{readable:1,total:2});assert.equal(partial.memoryBytes,'200');assert.equal(tracker.view('shared').cpuLowerBound,undefined);
+ tracker.update(b([p(10,1,'5','1200000000'),p(11,10,'6','999000000000')],'3000000000'),roots,{resetCpuBaseline:true});assert.equal(tracker.view('a').cpuLowerBound,undefined,'full warmup cannot imply a measured zero');
+ tracker.update(b([p(10,1,'5','1200000000'),p(11,10,'6','999000000000')],'4000000000'),roots);assert.equal(tracker.view('a').cpuPercent,0);assert.equal(tracker.view('a').cpuLowerBound,undefined,'complete zero remains a measured total');
+});

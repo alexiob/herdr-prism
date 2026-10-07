@@ -2,9 +2,49 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {previewViews,inspectorPreviewTabs,renderPreview,formatPreview} from '../src/tui/preview.ts';
 import type {PreviewView} from '../src/tui/preview.ts';
+import type {PreviewFrame} from '../src/tui/preview.ts';
 import type {ThemeName} from '../src/tui/theme.ts';
 import {InputDecoder} from '../src/tui/input.ts';
+import {pathToFileURL} from 'node:url';
 
+export interface PreviewBrowseState {selected:number;scroll:number;sectionScroll:Record<string,number>;sectionSelections:Map<string,number>;activeSection?:string;freeScroll:boolean;open?:boolean;}
+type PreviewRegion=NonNullable<PreviewFrame['sectionRegions']>[number];
+function scrollPreview(value:PreviewBrowseState,frame:PreviewFrame,region:PreviewRegion|undefined,delta:number){
+ value.freeScroll=true;
+ if(region){value.activeSection=region.id;value.sectionScroll[region.id]=Math.max(0,Math.min(Math.max(0,region.total-region.contentHeight),(value.sectionScroll[region.id]??region.scroll)+delta));if(!frame.entries.length||frame.view==='Notes')value.scroll=value.sectionScroll[region.id]!;}
+ else value.scroll=Math.max(0,value.scroll+delta);
+}
+export function navigatePreview(value:PreviewBrowseState,frame:PreviewFrame,key:string):boolean{
+ if(!['down','j','up','k','left','right','home','end','pageup','pagedown'].includes(key)||frame.view==='Notes editor')return false;
+ const regions=frame.sectionRegions??[],current=regions.find(r=>r.id===value.activeSection)??regions.find(r=>r.entries.includes(value.selected))??regions[0];
+ if(key==='left'||key==='right'){
+  if(!current||regions.length<2)return true;
+  if(current.entries.includes(value.selected))value.sectionSelections.set(current.id,value.selected);
+  const at=regions.indexOf(current),neighbors=regions.filter(r=>key==='right'?r.column>current.column:r.column<current.column).sort((a,b)=>Math.abs(a.line-current.line)-Math.abs(b.line-current.line));
+  const next=neighbors[0]??regions[(at+(key==='right'?1:regions.length-1))%regions.length]!;value.activeSection=next.id;
+  if(next.entries.length){value.selected=value.sectionSelections.get(next.id)??next.entries[0]!;value.freeScroll=false;}return true;
+ }
+ const direction=key==='up'||key==='k'||key==='pageup'?-1:1;
+ if(key==='pageup'||key==='pagedown'){scrollPreview(value,frame,current,direction*Math.max(1,current?.contentHeight??frame.bodyHeight));return true;}
+ const entries=current?current.entries:frame.entries.map((_,i)=>i);
+ if(entries.length){const at=entries.indexOf(value.selected);value.selected=entries[Math.max(0,Math.min(entries.length-1,key==='home'?0:key==='end'?entries.length-1:at+direction))]!;value.activeSection=current?.id;value.freeScroll=false;}
+ else scrollPreview(value,frame,current,key==='home'?-100000:key==='end'?100000:direction);
+ return true;
+}
+export function mousePreview(value:PreviewBrowseState,frame:PreviewFrame,event:{x:number;y:number;button:number;release:boolean}):boolean{
+ value.open=false;if(event.release)return false;
+ const region=frame.sectionRegions?.find(r=>event.x>=r.column+1&&event.x<r.column+r.width+1&&event.y>=r.line+1&&event.y<r.line+r.height+1);
+ if(event.button===64||event.button===65){
+  if(region){scrollPreview(value,frame,region,event.button===64?-3:3);return true;}
+  if(!frame.sectionRegions&&event.x>=1&&event.x<=frame.lines[0]!.length&&event.y>frame.bodyStart&&event.y<=frame.bodyStart+frame.bodyHeight){scrollPreview(value,frame,undefined,event.button===64?-3:3);return true;}return false;
+ }
+ if(event.button!==0||frame.view==='Notes editor')return false;
+ const position=frame.positions.find(p=>event.y===p.line+1&&event.x>=p.column+1&&event.x<p.column+p.width+1);
+ if(!position)return false;value.selected=position.entry;value.activeSection=region?.id;value.freeScroll=false;
+ const actionColumn=position.actionColumn;value.open=actionColumn!==undefined&&event.x===actionColumn+1;return true;
+}
+
+async function main(){
 const args=process.argv.slice(2);
 const option=(name:string)=>{const at=args.indexOf(name);return at>=0?args[at+1]:undefined;};
 const width=Number(option('--width')??50),height=Number(option('--height')??34);
@@ -32,44 +72,29 @@ if(!args.includes('--browse')){
 }else{
   if(!process.stdin.isTTY||!process.stdout.isTTY)throw new Error('--browse needs an interactive terminal');
   let view:PreviewView=requested??(initial?'Detail':'Overview'),selected=0,scroll=0,entry:NonNullable<Parameters<typeof renderPreview>[1]>['entry']=initial?.entry;
-  const history:{view:PreviewView;selected:number;scroll:number}[]=[];
-  let frame=render(view),closed=false,sectionScroll:Record<string,number>={};const sectionSelections=new Map<string,number>();
-  const draw=()=>{frame=render(view,{width:Math.min(width,process.stdout.columns||width),height:Math.min(height,process.stdout.rows||height),selected,scroll,sectionScroll,entry});scroll=frame.scroll;if(frame.sectionScroll)sectionScroll=frame.sectionScroll;process.stdout.write('\x1b[H\x1b[2J'+formatPreview(frame,{color}));};
+  const history:{view:PreviewView;selected:number;scroll:number;sectionScroll:Record<string,number>;activeSection?:string;freeScroll:boolean}[]=[];
+  let frame=render(view),closed=false,sectionScroll:Record<string,number>={},activeSection:string|undefined,freeScroll=false;const sectionSelections=new Map<string,number>();
+  const browseState=():PreviewBrowseState=>({selected,scroll,sectionScroll,sectionSelections,activeSection,freeScroll});
+  const accept=(value:PreviewBrowseState)=>{({selected,scroll,sectionScroll,activeSection,freeScroll}=value);};
+  const reset=()=>{selected=0;scroll=0;sectionScroll={};activeSection=undefined;freeScroll=false;sectionSelections.clear();};
+  const draw=()=>{frame=render(view,{width:Math.min(width,process.stdout.columns||width),height:Math.min(height,process.stdout.rows||height),selected,scroll,sectionScroll,entry,activeSection:frame.entries.length?undefined:activeSection,freeScroll});scroll=frame.scroll;if(frame.sectionScroll)sectionScroll=frame.sectionScroll;process.stdout.write('\x1b[H\x1b[2J'+formatPreview(frame,{color}));if(frame.terminalCursor)process.stdout.write(`\x1b[${frame.terminalCursor.line};${frame.terminalCursor.column}H\x1b[?25h`);else process.stdout.write('\x1b[?25l');};
   const close=()=>{if(closed)return;closed=true;process.stdin.setRawMode(false);process.stdin.pause();process.stdin.off('data',input);process.stdout.off('resize',draw);process.stdout.write('\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l');};
   const decoder=new InputDecoder();let timer:NodeJS.Timeout|undefined;
   const key=(key:string)=>{
     if(key==='q'||key==='ctrl+c'){clearTimeout(timer);close();return;}
-    if(key==='tab'||key==='shift+tab'){const i=previewViews.indexOf(view);view=previewViews[(i+(key==='tab'?1:previewViews.length-1))%previewViews.length]!;selected=0;scroll=0;history.length=0;}
-    else if(key==='escape'){const previous=history.pop();if(previous)({view,selected,scroll}=previous);else if(view==='Detail'||view==='Help'){view=initial?.tab??'Overview';selected=0;scroll=0;}}
+    if(key==='tab'||key==='shift+tab'){const i=previewViews.indexOf(view);view=previewViews[(i+(key==='tab'?1:previewViews.length-1))%previewViews.length]!;reset();history.length=0;}
+    else if(key==='escape'){const previous=history.pop();if(previous)({view,selected,scroll,sectionScroll,activeSection,freeScroll}=previous);else if(view==='Detail'||view==='Help'||view==='Notes editor'){view=initial?.tab??'Overview';reset();}}
     else if(key==='?'||key==='enter'){
       const picked=frame.entries[Math.max(0,Math.min(selected,frame.entries.length-1))]??(key==='?'&&view==='Detail'?entry:undefined);
-      if(picked){entry=picked;history.push({view,selected,scroll});view=key==='?'?'Help':picked.target??'Detail';selected=0;scroll=0;}
-    }else if(view==='Messages'&&frame.sectionRegions&&['down','j','up','k','left','right','home','end','pageup','pagedown'].includes(key)){
-      const current=frame.sectionRegions.find(region=>region.entries.includes(selected))??frame.sectionRegions[0]!;
-      if(key==='left'||key==='right'){
-        sectionSelections.set(current.id,selected);const at=frame.sectionRegions.indexOf(current),next=frame.sectionRegions[(at+(key==='right'?1:frame.sectionRegions.length-1))%frame.sectionRegions.length]!;
-        selected=sectionSelections.get(next.id)??next.entries[0]!;
-      }else{
-        const at=current.entries.indexOf(selected),step=key==='up'||key==='k'?-1:key==='pageup'?-Math.max(1,current.height-2):key==='pagedown'?Math.max(1,current.height-2):1;
-        selected=current.entries[Math.max(0,Math.min(key==='home'?0:key==='end'?current.entries.length-1:at+step,current.entries.length-1))]!;
-      }
-    }else if(key==='down'||key==='j'){if(frame.entries.length)selected=Math.min(selected+1,frame.entries.length-1);else scroll++;}
-    else if(key==='up'||key==='k'){if(frame.entries.length)selected=Math.max(0,selected-1);else scroll=Math.max(0,scroll-1);}
-    else if(key==='left'||key==='right'){
-      const current=frame.positions.find(position=>position.entry===selected);
-      if(current){const candidates=frame.positions.filter(position=>key==='right'?position.column>current.column:position.column<current.column).sort((a,b)=>Math.abs(a.line-current.line)-Math.abs(b.line-current.line)||Math.abs(a.column-current.column)-Math.abs(b.column-current.column));if(candidates[0])selected=candidates[0].entry;}
-    }
-    else if(key==='home'){selected=0;scroll=0;}
-    else if(key==='end'){if(frame.entries.length)selected=frame.entries.length-1;else scroll=100000;}
-    else if(key==='pagedown'){if(frame.entries.length)selected=Math.min(frame.entries.length-1,selected+Math.max(1,frame.positions.length));else scroll+=frame.bodyHeight;}
-    else if(key==='pageup'){if(frame.entries.length)selected=Math.max(0,selected-Math.max(1,frame.positions.length));else scroll=Math.max(0,scroll-frame.bodyHeight);}
+      if(picked){entry=picked;history.push({view,selected,scroll,sectionScroll:{...sectionScroll},activeSection,freeScroll});view=key==='?'?'Help':picked.target??'Detail';reset();}
+    }else {const value=browseState();if(navigatePreview(value,frame,key))accept(value);}
     draw();
   };
   const input=(data:Buffer)=>{clearTimeout(timer);for(const event of decoder.feed(data)){
     if(event.type==='key')key(event.key);
-    else if(view==='Messages'&&!event.release&&(event.button===64||event.button===65)){
-      const region=frame.sectionRegions?.find(region=>event.y>=region.line+1&&event.y<region.line+region.height+1);if(region){const current=frame.sectionRegions?.find(region=>region.entries.includes(selected));if(current)sectionSelections.set(current.id,selected);const saved=region.entries.includes(selected)?selected:sectionSelections.get(region.id)??region.entries[0]!,at=region.entries.indexOf(saved);selected=region.entries[Math.max(0,Math.min(at+(event.button===64?-3:3),region.entries.length-1))]!;draw();}
-    }
+    else if(event.type==='mouse'){const value=browseState();if(mousePreview(value,frame,event)){accept(value);if(value.open)key('enter');else draw();}}
   }timer=setTimeout(()=>{for(const event of decoder.flushEscape())if(event.type==='key')key(event.key);},40);};
   process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',input);process.stdout.on('resize',draw);process.once('SIGINT',close);process.once('SIGTERM',close);process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h');draw();
 }
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)await main();

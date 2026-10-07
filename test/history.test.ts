@@ -61,3 +61,8 @@ test('a new short-lived job leaves current aggregate CPU unknown while retaining
  assert.equal(tracker.view('a').cpuPercent,50);
  assert.deepEqual(history.view('a','self',4000).cpu,[undefined,50,undefined,50]);
 });
+test('history retains measured lower bounds separately from complete CPU totals and true gaps',()=>{
+ const history=new SampleHistory({gapMs:5000});
+ history.add('a','self',{at:1000,cpuPercent:50});history.add('a','self',{at:2000,cpuLowerBound:120});history.add('a','self',{at:3000,gap:true});history.add('a','self',{at:10000,cpuLowerBound:80});
+ const view=history.view('a','self',10000);assert.deepEqual(view.cpu,[50,undefined,undefined,undefined,undefined]);assert.equal(view.points[1].cpuPercent,undefined);assert.equal(view.points[1].cpuLowerBound,120);assert.equal(view.peakCpuPercent,50);assert.equal(view.peakCpuLowerBound,120);assert.equal(view.points[3].gap,true);
+});

@@ -4,8 +4,9 @@ import {EventEmitter} from 'node:events';
 import type {NotesEditorState,DashboardData,UiState,RenderedScreen,ScreenRow} from './types.ts';
 import {NotesStore,noteLimit} from '../state/notes.ts';
 import type {NoteSnapshot} from '../state/notes.ts';
-import {sanitize,cellWidth} from './text.ts';
-import {span,fitSpans,asciiText} from './widgets.ts';
+import {sanitize,cellWidth,truncate} from './text.ts';
+import {span,pad,fitSpans,asciiText} from './widgets.ts';
+import type {TextSpan} from './theme.ts';
 import {renderLayout} from './layout.ts';
 
 export interface EditorViewport {columns:number;height:number;tabOrder?:readonly Tab[];}
@@ -84,34 +85,50 @@ export class NotesController extends EventEmitter {
 
 /** Exact Markdown source: wrapping never rewrites its spaces or newlines. */
 export function renderNotes(data:DashboardData,state:UiState,columns:number,height:number,now:number):RenderedScreen{
+  columns=Math.max(1,Math.floor(columns));height=Math.max(1,Math.floor(height));
   const note=state.notes,editing=note?.editing===true;
   const inspecting=Boolean(state.boundSessionKey&&state.selectedKey!==state.boundSessionKey&&!state.pin&&!editing),session=data.sessions.find(session=>session.key===state.selectedKey);
   const inspection=inspecting?(session&&!session.attachment&&!session.attachments?.length?'Transcript only':'Inspecting'):undefined;
   const returnHint=inspecting&&!state.editingFilter;
   const action:ScreenRow={id:'notes-edit',text:'Edit Markdown notes',help:'Enter edits. Text autosaves after 500 ms. Escape returns to reading; Ctrl+S flushes. Follow is held while editing. Tab leaves after saving. Complete Prism removal deletes notes.',action:{type:'notes-edit',sessionKey:state.selectedKey}};if(note?.recoveryPath)action.help+=' Recovery draft: '+note.recoveryPath;
+  const requestedScroll=state.notesScroll??state.scroll;
   state.cursor=0;state.cursorId='notes-edit';
-  if(!notesEditorFits({columns,height,tabOrder:state.tabOrder})){
+  if(editing&&!notesEditorFits({columns,height,tabOrder:state.tabOrder})){
     const small=renderLayout(data,state,[{id:'notes',title:'Notes · enlarge panel',rows:[{...action,action:undefined,selectable:false}]}],columns,height,now);
-    if(height>=2){small.spans![height-2]=fitSpans([span(state.notice??note?.error??(editing?'Editing paused · enlarge panel':inspection?inspection+' · Enlarge panel':'Enlarge panel to edit'),'warning')],columns);small.spans![height-1]=fitSpans([span(editing?'Esc read · Ctrl+S save · Tab leave':returnHint?'Shift+F follow · ? help':'? help · Tab views · q close','secondary')],columns);for(const i of [height-2,height-1])small.lines[i]=small.spans![i]!.map(p=>p.text).join('');}return small;
+    if(height>=2){small.spans![height-2]=fitSpans([span(state.notice??note?.error??'Editing paused · enlarge panel','warning')],columns);small.spans![height-1]=fitSpans([span('Esc read · Ctrl+S save · Tab leave','secondary')],columns);for(const i of [height-2,height-1])small.lines[i]=small.spans![i]!.map(p=>p.text).join('');}return small;
   }
   const frame=renderLayout(data,state,[{id:'notes',title:'Markdown notes',rows:[action]}],columns,height,now,new Map(),undefined,3);
-  const first=frame.bodyStart+2,room=Math.max(1,columns-4),visible=Math.max(1,height-first-2),text=note?.text??'';
+  const sourceAction=frame.rowRegions?.find(region=>region.index===0),actionParts=sourceAction?frame.spans![sourceAction.y-1]:undefined;
+  const framed=frame.bodyHeight>=4,showAction=frame.bodyHeight>=2;
+  const first=frame.bodyStart+(framed?1:0)+(showAction?1:0),visible=frame.bodyHeight-(framed?2:0)-(showAction?1:0);
+  const inset=columns>=4?2:0,room=Math.max(1,columns-(inset?4:0)),text=note?.text??'';
   const lines:{text:string;start:number;end:number}[]=[];let at=0;
   for(const raw of text.split('\n')){let current='',used=0,start=at;
     for(const s of segments.segment(raw)){const rendered=s.segment==='\t'?'    ':sanitize(s.segment),width=cellWidth(rendered);if(current&&used+width>room){lines.push({text:current,start,end:at});current='';used=0;start=at;}current+=rendered;used+=width;at+=s.segment.length;}
     lines.push({text:current,start,end:at});at++;
   }
-  const cursor=note?.cursor??0;let cursorLine=lines.findIndex((line,i)=>cursor>=line.start&&(cursor<line.end||cursor===line.end&&(lines[i+1]?.start!==cursor)));if(cursorLine<0)cursorLine=lines.length-1;
-  // At the wrap boundary put a caret at the start of the following visual line.
-  if(editing){if(cursorLine<state.scroll)state.scroll=cursorLine;if(cursorLine>=state.scroll+visible)state.scroll=cursorLine-visible+1;}
-  else state.scroll=Math.max(0,Math.min(state.notesScroll??0,Math.max(0,lines.length-visible)));state.notesScroll=state.scroll;
-  for(let i=first;i<height-2;i++){const line=lines[state.scroll+i-first],raw=line?.text??(!text&&i===first?'No notes yet. Enter to write.':'');let parts=[span('│ ','border'),span(raw,/^#{1,6} /.test(raw)?'accent':'text')];if(state.ascii)parts=parts.map(part=>({...part,text:asciiText(part.text)}));frame.spans![i]=fitSpans(parts,columns);frame.lines[i]=frame.spans![i]!.map(part=>part.text).join('');}
+  const cursor=Math.max(0,Math.min(note?.cursor??0,text.length));let cursorLine=lines.findIndex((line,i)=>cursor>=line.start&&(cursor<line.end||cursor===line.end&&(lines[i+1]?.start!==cursor)));if(cursorLine<0)cursorLine=lines.length-1;
+  let scroll=Math.max(0,Math.min(requestedScroll,Math.max(0,lines.length-visible)));
+  if(editing&&!state.notesFreeScroll){if(cursorLine<scroll)scroll=cursorLine;if(cursorLine>=scroll+visible)scroll=cursorLine-visible+1;}
+  state.scroll=scroll;state.notesScroll=scroll;
+  const setLine=(index:number,parts:TextSpan[])=>{if(state.ascii)parts=parts.map(part=>({...part,text:asciiText(part.text)}));frame.spans![index]=fitSpans(parts,columns);frame.lines[index]=frame.spans![index]!.map(part=>part.text).join('');};
+  frame.rows=[action,...lines.map((line,index):ScreenRow=>({id:`notes-line:${index}`,section:'notes',text:line.text,selectable:false,band:false,help:action.help}))];
+  frame.rowRegions=[];
+  if(framed){const heading='┌ '+truncate('Markdown notes',Math.max(1,columns-4))+' ';setLine(frame.bodyStart,[span(heading,'accent'),span('─'.repeat(Math.max(0,columns-cellWidth(heading)-1))+'┐','border')]);}
+  if(showAction){const line=frame.bodyStart+(framed?1:0);setLine(line,actionParts??[span('› Edit Markdown notes →','accent',true)]);frame.rowRegions.push({index:0,x:sourceAction?.x??1,y:line+1,width:sourceAction?.width??columns,display:sourceAction?.display??'Edit Markdown notes',actionX:sourceAction?.actionX});frame.selectedLine=editing?undefined:line;}
+  else frame.selectedLine=undefined;
+  for(let offset=0;offset<visible;offset++){
+    const index=scroll+offset,line=lines[index],raw=line?.text??(!text&&offset===0?'No notes yet. Enter to write.':'');
+    setLine(first+offset,inset?[span('│ ','border'),span(pad(raw,room),/^#{1,6} /.test(raw)?'accent':'text'),span(' │','border')]:[span(raw,/^#{1,6} /.test(raw)?'accent':'text')]);
+    if(line)frame.rowRegions.push({index:index+1,x:inset+1,y:first+offset+1,width:room,display:line.text});
+  }
+  if(framed)setLine(frame.bodyStart+frame.bodyHeight-1,[span('└'+'─'.repeat(Math.max(0,columns-2))+'┘','border')]);
+  const indices=lines.map((_,index)=>index+1);
+  frame.sectionRegions=[{id:'notes',x:1,y:first+1,width:columns,height:visible,contentHeight:visible,total:lines.length,scroll,indices,lineIndices:indices}];
   const status=state.notice??note?.error??(note?`${editing?'Editing · ':''}${note.status==='saved'?'Saved':note.status==='conflict'?'Draft saved · external edit preserved':note.status}${inspection?' · '+inspection:''}${note.savedAt?' · '+new Date(note.savedAt).toLocaleTimeString():''}`:`Loading notes…${inspection?' · '+inspection:''}`);
-  frame.spans![height-2]=fitSpans([span(status,note?.status==='error'||note?.status==='conflict'||inspection==='Transcript only'?'warning':'secondary')],columns);
+  if(height>=3)setLine(height-2,[span(status,note?.status==='error'||note?.status==='conflict'||inspection==='Transcript only'?'warning':'secondary')]);
   const controls=editing?'Ctrl+S save · Esc read · Tab leave':'Enter edit · ↑↓ scroll · ? help · q',readingControls=returnHint?(cellWidth('Shift+F follow · '+controls)<=columns?'Shift+F follow · '+controls:'Shift+F follow · Enter · ?'):controls;
-  frame.spans![height-1]=fitSpans([span(readingControls,'secondary')],columns);
-  frame.lines[height-2]=frame.spans![height-2]!.map(part=>part.text).join('');frame.lines[height-1]=frame.spans![height-1]!.map(part=>part.text).join('');
-  if(editing){const line=lines[cursorLine]!,offset=text.slice(line.start,cursor).replace(/\t/g,'    ');frame.terminalCursor={line:Math.min(height-2,first+cursorLine-state.scroll+1),column:Math.min(columns,cellWidth(offset)+3)};frame.selectedLine=undefined;}
-  else{frame.rows=[action];}
+  if(height>=2)setLine(height-1,[span(readingControls,'secondary')]);
+  if(editing&&cursorLine>=scroll&&cursorLine<scroll+visible){const line=lines[cursorLine]!,offset=text.slice(line.start,cursor).replace(/\t/g,'    ');frame.terminalCursor={line:first+cursorLine-scroll+1,column:Math.min(columns,cellWidth(offset)+inset+1)};frame.selectedLine=undefined;}
   return frame;
 }

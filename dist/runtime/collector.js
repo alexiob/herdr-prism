@@ -46,6 +46,8 @@ export class Collector extends EventEmitter {
     store;
     ledger = new LaunchLedger();
     tracker = new ProcessTracker(this.ledger);
+    nativeTracker = new ProcessTracker(this.ledger);
+    nativeResources = new Map();
     history = new SampleHistory();
     rpc;
     endpoint;
@@ -78,15 +80,14 @@ export class Collector extends EventEmitter {
     sampledGeneration;
     warmup = true;
     processesExpanded = false;
-    lastProcessAttemptAt = 0;
+    lastProcessAttemptAt = -Infinity;
     rootProofs = new Map();
     activity;
     sidebar;
-    sidebarSupported;
     accountReports = new Map();
     todoHydrated = new Set();
     derived = new Map();
-    constructor(options) { super(); this.activity = new ActivityMonitor(options.rpc); this.data.tabOrder = normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); this.sidebarSupported = process.platform !== 'win32' || !!options.sidebarSampler; this.sidebar = new SidebarInventory(options.rpc, this.git, matchesHarness, options.sidebarSampler, this.sidebarSupported); }
+    constructor(options) { super(); this.activity = new ActivityMonitor(options.rpc); this.data.tabOrder = normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); this.sidebar = new SidebarInventory(options.rpc, this.git, matchesHarness, options.sidebarSampler, false); }
     async init() {
         await this.store.init();
         this.data.server = await loadServerIdentity(this.store, { session: serverSession(this.endpoint) });
@@ -110,7 +111,8 @@ export class Collector extends EventEmitter {
             await this.refresh();
             if (this.stopped)
                 return;
-            await this.sampleProcesses();
+            if (!this.lastSample || this.paneOpen && this.sampledGeneration !== this.visibilityGeneration)
+                await this.sampleProcesses();
             if (this.stopped)
                 return;
             this.timer = setInterval(() => void this.refresh(), 1000);
@@ -216,15 +218,19 @@ export class Collector extends EventEmitter {
     scheduleProcessSample() {
         clearTimeout(this.sampleTimer);
         this.sampleTimer = undefined;
-        if (this.stopped || !this.timer || !this.paneOpen || !this.visibleSession || this.sampling)
+        if (this.stopped || !this.timer || this.sampling)
+            return;
+        const native = this.settings.nativeMode !== 'inspector-only' && this.data.sessions.some(s => s.attachment);
+        if (!native && (!this.paneOpen || !this.visibleSession))
             return;
         const keys = this.observedKeys();
         const observed = this.data.sessions.filter(session => keys.has(session.key));
-        if (!observed.length)
+        if (!observed.length && !native)
             return;
         const idle = observed.every(session => inactive(session.evidence.state));
         const expanded = this.visibleSelections ? this.visibleSelections.some(v => v.expanded) : this.processesExpanded;
-        const cadence = expanded ? 1000 : idle ? Math.max(5000, this.settings.sampleIntervalMs) : this.settings.sampleIntervalMs;
+        const foregroundCadence = expanded ? 1000 : idle ? Math.max(5000, this.settings.sampleIntervalMs) : this.settings.sampleIntervalMs;
+        const cadence = native ? observed.length ? Math.min(5000, foregroundCadence) : 5000 : foregroundCadence;
         this.sampleTimer = setTimeout(() => { this.sampleTimer = undefined; void this.sampleProcesses(); }, Math.max(1, this.lastProcessAttemptAt + cadence - Date.now()));
     }
     descendants(key) {
@@ -539,7 +545,11 @@ export class Collector extends EventEmitter {
                 this.updateResources();
                 this.scheduleProcessSample();
                 if (this.settings.nativeMode !== 'inspector-only') {
-                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource: this.sidebarSupported ? this.sidebar.resource(a) : !this.paneOpen || this.sampledGeneration !== this.visibilityGeneration || !this.isSessionVisible(s.key) ? { ...this.tracker.view(s.key), availability: 'stale', reason: 'Updates paused while this session is not shown' } : this.sampleError ? { ...this.tracker.view(s.key), availability: this.lastSample ? 'stale' : 'unavailable', reason: this.sampleError } : this.tracker.view(s.key), git: this.sidebar.gitIdentity(a, s.git) }))), Date.now(), views, { grouping: this.settings.ui?.nativeGrouping, tabs: snapshot.tabs, harnessOnly: this.sidebarSupported });
+                    if (Date.now() - this.lastProcessAttemptAt >= 5000)
+                        await this.sampleProcesses();
+                    if (this.stopped)
+                        return;
+                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource: this.nativeResource(a), git: this.sidebar.gitIdentity(a, s.git) }))), Date.now(), views, { grouping: this.settings.ui?.nativeGrouping, tabs: snapshot.tabs, selfJobs: true });
                     if (!this.viewInstalled && !this.publisher.diagnostics.length && views.some(s => s.attachment)) {
                         await this.publisher.installView();
                         this.viewInstalled = true;
@@ -609,7 +619,8 @@ export class Collector extends EventEmitter {
     async sampleProcesses() {
         if (this.stopped)
             return;
-        if (!this.paneOpen || !this.visibleSession || !this.data.sessions.some(s => s.key === this.visibleSession))
+        const native = this.settings.nativeMode !== 'inspector-only' && this.data.sessions.some(s => s.attachment);
+        if (!native && (!this.paneOpen || !this.visibleSession || !this.data.sessions.some(s => s.key === this.visibleSession)))
             return;
         if (this.sampling)
             return this.sampling;
@@ -636,19 +647,19 @@ export class Collector extends EventEmitter {
                 // cached identity checks, never background transcript/Git/detail refreshes.
                 for (const session of this.data.sessions)
                     for (const attachment of session.attachments ?? (session.attachment ? [session.attachment] : [])) {
-                        if (!this.paneOpen || generation !== this.visibilityGeneration)
+                        if (this.stopped || !native && (!this.paneOpen || generation !== this.visibilityGeneration))
                             return;
                         const proofKey = JSON.stringify([session.key, attachment.terminal_id]);
                         liveProofs.add(proofKey);
                         const proof = this.rootProofs.get(proofKey);
                         const oldProcess = proof ? batchProcesses.get(proof.root.pid) : undefined;
-                        if (!observed.has(session.key) && proof && sameOccupant(proof.attachment, attachment) && proof.bootId === batch.bootId && oldProcess?.startTime === proof.root.startTime && batch.sampledAt - proof.verifiedAt < 30000) {
+                        if (!observed.has(session.key) && proof && sameOccupant(proof.attachment, attachment) && proof.bootId === batch.bootId && oldProcess?.startTime === proof.root.startTime && batch.sampledAt - proof.verifiedAt < (native ? 5000 : 30000)) {
                             roots.push(proof.root);
                             continue;
                         }
                         this.rootProofs.delete(proofKey);
                         const liveResult = await this.rpc.call('agent.get', { target: attachment.pane_id });
-                        if (!this.paneOpen || generation !== this.visibilityGeneration)
+                        if (this.stopped || !native && (!this.paneOpen || generation !== this.visibilityGeneration))
                             return;
                         if (!sameOccupant(attachment, liveResult.agent ?? liveResult))
                             continue;
@@ -656,7 +667,8 @@ export class Collector extends EventEmitter {
                         const info = result.process_info ?? result;
                         const foreground = (info.foreground_processes ?? []);
                         const candidates = foreground.filter(p => matchesHarness(session.evidence.provider, p));
-                        const process = candidates.map(p => batchProcesses.get(p.pid)).find(Boolean);
+                        const candidate = candidates.find(p => p.pid === info.foreground_process_group_id) ?? (candidates.length === 1 ? candidates[0] : undefined);
+                        const process = candidate ? batchProcesses.get(candidate.pid) : undefined;
                         if (!process)
                             continue;
                         const root = { sessionKey: session.key, pid: process.pid, startTime: process.startTime };
@@ -666,6 +678,18 @@ export class Collector extends EventEmitter {
                 for (const key of this.rootProofs.keys())
                     if (!liveProofs.has(key))
                         this.rootProofs.delete(key);
+                if (this.stopped)
+                    return;
+                if (native) {
+                    this.nativeTracker.update(batch, roots);
+                    this.nativeResources.clear();
+                    for (const session of this.data.sessions)
+                        for (const attachment of session.attachments ?? (session.attachment ? [session.attachment] : [])) {
+                            const proof = this.rootProofs.get(JSON.stringify([session.key, attachment.terminal_id]));
+                            if (proof && sameOccupant(proof.attachment, attachment))
+                                this.nativeResources.set(attachment.terminal_id, { attachment: { ...attachment }, resource: this.nativeTracker.view(session.key) });
+                        }
+                }
                 if (!this.paneOpen || generation !== this.visibilityGeneration)
                     return;
                 this.roots = roots;
@@ -676,7 +700,7 @@ export class Collector extends EventEmitter {
                 for (const session of this.data.sessions.filter(s => observed.has(s.key))) {
                     for (const scope of this.observedScopes(session.key)) {
                         const resource = this.tracker.view(session.key, scope === 'subtree', scope === 'subtree' ? this.descendants(session.key) : []);
-                        this.history.add(session.key, scope, { at: batch.sampledAt, cpuPercent: resource.cpuPercent, memoryBytes: resource.memoryBytes, gap: resource.availability === 'unavailable' });
+                        this.history.add(session.key, scope, { at: batch.sampledAt, cpuPercent: resource.cpuPercent, cpuLowerBound: resource.cpuLowerBound, memoryBytes: resource.memoryBytes, gap: resource.availability === 'unavailable' });
                     }
                     session.history = this.history.view(session.key, this.visibleSelections ? 'self' : this.subtree ? 'subtree' : 'self');
                 }
@@ -684,10 +708,12 @@ export class Collector extends EventEmitter {
             }
             catch (error) {
                 this.sampleError = error.message;
+                for (const record of this.nativeResources.values())
+                    record.resource = { ...record.resource, availability: 'stale', reason: this.sampleError };
                 for (const session of this.data.sessions) {
                     if (session.resource)
                         session.resource = { ...session.resource, availability: 'stale', reason: error.message };
-                    if (observed.has(session.key))
+                    if (this.paneOpen && generation === this.visibilityGeneration && observed.has(session.key))
                         for (const scope of this.observedScopes(session.key))
                             this.history.add(session.key, scope, { at: Date.now(), gap: true });
                 }
@@ -696,6 +722,13 @@ export class Collector extends EventEmitter {
             }
         })().finally(() => { this.sampling = undefined; this.scheduleProcessSample(); });
         return this.sampling;
+    }
+    /** Native cards show self and OS-verified jobs, independent of inspector selection. */
+    nativeResource(attachment) {
+        const record = this.nativeResources.get(attachment.terminal_id);
+        if (!record || !sameOccupant(record.attachment, attachment))
+            return;
+        return Date.now() - (record.resource.sampledAt ?? 0) > 15000 ? { ...record.resource, availability: 'stale', reason: 'Native job sample expired' } : record.resource;
     }
     /** Read the retained owner terminal, never another process's stdout pipe. */
     async processOutput(sessionKey, target, assertVisible, subtree = this.subtree) {

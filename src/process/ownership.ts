@@ -2,7 +2,7 @@ import type {Availability,ProcessSample,SampleBatch} from '../model/types.ts';
 import {LaunchLedger,processKey} from './ledger.ts';
 export interface ProcessRoot {sessionKey:string;pid:number;startTime?:string;}
 export interface OwnedProcess extends ProcessSample {key:string;owner:string;isHarness?:boolean;cpuPercent?:number;}
-export interface ProcessView {processes:OwnedProcess[];cpuPercent?:number;memoryBytes?:string;availability:Availability;coverage:{readable:number;total:number};cpuCoverage:{readable:number;total:number};memoryLabel:'RSS sum'|'working-set sum';sampledAt?:number;sharedWith?:string;reason?:string;errors:string[];unreadablePids:number[];}
+export interface ProcessView {processes:OwnedProcess[];cpuPercent?:number;cpuLowerBound?:number;memoryBytes?:string;availability:Availability;coverage:{readable:number;total:number};cpuCoverage:{readable:number;total:number};memoryLabel:'RSS sum'|'working-set sum';sampledAt?:number;sharedWith?:string;reason?:string;errors:string[];unreadablePids:number[];}
 interface OwnerBatch {processes:OwnedProcess[];unreadablePids:number[];total:number;readable:number;cpuReadable:number;cpu:number;memory:bigint;}
 export class ProcessTracker {
  private batch?:SampleBatch; private owned=new Map<string,OwnedProcess>(); private remembered=new Map<string,string>();private boundRoots=new Map<string,string>();private shared=new Map<string,string>();private unreadable=new Map<string,{pid:number;owner:string}>();
@@ -67,6 +67,6 @@ export class ProcessTracker {
   if(sessions.size>1)processes.sort((a,b)=>this.order.get(a.key)!-this.order.get(b.key)!);
   const sharedWith=this.shared.get(sessionKey),errors=[...this.batch?.errors??[]];
   const availability:Availability=sharedWith?'not_applicable':!total?'unavailable':readable!==total||errors.length?'partial':'known';
-  return {processes,cpuPercent:total&&cpuReadable===total?cpu:undefined,memoryBytes:readable?memory.toString():undefined,availability,coverage:{readable,total},cpuCoverage:{readable:cpuReadable,total},memoryLabel:this.batch?.platform==='win32'||this.batch?.platform==='windows'?'working-set sum':'RSS sum',sampledAt:this.batch?.sampledAt,sharedWith,reason:sharedWith?'shared with parent':!processes.length?'No verified live process':undefined,errors,unreadablePids};
+  return {processes,cpuPercent:!sharedWith&&total&&cpuReadable===total?cpu:undefined,cpuLowerBound:!sharedWith&&cpuReadable>0&&cpuReadable<total?cpu:undefined,memoryBytes:readable?memory.toString():undefined,availability,coverage:{readable,total},cpuCoverage:{readable:cpuReadable,total},memoryLabel:this.batch?.platform==='win32'||this.batch?.platform==='windows'?'working-set sum':'RSS sum',sampledAt:this.batch?.sampledAt,sharedWith,reason:sharedWith?'shared with parent':!processes.length?'No verified live process':undefined,errors,unreadablePids};
  }
 }

@@ -121,3 +121,74 @@ test('fact detail views keep explanation prose in help and preserve full narrati
   const goal=api.renderPreview('Overview').entries.find((e:any)=>e.id==='goal');
   assert.ok(api.renderPreview('Detail',{entry:goal,width:80,height:40}).lines.join('\n').includes('reliable monitoring'));
 });
+
+test('preview bounds each Overview panel and retains hidden panel metadata in short terminals',()=>{
+  for(const height of [10,12,34]){
+    const frame=api.renderPreview('Overview',{width:50,height,selected:14});
+    assert.ok(frame.sectionRegions,'Overview has no bounded panels');
+    assert.equal(frame.sectionRegions.length,6);
+    for(const region of frame.sectionRegions){
+      assert.ok(region.line>=frame.bodyStart);
+      assert.ok(region.line+region.height<=height-2,`${region.id} exceeds its viewport`);
+    }
+    assert.ok(frame.sectionRegions.find((region:any)=>region.id==='Account / limits').height>=3);
+    assert.ok(frame.lines[frame.selectedLine].includes(frame.entries[14].display));
+  }
+});
+
+test('wide preview reports one column when a short viewport shows only its active panel',()=>{
+  const frame=api.renderPreview('Overview',{width:80,height:10});
+  assert.equal(frame.columns,1);
+  assert.equal(frame.sectionRegions.filter((region:any)=>region.height>0).length,1);
+});
+
+test('preview applies alternating whole-entry bands to ordinary lists',()=>{
+  const frame=api.renderPreview('Git',{width:50,height:34});
+  const surfaces=frame.positions.filter((position:any)=>position.entry<6).map((position:any)=>{
+    const interior=frame.spans[position.line].filter((part:any)=>part.role!=='border');
+    assert.ok(interior.every((part:any)=>part.surface===interior[0].surface));
+    return interior[0].surface;
+  });
+  assert.deepEqual(surfaces,['messageEven','messageOdd','messageEven','messageOdd','messageEven','messageOdd']);
+});
+
+test('message preview selects its complete multiline entry with a single action arrow',()=>{
+  const frame=api.renderPreview('Messages',{width:50,height:40,selected:1});
+  const positions=frame.positions.filter((position:any)=>position.entry===1);
+  assert.ok(positions.length>=2);
+  const parts=positions.flatMap((position:any)=>frame.spans[position.line]);
+  assert.equal(parts.map((part:any)=>part.text).join('').split('→').length-1,1);
+  assert.ok(parts.filter((part:any)=>part.surface).every((part:any)=>part.selected));
+});
+
+test('Overview preview separates CPU and RSS chart entries with one blank line',()=>{
+  const frame=api.renderPreview('Overview',{width:80,height:40});
+  const cpu=frame.entries.findIndex((entry:any)=>entry.id==='cpu'),memory=frame.entries.findIndex((entry:any)=>entry.id==='memory');
+  const cpuLine=frame.positions.find((position:any)=>position.entry===cpu).line;
+  const memoryLine=frame.positions.find((position:any)=>position.entry===memory).line;
+  assert.equal(memoryLine-cpuLine,2);
+  assert.match(frame.lines[cpuLine+1].slice(0,39),/^│\s+│$/);
+});
+
+test('notes editor preview keeps the actual editor caret inside a short viewport',()=>{
+  const frame=api.renderPreview('Notes editor',{width:36,height:12});
+  assert.ok(frame.terminalCursor,'editor has no visible caret');
+  assert.ok(frame.terminalCursor.line>frame.bodyStart);
+  assert.ok(frame.terminalCursor.line<=frame.lines.length-2);
+  assert.ok(frame.terminalCursor.column<=36);
+  assert.ok(frame.lines.some((line:string)=>line.includes('saved draft')));
+});
+
+test('preview scrolls long help inside its bounded panel',()=>{
+  const entry={id:'long-help',label:'Reading',help:Array.from({length:50},(_,i)=>`Help paragraph ${i+1}`).join('\n')};
+  const first=api.renderPreview('Help',{width:50,height:12,entry});
+  const scrolled=api.renderPreview('Help',{width:50,height:12,entry,scroll:20});
+  assert.ok(scrolled.lines.some((line:string)=>line.includes('Help paragraph 21')));
+  assert.ok(!scrolled.lines.some((line:string)=>line.includes('Help paragraph 1 ')));
+  assert.ok(scrolled.sectionRegions,'Help has no bounded panel');
+  assert.ok(scrolled.sectionRegions[0].scroll>first.sectionRegions[0].scroll);
+});
+
+test('Agents preview keeps worker names and scopes its useful tree without unrelated summaries',()=>{
+ const frame=api.renderPreview('Agents',{width:60,height:34}),text=frame.lines.join('\n');for(const name of ['Monitor','Parser','Source','Linux tests'])assert.ok(text.includes(name),name);assert.equal(frame.sectionRegions?.length,1);assert.doesNotMatch(text,/Selected agent|cached · 8s/);
+});

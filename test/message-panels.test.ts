@@ -46,7 +46,7 @@ test('every entry remains selectable through local navigation, mouse targets, re
     for(let i=0;i<count;i++){
       assert.equal(frame.rows[state.cursor]?.section,section);
       const region=frame.rowRegions?.find(r=>r.index===state.cursor);assert.ok(region,`${section}/${i}: selected row stays visible`);
-      const action=handleRowClick(state,region.x,region.y,data,frame);assert.equal(action?.type,'message');
+      assert.equal(handleRowClick(state,region.x,region.y,data,frame),undefined);const action=handleRowClick(state,region.actionX!,region.y,data,frame);assert.equal(action?.type,'message');
       const id=state.cursorId;frame=renderScreen(data,state,i%2?80:26,12);assert.equal(state.cursorId,id);
       assert.ok(frame.rowRegions?.some(r=>r.index===state.cursor));
       handleKey(state,'down',data,frame);frame=renderScreen(data,state,36,12);
@@ -62,7 +62,7 @@ test('message blocks share alternating backgrounds and metadata styling while se
     const rows=frame.rows.filter(row=>row.action?.id===id),band=(rows[0] as any).messageBand;
     assert.equal(band,id==='m0'?0:1);
     assert.ok(rows.every(row=>(row as any).messageBand===band));
-    assert.equal(rows[0]?.role,'identity');assert.equal(rows[1]?.role,'text');
+    assert.equal(rows[0]?.role,'identity');assert.equal(rows[0]?.continuations?.[0]?.role,'text');
   }
   for(const theme of ['dark','light'] as const){
     const outputs=[0,1].map(band=>styleSpans([{text:'Body',role:'text',surface:band?'messageOdd':'messageEven'}] as any,{theme}));

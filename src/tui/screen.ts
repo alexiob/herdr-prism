@@ -1,3 +1,4 @@
+import {agentRows} from './agents.ts';
 import {renderNotes} from './notes.ts';
 import {orderedTabs} from './types.ts';
 import type {DashboardData,UiState,UiAction,ScreenRow,RenderedScreen,SessionView,DetailDocument} from './types.ts';
@@ -11,7 +12,7 @@ import {documentText,summary} from './widgets.ts';
 export {addReferencePage,showReferenceSources} from './reference-readers.ts';
 
 export function createUiState():UiState{return {tab:'Overview',cursor:0,scroll:0,collapsed:new Set(),expanded:new Set(),filter:'',editingFilter:false,pin:false,subtree:false,ascii:false,monochrome:false,help:false,numberPrefix:'',numberTargets:new Map(),view:'lineage',pagedMessages:new Map(),messageReaders:new Map(),readers:new Map(),followMessages:true,pagedRefs:new Map()};}
-export function showDetail(state:UiState,text:string,document?:DetailDocument):void {const position={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};if(state.detail!==undefined)(state.detailStack??=[]).push({text:state.detail,document:state.detailDocument,position});else if(state.refSources)state.sourceDetailReader=position;else state.detailReader=position;if(state.tab==='Messages'&&state.selectedKey){const reader=state.messageReaders.get(state.selectedKey)??{lastIds:[],following:false,newCount:0};reader.following=false;state.messageReaders.set(state.selectedKey,reader);}state.detail=text.slice(0,1024*1024);state.detailDocument=document;state.cursor=0;state.scroll=0;state.cursorId=undefined;}
+export function showDetail(state:UiState,text:string,document?:DetailDocument):void {const position={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll,detailViewId:state.detailViewId};if(state.detail!==undefined)(state.detailStack??=[]).push({text:state.detail,document:state.detailDocument,position});else if(state.refSources)state.sourceDetailReader=position;else state.detailReader=position;if(state.tab==='Messages'&&state.selectedKey){const reader=state.messageReaders.get(state.selectedKey)??{lastIds:[],following:false,newCount:0};reader.following=false;state.messageReaders.set(state.selectedKey,reader);}state.readerSequence=(state.readerSequence??0)+1;state.detailViewId=state.readerSequence;state.detail=text.slice(0,1024*1024);state.detailDocument=document;state.cursor=0;state.scroll=0;state.cursorId=undefined;}
 export function closeDetail(state:UiState):void {const prior=state.detailStack?.pop();if(state.detail!==undefined&&prior){state.detail=prior.text;state.detailDocument=prior.document;Object.assign(state,prior.position);return;}if(state.detail!==undefined&&state.refSources){state.detail=undefined;state.detailDocument=undefined;if(state.sourceDetailReader)Object.assign(state,state.sourceDetailReader);state.sourceDetailReader=undefined;return;}if(state.refSources&&state.refParent){state.detail=state.refParent.text;state.detailDocument=state.refParent.document;Object.assign(state,state.refParent.position);state.refParent=undefined;state.refSources=undefined;return;}state.detail=undefined;state.detailDocument=undefined;state.refSources=undefined;state.sourceDetailReader=undefined;if(state.detailReader){Object.assign(state,state.detailReader);state.detailReader=undefined;}}
 function closeHelp(state:UiState):void {state.help=false;state.helpText=undefined;if(state.helpReader)Object.assign(state,state.helpReader);state.helpReader=undefined;}
 export function changeTab(state:UiState,tab:import('./types.ts').Tab):UiAction {closeHelp(state);while(state.detail!==undefined||state.refSources)closeDetail(state);if(state.readerKey)state.readers.set(state.readerKey,{cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll});state.tab=tab;state.numberPrefix='';return {type:'tab',tab};}
@@ -20,33 +21,8 @@ export function addMessagePage(state:UiState,key:string,messages:Message[]):void
 const allMessages=(session:SessionView,state:UiState)=>[...new Map([...(state.pagedMessages.get(session.key)??[]),...session.evidence.messages].map(message=>[message.id,message])).values()].sort((a,b)=>(a.timestamp??0)-(b.timestamp??0));
 const resident=(value?:string)=>{if(value!==undefined&&/^\d+$/.test(value)){const amount=BigInt(value);if(amount>0n&&amount<1048576n)return `${number(Number(amount)/1024)}KiB`;}return bytes(value);};
 const match=(text:string,state:UiState)=>!state.filter||sanitize(text).toLocaleLowerCase().includes(state.filter.toLocaleLowerCase());
-const pathName=(value?:string)=>value?.replace(/[\\/]+$/,'').split(/[\\/]/).at(-1);
-const checkoutBadge=(session:SessionView)=>`${pathName(session.git?.root??session.evidence.cwd)??'checkout unavailable'}@${session.git?.branch??session.git?.branchState??'branch unavailable'}`;
 function overview(session:SessionView,state:UiState,columns:number,now:number,data:DashboardData):ScreenRow[]{return overviewRows(session,state,now,data);}
 
-function agentRows(data:DashboardData,state:UiState,numeric:Map<number,string>,columns:number):ScreenRow[]{
-  const rows:ScreenRow[]=[];const nodes=new Map(data.sessions.map(s=>[s.key,s]));let index=0;
-  const hidden=(s:SessionView)=>{let key=s.parentKey;const seen=new Set<string>();while(key&&!seen.has(key)){seen.add(key);if(state.collapsed.has(key))return true;key=nodes.get(key)?.parentKey;}return false;};
-  let sessions=data.sessions;
-  if(state.view==='worktrees')sessions=[...sessions].sort((a,b)=>(a.git?.familyKey??'').localeCompare(b.git?.familyKey??'')||(a.git?.checkoutKey??a.evidence.cwd??'').localeCompare(b.git?.checkoutKey??b.evidence.cwd??''));
-  let familyGroup='';let checkoutGroup='';
-  for(const session of sessions){
-    if(state.view==='lineage'&&hidden(session))continue;
-    const title=`${session.evidence.provider} ${session.evidence.title??session.evidence.id} ${session.evidence.state??'unknown'}`;
-    if(!match(title,state))continue;
-    if(state.view==='worktrees'){const family=session.git?.familyKey;const familyKey=family??'unknown-family';if(familyKey!==familyGroup){rows.push({id:`family:${familyKey}`,text:family?`Repository ${family}`:'Repository family unavailable'});familyGroup=familyKey;checkoutGroup='';}const checkout=session.git?.checkoutKey??session.git?.root??session.evidence.cwd??'unknown-checkout';if(checkout!==checkoutGroup){rows.push({id:`checkout:${checkout}`,text:`  Checkout ${session.git?.root??session.evidence.cwd??'unavailable'} · ${session.git?.branch??session.git?.branchState??'branch unavailable'}`});checkoutGroup=checkout;}}
-    const value=++index;numeric.set(value,session.key);
-    const glyph=session.children.length?(state.collapsed.has(session.key)?(state.ascii?'+':'▸'):(state.ascii?'-':'▾')):(state.ascii?'·':'·');
-    const depth=state.view==='lineage'?Math.min(session.depth,5):1;
-    const live=session.attachment?'': ' · no pane';
-    rows.push({id:session.key,text:`${' '.repeat(depth*2)}${glyph} A${value} ${session.depth>5&&state.view==='lineage'?`d${session.depth} `:''}${summary(session.evidence.title??session.evidence.id,Math.max(1,columns-6-depth*2-8-(session.evidence.state??'unknown').length))} · ${session.evidence.state??'unknown'}${columns>=80&&state.view==='lineage'?` · ${checkoutBadge(session)}`:''}${live}`,help:'Enter inspects this agent inside Prism. f focuses its live pane; Space folds children. Numbers + Enter select a displayed Prism target.',document:identityDocument(session,data,Date.now()),action:{type:'select',sessionKey:session.key},disclosureColumn:session.children.length?depth*2+1:undefined});
-    if(state.expanded.has(session.key)){
-      rows.push({id:session.key+':goal',text:`  Goal: ${session.evidence.goals.at(-1)?.objective??'not reported'}`});
-      rows.push({id:session.key+':branch',text:`  ${session.git?.branch??session.evidence.cwd??'Checkout unavailable'} · ${session.evidence.messages.length} messages`});
-    }
-  }
-  return rows;
-}
 function contentRows(session:SessionView,state:UiState,columns:number,now:number,data:DashboardData):ScreenRow[]{
   const rows:ScreenRow[]=[];
   if(state.tab==='Overview')return overview(session,state,columns,now,data);
@@ -65,7 +41,7 @@ function contentRows(session:SessionView,state:UiState,columns:number,now:number
       const help='Enter opens the full message; s opens its exact source; Space expands its preview; y copies the full text. Left/right switches between messages and tools; arrows, Home/End and Page Up/Down scroll the active panel. Mouse wheels scroll the hovered panel. Alternating backgrounds group each message header and body; the selected-row marker and highlight identify the current entry. b loads older message history.';
       rows.push({...block,id:message.id,role:'identity',help,text:`${message.kind==='inter-agent'?`Agent ${message.author??'unknown'} → ${message.recipient??'unknown'}`:message.role==='user'?'U':message.role==='tool'?'Tool result':'A'} · ${session.evidence.provider} · ${age(message.timestamp,now)} ago · ${tools.length} tools`,action:{type:'message',sessionKey:session.key,id:message.id,text:message.text},copy:message.text});
       const full=state.expanded.has(message.id);const lines=wrap(full?message.text.slice(0,128*1024):message.text.slice(0,Math.max(256,columns*12)),Math.max(1,columns-8),full?2000:3);const limit=lines.length;
-      for(const [i,line]of lines.slice(0,Math.min(limit,2000)).entries())rows.push({...block,id:`${message.id}:line:${i}`,role:'text',help,text:`  ${line}`,action:{type:'message',sessionKey:session.key,id:message.id,text:message.text},copy:message.text});
+      rows.at(-1)!.continuations=lines.slice(0,Math.min(limit,2000)).map(line=>({text:`  ${line}`,role:'text'}));
       for(const tool of tools)rows.push({...block,sourceId:message.id,id:`${message.id}:tool:${tool.id}`,role:'secondary',help:'Enter opens this recorded tool result; s opens its source message. Left/right switches panels; each panel scrolls independently.',text:`  ${tool.status} ${tool.name}: ${tool.summary??''}`,action:{type:'message',text:`${tool.status} ${tool.name}\n${tool.summary??'No recorded result'}${tool.editedPaths?.length?`\nEdited paths: ${tool.editedPaths.join('\n')}`:''}`},copy:tool.summary??tool.name});
     }
     const attached=new Set(allMessages(session,state).flatMap(message=>(message.tools??[]).map(tool=>tool.id)));
@@ -127,27 +103,35 @@ export function handleRowClick(state:UiState,x:number,y:number,data:DashboardDat
   if(!Number.isInteger(x)||!Number.isInteger(y)||x<1)return;
   const tab=screen.tabRegions?.find(region=>region.y===y&&x>=region.x&&x<region.x+region.width);if(tab)return state.processConfirmation?undefined:changeTab(state,tab.tab);
   const region=screen.rowRegions?.find(region=>region.y===y&&x>=region.x-1&&x<region.x+region.width);if(!region)return;
-  const row=screen.rows[region.index];if(!row)return;if(row.selectable===false){if(screen.sectionRegions){state.cursor=region.index;state.cursorId=row.id;}return;}state.cursor=region.index;state.cursorId=row.id;state.numberPrefix='';
-  return handleKey(state,x===region.disclosureX?'space':'enter',data,screen);
+  const row=screen.rows[region.index];if(!row)return;const changed=state.cursor!==region.index;state.cursor=region.index;state.cursorId=row.id;state.numberPrefix='';
+  if(changed)resetEntryScroll(state,screen);
+  if(row.selectable===false)return;
+  return x===region.disclosureX?handleKey(state,'space',data,screen):x===region.actionX?handleKey(state,'enter',data,screen):undefined;
 }
 
-/** Mouse wheels route to the hovered Messages viewport without touching its sibling. */
+function resetEntryScroll(state:UiState,screen:RenderedScreen){const region=screen.sectionRegions?.find(region=>region.indices.includes(state.cursor));if(region){const reader=state.sectionReaders?.get(sectionReaderKey(state,region.id));if(reader)reader.freeScroll=false;}}
+function scrollRegion(state:UiState,region:NonNullable<RenderedScreen['sectionRegions']>[number],delta:number,screen:RenderedScreen){
+ const readers=state.sectionReaders??=new Map(),key=sectionReaderKey(state,region.id),reader=readers.get(key)??{cursor:region.indices[0]??0,scroll:0};
+ const scroll=Math.max(0,Math.min(reader.scroll+delta,Math.max(0,region.total-Math.max(1,region.contentHeight))));
+ const visible=region.lineIndices.slice(scroll,scroll+Math.max(1,region.contentHeight)).filter(index=>index>=0);
+ if(!visible.includes(state.cursor))state.cursor=visible[0]??region.indices[0]??state.cursor;
+ state.cursorId=screen.rows[state.cursor]?.id;reader.cursor=state.cursor;reader.cursorId=state.cursorId;reader.scroll=scroll;reader.freeScroll=true;readers.set(key,reader);state.scroll=scroll;
+ if(region.id==='Retained messages'){const messages=state.messageReaders.get(state.selectedKey??'');if(messages){messages.following=scroll>=region.total-region.contentHeight&&delta>0;if(messages.following)messages.newCount=0;}}
+}
+/** Wheels move a panel's content lines; arrow keys move whole logical entries. */
 export function handleRowWheel(state:UiState,x:number,y:number,delta:number,screen:RenderedScreen):boolean{
-  if(state.help||!screen.sectionRegions)return false;
+  if(state.tab==='Notes'&&!state.help&&state.detail===undefined){const region=screen.sectionRegions?.find(region=>x>=region.x&&x<region.x+region.width&&y>=region.y&&y<region.y+region.height);if(region){state.notesScroll=Math.max(0,Math.min((state.notesScroll??0)+delta,Math.max(0,region.total-region.contentHeight)));state.notesFreeScroll=state.notes?.editing===true;}return true;}
+  if(!screen.sectionRegions)return false;
   const region=screen.sectionRegions.find(region=>x>=region.x&&x<region.x+region.width&&y>=region.y&&y<region.y+region.height);
-  if(region?.indices.length){
-    const reader=state.sectionReaders?.get(sectionReaderKey(state,region.id)),current=screen.rows[state.cursor]?.section===region.id?state.cursor:region.indices.find(index=>screen.rows[index]?.id===reader?.cursorId)??region.indices[0]!;
-    const at=region.indices.indexOf(current);state.cursor=region.indices[Math.max(0,Math.min(at+delta,region.indices.length-1))]!;state.cursorId=screen.rows[state.cursor]?.id;
-    if(region.id==='Retained messages'){const reader=state.messageReaders.get(state.selectedKey??'');if(reader){reader.following=state.cursor===region.indices.at(-1);if(reader.following)reader.newCount=0;}}
-  }
+  if(region?.indices.length)scrollRegion(state,region,delta,screen);
   return true;
 }
 
 export function handleKey(state:UiState,key:string,data:DashboardData,screen:RenderedScreen):UiAction|undefined {
   if(state.processConfirmation){
-    if(state.help){if(key==='escape'||key==='?'||key==='help')closeHelp(state);else if(['up','k','down','j','home','end','pageup','pagedown'].includes(key)){state.cursor+=key==='up'||key==='k'?-1:key==='home'?-state.cursor:key==='end'?screen.rows.length:key==='pageup'?-screen.bodyHeight:key==='pagedown'?screen.bodyHeight:1;state.cursorId=undefined;}return;}
+    if(state.help){if(key==='escape'||key==='?'||key==='help')closeHelp(state);else if(['up','k','down','j','home','end','pageup','pagedown'].includes(key)){resetEntryScroll(state,screen);state.cursor+=key==='up'||key==='k'?-1:key==='home'?-state.cursor:key==='end'?screen.rows.length:key==='pageup'?-screen.bodyHeight:key==='pagedown'?screen.bodyHeight:1;state.cursorId=undefined;}return;}
     if(key==='escape'||key==='n'||key==='q'||key==='ctrl+c'){state.processConfirmation=undefined;closeDetail(state);return;}
-    if(key==='?'||key==='help'){state.helpReader={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};state.helpText=screen.rows[state.cursor]?.help??'Confirm only the captured process. Escape cancels. No signal is sent until you confirm.';state.help=true;state.cursor=0;state.cursorId=undefined;state.scroll=0;return;}
+    if(key==='?'||key==='help'){state.helpReader={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};state.helpText=screen.rows[state.cursor]?.help??'Confirm only the captured process. Escape cancels. No signal is sent until you confirm.';state.readerSequence=(state.readerSequence??0)+1;state.helpViewId=state.readerSequence;state.help=true;state.cursor=0;state.cursorId=undefined;state.scroll=0;return;}
     if(key==='enter'&&screen.rows[state.cursor]?.id==='process-cancel'){state.processConfirmation=undefined;closeDetail(state);return;}
     if(key==='y'||key==='enter'&&screen.rows[state.cursor]?.id==='process-confirm'){
       const visible=screen.rowRegions?.find(r=>screen.rows[r.index]?.id==='process-confirm');
@@ -170,7 +154,7 @@ export function handleKey(state:UiState,key:string,data:DashboardData,screen:Ren
   if(state.tab==='Notes'&&!state.notes?.editing&&!state.help&&state.detail===undefined){const move:Record<string,number>={up:-1,down:1,pageup:-screen.bodyHeight,pagedown:screen.bodyHeight};if(key in move){state.notesScroll=Math.max(0,(state.notesScroll??0)+move[key]!);return;}if(key==='home'||key==='end'){state.notesScroll=key==='home'?0:Number.MAX_SAFE_INTEGER;return;}}
   if(state.editingFilter){if(key==='enter'||key==='escape'){state.editingFilter=false;state.cursor=0;state.cursorId=undefined;}else if(key==='backspace')state.filter=[...state.filter].slice(0,-1).join('');else if(key.length===1)state.filter+=key;return;}
   if(key==='escape'){if(state.help)closeHelp(state);else closeDetail(state);state.numberPrefix='';state.notice=undefined;return;}
-  if(key==='?'||key==='help'){if(state.help)closeHelp(state);else{state.helpReader={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};state.helpText=screen.rows[state.cursor]?.help??'Scroll to read recorded content; Escape returns to the previous entry.';if(state.boundSessionKey&&state.selectedKey!==state.boundSessionKey&&!state.pin)state.helpText+='\n\nYou are inspecting another agent. Escape closes this help; Shift+F then returns to following this panel’s bound agent.';state.help=true;state.cursor=0;state.cursorId=undefined;state.scroll=0;}return;}
+  if(key==='?'||key==='help'){if(state.help)closeHelp(state);else{state.helpReader={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};state.helpText=screen.rows[state.cursor]?.help??'Scroll to read recorded content; Escape returns to the previous entry.';if(state.boundSessionKey&&state.selectedKey!==state.boundSessionKey&&!state.pin)state.helpText+='\n\nYou are inspecting another agent. Escape closes this help; Shift+F then returns to following this panel’s bound agent.';state.readerSequence=(state.readerSequence??0)+1;state.helpViewId=state.readerSequence;state.help=true;state.cursor=0;state.cursorId=undefined;state.scroll=0;}return;}
   if(key==='q'||key==='ctrl+c')return {type:'quit'};
   if(key==='tab'||key==='shift+tab'){const order=orderedTabs(state),i=order.indexOf(state.tab);return changeTab(state,order[(i+(key==='tab'?1:order.length-1))%order.length]!);}
   if(state.help&&!['j','k','down','up','pageup','pagedown','home','end','g','G'].includes(key))return;
@@ -187,26 +171,28 @@ export function handleKey(state:UiState,key:string,data:DashboardData,screen:Ren
   if(!state.help&&screen.sectionRegions){
     const current=screen.sectionRegions.find(region=>region.indices.includes(state.cursor))??screen.sectionRegions[0]!;
     if(key==='left'||key==='right'){
-      const available=screen.sectionRegions.filter(region=>region.indices.length),at=available.indexOf(current),next=available[(Math.max(0,at)+(key==='right'?1:available.length-1))%available.length];
-      if(next){const saved=state.sectionReaders?.get(sectionReaderKey(state,next.id));state.cursor=next.indices.find(index=>screen.rows[index]?.id===saved?.cursorId)??next.indices[0]!;state.cursorId=screen.rows[state.cursor]?.id;}return;
+      const available=screen.sectionRegions.filter(region=>region.indices.length),at=available.indexOf(current),neighbors=available.filter(region=>region.height>0&&(key==='right'?region.x>current.x:region.x<current.x)).sort((a,b)=>Math.abs(a.y-current.y)-Math.abs(b.y-current.y)),next=neighbors[0]??available[(Math.max(0,at)+(key==='right'?1:available.length-1))%available.length];
+      if(next){const saved=state.sectionReaders?.get(sectionReaderKey(state,next.id));state.cursor=next.indices.find(index=>screen.rows[index]?.id===saved?.cursorId)??next.indices[0]!;state.cursorId=screen.rows[state.cursor]?.id;resetEntryScroll(state,screen);}return;
     }
-    const moves:Record<string,number>={j:1,down:1,k:-1,up:-1,pagedown:Math.max(1,current.height-2),pageup:-Math.max(1,current.height-2)};
+    if(key==='pagedown'||key==='pageup'){scrollRegion(state,current,(key==='pagedown'?1:-1)*Math.max(1,current.contentHeight),screen);return;}
+    const moves:Record<string,number>={j:1,down:1,k:-1,up:-1};
     if(key in moves||['home','g','end','G'].includes(key)){
       const at=current.indices.indexOf(state.cursor),target=key==='home'||key==='g'?0:key==='end'||key==='G'?current.indices.length-1:at+moves[key]!;
       state.cursor=current.indices[Math.max(0,Math.min(target,current.indices.length-1))]??state.cursor;state.cursorId=screen.rows[state.cursor]?.id;
+      resetEntryScroll(state,screen);
       if(current.id==='Retained messages'){const reader=state.messageReaders.get(state.selectedKey??'');if(reader){reader.following=state.cursor===current.indices.at(-1)&&!['home','g','up','k','pageup'].includes(key);if(reader.following)reader.newCount=0;}}return;
     }
   }
   if((key==='left'||key==='right')&&state.tab==='Overview'&&!state.detail&&!state.help){const current=screen.rowRegions?.find(region=>region.index===state.cursor);if(current){const candidates=screen.rowRegions?.filter(region=>key==='right'?region.x>current.x:region.x<current.x).sort((a,b)=>Math.abs(a.y-current.y)-Math.abs(b.y-current.y));if(candidates?.[0]){state.cursor=candidates[0].index;state.cursorId=screen.rows[state.cursor]?.id;}}return;}
   const moves:Record<string,number>={j:1,down:1,k:-1,up:-1,pagedown:screen.bodyHeight,pageup:-screen.bodyHeight};
-  if(key in moves){state.cursor+=moves[key];state.cursorId=undefined;const reader=state.selectedKey?state.messageReaders.get(state.selectedKey):undefined;if(reader&&state.tab==='Messages'&&state.detail===undefined)reader.following=state.cursor>=screen.rows.length-1;if(reader?.following)reader.newCount=0;return;}
-  if(key==='home'||key==='g'){state.cursor=0;state.cursorId=undefined;const reader=state.selectedKey?state.messageReaders.get(state.selectedKey):undefined;if(reader&&state.tab==='Messages')reader.following=false;return;}
-  if(key==='end'||key==='G'){state.cursor=screen.rows.length-1;state.cursorId=undefined;const reader=state.selectedKey?state.messageReaders.get(state.selectedKey):undefined;if(reader&&state.tab==='Messages'&&state.detail===undefined){reader.following=true;reader.newCount=0;}return;}
+  if(key in moves){state.cursor+=moves[key];state.cursorId=undefined;resetEntryScroll(state,screen);const reader=state.selectedKey?state.messageReaders.get(state.selectedKey):undefined;if(reader&&state.tab==='Messages'&&state.detail===undefined)reader.following=state.cursor>=screen.rows.length-1;if(reader?.following)reader.newCount=0;return;}
+  if(key==='home'||key==='g'){resetEntryScroll(state,screen);state.cursor=0;state.cursorId=undefined;const reader=state.selectedKey?state.messageReaders.get(state.selectedKey):undefined;if(reader&&state.tab==='Messages')reader.following=false;return;}
+  if(key==='end'||key==='G'){resetEntryScroll(state,screen);state.cursor=screen.rows.length-1;state.cursorId=undefined;const reader=state.selectedKey?state.messageReaders.get(state.selectedKey):undefined;if(reader&&state.tab==='Messages'&&state.detail===undefined){reader.following=true;reader.newCount=0;}return;}
   const row=screen.rows[state.cursor];if(!row)return;
   if(key==='f'&&state.tab==='Agents'&&state.detail===undefined){const session=data.sessions.find(s=>s.key===row.action?.sessionKey);if(session?.attachment)return {type:'focus',sessionKey:session.key};state.notice='This agent has no live Herdr pane';return;}
   if(key==='space'){
     if(state.detail!==undefined)return row.action?.type==='ref-sources'?row.action:undefined;
-    if(state.tab==='Agents'){const session=data.sessions.find(s=>s.key===row.action?.sessionKey);if(session?.children.length){state.collapsed.has(session.key)?state.collapsed.delete(session.key):state.collapsed.add(session.key);}else if(session){state.expanded.has(session.key)?state.expanded.delete(session.key):state.expanded.add(session.key);}}
+    if(state.tab==='Agents'){const session=data.sessions.find(s=>s.key===row.action?.sessionKey);if(session&&data.sessions.some(child=>child.parentKey===session.key)){state.collapsed.has(session.key)?state.collapsed.delete(session.key):state.collapsed.add(session.key);}else if(session){state.expanded.has(session.key)?state.expanded.delete(session.key):state.expanded.add(session.key);}}
     else if(state.tab==='Messages'){const id=row.action?.id??row.id;state.expanded.has(id)?state.expanded.delete(id):state.expanded.add(id);}
     else if(state.tab==='Processes'){const id=`process:${state.selectedKey}:${row.id}`;state.collapsed.has(id)?state.collapsed.delete(id):state.collapsed.add(id);}
     else if(state.tab==='Refs'){if(state.refSources)return row.action;const session=data.sessions.find(s=>s.key===state.selectedKey);const ref=session?visibleReferences(session,state).find(ref=>ref.id===row.id):undefined;if(ref)return{type:'ref-sources',sessionKey:state.selectedKey,id:ref.id};else showDetail(state,row.copy??row.text);}

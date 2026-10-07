@@ -161,6 +161,6 @@ export class ProcessTracker {
             processes.sort((a, b) => this.order.get(a.key) - this.order.get(b.key));
         const sharedWith = this.shared.get(sessionKey), errors = [...this.batch?.errors ?? []];
         const availability = sharedWith ? 'not_applicable' : !total ? 'unavailable' : readable !== total || errors.length ? 'partial' : 'known';
-        return { processes, cpuPercent: total && cpuReadable === total ? cpu : undefined, memoryBytes: readable ? memory.toString() : undefined, availability, coverage: { readable, total }, cpuCoverage: { readable: cpuReadable, total }, memoryLabel: this.batch?.platform === 'win32' || this.batch?.platform === 'windows' ? 'working-set sum' : 'RSS sum', sampledAt: this.batch?.sampledAt, sharedWith, reason: sharedWith ? 'shared with parent' : !processes.length ? 'No verified live process' : undefined, errors, unreadablePids };
+        return { processes, cpuPercent: !sharedWith && total && cpuReadable === total ? cpu : undefined, cpuLowerBound: !sharedWith && cpuReadable > 0 && cpuReadable < total ? cpu : undefined, memoryBytes: readable ? memory.toString() : undefined, availability, coverage: { readable, total }, cpuCoverage: { readable: cpuReadable, total }, memoryLabel: this.batch?.platform === 'win32' || this.batch?.platform === 'windows' ? 'working-set sum' : 'RSS sum', sampledAt: this.batch?.sampledAt, sharedWith, reason: sharedWith ? 'shared with parent' : !processes.length ? 'No verified live process' : undefined, errors, unreadablePids };
     }
 }

@@ -15,12 +15,13 @@ catch {
 } return bytes(value); }
 const duration = (ms) => ms === undefined || !Number.isFinite(ms) || ms < 0 ? '—' : number(ms / 1000) + 's';
 const percent = (value) => value === undefined ? '—' : number(value) + '%';
+const aggregateCpu = (session) => session.resource?.cpuPercent !== undefined ? percent(session.resource.cpuPercent) : session.resource?.cpuLowerBound !== undefined ? '≥' + percent(session.resource.cpuLowerBound) : '—';
 const iso = (timestamp) => timestamp === undefined || !Number.isFinite(timestamp) || Math.abs(timestamp) > 8640000000000000 ? '—' : new Date(timestamp).toISOString();
 const statusRole = (value) => value === 'known' || value === 'active' || value === 'done' ? 'positive' : value === 'unavailable' || value === 'partial' || value === 'stale' ? 'warning' : 'text';
 export const rowHelp = {
-    cpu: 'Sampled user + kernel CPU delta over monotonic elapsed. 100% = one logical core; the aggregate can exceed 100%. The first sample needs warmup. Only verified owned processes count. History spans the observed period, up to 15 minutes, newest at right. Each column shows its last measured sample; a missing current reading does not erase earlier measurements. Explicit sampling gaps clear columns. Blanks are unobserved intervals or explicit gaps, never interpolated; measured zero uses a baseline mark. CPU chart full scale is at least one core and grows in whole cores. Enter opens the exact period, last measurement time and scale.',
-    memory: 'RSS sum on Unix; working-set sum on Windows. Each process counts once, but shared pages can occur in several processes. Peak is the highest observed aggregate sample, not lifetime allocation. The chart uses bytes from zero to its observed chart peak, not host memory percentage. History spans the observed period, up to 15 minutes, newest at right. Each column shows its last measured sample; current availability is separate. Explicit sampling gaps clear columns. Blanks are unobserved intervals or explicit gaps; measured zero uses a baseline mark. Enter opens measurements, last measurement time, period, scale and scope.',
-    coverage: 'Readable/total verified process coverage. Unreadable processes remain in the denominator. A missing required CPU sample makes the aggregate unavailable. Enter opens Processes; u changes scope.',
+    cpu: 'Sampled user + kernel CPU delta over monotonic elapsed. 100% = one logical core; the aggregate can exceed 100%. The first sample needs warmup. Only verified owned processes count. ≥ marks a measured lower bound when some owned processes are warming up or unreadable; it is not a complete total. History can include these labeled partial observations. History spans the observed period, up to 15 minutes, newest at right. Each column shows its last measured sample; a missing current reading does not erase earlier measurements. Explicit sampling gaps clear columns. Blanks are unobserved intervals or explicit gaps, never interpolated; measured zero uses a baseline mark. CPU chart full scale is at least one core and grows in whole cores. Enter opens the exact period, last measurement time and scale.',
+    memory: 'Cumulative RSS of the selected agent and all verified owned processes on Unix; working-set sum on Windows. u additionally includes recorded sub-agent sessions. Each process counts once, but shared pages can occur in several processes. Peak is the highest observed aggregate sample, not lifetime allocation. The chart uses bytes from zero to its observed chart peak, not host memory percentage. History spans the observed period, up to 15 minutes, newest at right. Each column shows its last measured sample; current availability is separate. Explicit sampling gaps clear columns. Blanks are unobserved intervals or explicit gaps; measured zero uses a baseline mark. Enter opens measurements, last measurement time, period, scale and scope.',
+    coverage: 'Readable/total verified process coverage. Unreadable processes remain in the denominator. A missing required CPU sample leaves the complete aggregate unavailable; ≥ shows the measured lower bound when available. Enter opens Processes; u changes scope.',
     tokens: 'Recorded provider observations. Repeated cumulative counters are not added twice. Cache can be a subset of input or a separate category. Retained observations do not establish lifetime completeness. Enter opens all usage facts.',
     context: 'Measured current-context occupancy, separate from lifetime consumption. Percent requires a compatible actual capacity and current measurement. Enter opens exact counters and available provenance.',
     'turn-tokens': 'Current or last recorded turn usage uses explicit turn IDs, compatible deltas or a prior-turn cumulative baseline. A first lifetime snapshot does not establish a turn total. Enter opens counters, coverage and reduction provenance.',
@@ -68,6 +69,7 @@ function resourceHistory(session, kind, width, ascii, now) {
             field('Period', period ? `${duration(period.to - period.from)} observed · ending ${iso(period.to)}` : values.length ? `Recent ${values.length} samples · timestamps unavailable` : 'No recorded samples', 'duration'),
             field('Last measured', iso(data.latestMeasuredAt), 'duration'),
             field('Measured samples', data.measuredCount, 'quantity'),
+            ...(kind === 'cpu' && data.partialCount ? [field('Partial samples', data.partialCount, 'warning'), field('Partial history', 'Includes measured lower bounds (≥), not complete totals.')] : []),
             field('Sampling', `Last measured sample per column; current availability is separate. Explicit gaps clear columns (${data.explicitGaps} recorded).`),
             field('Scale', ceiling === undefined ? data.measuredCount ? 'Unavailable while chart columns contain only gaps' : 'Unavailable until measured' : kind === 'cpu' ? `0–${percent(ceiling)}` : `0–${resident(BigInt(Math.floor(ceiling)).toString())} · observed chart peak, not host %`, 'quantity'),
         ] };
@@ -97,7 +99,7 @@ export function resourceDocument(session, id, state, now) {
     const r = session.resource, history = session.history;
     const doc = { title: id === 'cpu' ? 'CPU' : id === 'coverage' || id === 'scope' ? 'Process coverage' : 'Memory', capturedAt: now, sections: [] };
     if (id === 'cpu')
-        doc.sections.push(section('cpu', 'CPU', [field('Current', percent(r?.cpuPercent), 'quantity'), ...resourceHistory(session, 'cpu', 22, state.ascii, now).fields]));
+        doc.sections.push(section('cpu', 'CPU', [field('Current', aggregateCpu(session), 'quantity'), ...resourceHistory(session, 'cpu', 22, state.ascii, now).fields]));
     else if (id !== 'coverage' && id !== 'scope')
         doc.sections.push(section('memory', 'Memory', [field('Metric', r?.memoryLabel, 'identity'), field('Current', resident(r?.memoryBytes), 'quantity'), field('Peak', resident(history?.peakMemoryBytes), 'quantity'), ...resourceHistory(session, 'memory', 22, state.ascii, now).fields]));
     doc.sections.push(section('scope', 'Sample scope', [field('Includes', state.subtree ? 'Selected agent + descendants + owned jobs' : 'Selected agent + owned jobs'), field('Status', r?.availability, statusRole(r?.availability)), field('Shared with', r?.sharedWith, 'identity'), field('Sample', iso(r?.sampledAt), 'duration'), field('Reason', r?.reason)], 1));
@@ -157,9 +159,10 @@ export function overviewRows(session, state, now, data) {
         add('task', 'Task', e.task, workDocument(session, 'task', data, now), 'Work', 1);
     add('process-uptime', 'Timing', `Harness uptime ${duration(t.uptime)} · current turn ${duration(t.elapsed)}`, timingDocument(session, now), 'Work', 1, 'duration');
     rows.at(-1).value = `${age(e.startedAt, now)} session · ${duration(t.elapsed)} turn`;
-    const cpuValue = percent(r?.cpuPercent), memoryValue = resident(r?.memoryBytes), metricWidth = Math.max(8, cellWidth(cpuValue), cellWidth(memoryValue));
+    const cpuValue = aggregateCpu(session), memoryValue = resident(r?.memoryBytes), metricWidth = Math.max(8, cellWidth(cpuValue), cellWidth(memoryValue));
     add('cpu', 'CPU', `${pad(cpuValue, metricWidth)} ${resourceHistory(session, 'cpu', 8, state.ascii, now).chart}`, resourceDocument(session, 'cpu', state, now), 'Resources', 0, 'quantity');
     add('memory', r?.memoryLabel === 'working-set sum' ? 'WS sum' : 'RSS sum', `${pad(memoryValue, metricWidth)} ${resourceHistory(session, 'memory', 8, state.ascii, now).chart}`, resourceDocument(session, 'memory', state, now), 'Resources', 0, 'quantity');
+    rows.at(-1).gapBefore = 1;
     link('coverage', 'Processes', r?.coverage ? `${r.coverage.readable}/${r.coverage.total} readable` : '—', 'Processes', 'Resources', 0);
     add('context', 'Context', u?.contextPercent === undefined ? '—' : percent(u.contextPercent) + ' ' + meter(u.contextPercent, 8, state.ascii), usageDocument(session, now), 'Usage', 0, 'quantity');
     add('tokens', 'Tokens', `in ${number(u?.input)} · out ${number(u?.output)}`, usageDocument(session, now), 'Usage', 0, 'quantity');

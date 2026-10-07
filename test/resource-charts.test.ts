@@ -124,3 +124,12 @@ test('ASCII measured zero stays visible and differs from an unavailable chart co
 test('overview CPU and resident-memory graphs share a fixed left edge across numeric lengths',()=>{
  for(const [cpu,memory] of [[4.7,'2469606195'],[124.2,'65536'],[0,'0'],[2345.7,'107374182400']] as const){const root=sampled();root.resource={...root.resource!,cpuPercent:cpu,memoryBytes:memory};const state=createUiState();state.selectedKey=root.key;const frame=renderScreen({sessions:[root],updatedAt:30000,stale:false,diagnostics:[]},state,80,34,30000);const cpuLine=frame.lines.find(l=>/^│.? CPU\s|^│.?CPU\s/.test(l))??frame.lines.find(l=>l.includes('CPU')&&/[▁▂▃▄▅▆▇█]/.test(l));const memLine=frame.lines.find(l=>l.includes('RSS sum')&&/[▁▂▃▄▅▆▇█]/.test(l));assert.ok(cpuLine&&memLine);assert.equal(cpuLine.search(/[▁▂▃▄▅▆▇█]/),memLine.search(/[▁▂▃▄▅▆▇█]/));}
 });
+
+test('partial CPU retains an explicit measured lower bound in current values and history',()=>{
+ const root=sampled();root.resource={...root.resource!,cpuPercent:undefined,cpuLowerBound:124.5,cpuCoverage:{readable:1,total:2}};
+ root.history={cpu:[undefined,undefined],memory:['1024','2048'],windowMs:60000,points:[{at:1000,cpuLowerBound:125},{at:2000,cpuLowerBound:124.5}]};
+ const state=createUiState();state.selectedKey=root.key;
+ const frame=renderScreen({sessions:[root],updatedAt:2000,stale:false,diagnostics:[]},state,80,34,2000),row=frame.rows.find(row=>row.id==='cpu')!;
+ assert.match(row.value!,/≥124.5%/);assert.ok(/[▁▂▃▄▅▆▇█]/.test(row.value!));assert.match(row.help!,/lower bound/);
+ const doc=row.document!,fields=doc.sections.flatMap(section=>section.fields??[]);assert.equal(fields.find(field=>field.label==='Current')!.value,'≥124.5%');assert.ok(fields.some(field=>field.label==='Partial samples'&&field.value==='2'));
+});

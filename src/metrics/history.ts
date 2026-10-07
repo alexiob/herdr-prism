@@ -1,4 +1,4 @@
-export interface HistoryPoint {at:number;cpuPercent?:number;memoryBytes?:string;gap?:boolean;}
+export interface HistoryPoint {at:number;cpuPercent?:number;cpuLowerBound?:number;memoryBytes?:string;gap?:boolean;}
 export interface HistoryOptions {windowMs?:number;maxPoints?:number;gapMs?:number;maxSeries?:number;}
 export class SampleHistory {
  private series=new Map<string,HistoryPoint[]>();private windowMs:number;private maxPoints:number;private gapMs:number;private maxSeries:number;
@@ -6,9 +6,9 @@ export class SampleHistory {
  add(session:string,scope:string,point:HistoryPoint):void{if(!Number.isFinite(point.at))throw new Error('Invalid sample time');const key=JSON.stringify([session,scope]);let points=this.series.get(key)??[];const last=points.at(-1);if(last&&point.at<last.at)return;if(last&&point.at===last.at)points.pop();points.push({...point});points=points.filter(p=>p.at>=point.at-this.windowMs).slice(-this.maxPoints);this.series.delete(key);this.series.set(key,points);while(this.series.size>this.maxSeries)this.series.delete(this.series.keys().next().value!);}
  // Presentation clocks can differ between panels. Pruning belongs to add(),
  // not a read: an earlier view must not discard newer measured observations.
- view(session:string,scope:string,now=Date.now()) {const key=JSON.stringify([session,scope]);const raw=(this.series.get(key)??[]).filter(p=>p.at>=now-this.windowMs&&p.at<=now);const points:HistoryPoint[]=[];let peakMemoryBytes:bigint|undefined,peakCpuPercent:number|undefined;
-  for(const p of raw){const last=points.at(-1);if(last&&p.at-last.at>this.gapMs)points.push({at:last.at+this.gapMs,gap:true});points.push({...p});if(p.memoryBytes!==undefined){const v=BigInt(p.memoryBytes);peakMemoryBytes=peakMemoryBytes===undefined||v>peakMemoryBytes?v:peakMemoryBytes;}if(p.cpuPercent!==undefined)peakCpuPercent=Math.max(peakCpuPercent??0,p.cpuPercent);}
-  return {points,cpu:points.map(p=>p.cpuPercent),memory:points.map(p=>p.memoryBytes),peakMemoryBytes:peakMemoryBytes?.toString(),peakCpuPercent,observedFrom:raw[0]?.at,observedTo:raw.at(-1)?.at,windowMs:this.windowMs};
+ view(session:string,scope:string,now=Date.now()) {const key=JSON.stringify([session,scope]);const raw=(this.series.get(key)??[]).filter(p=>p.at>=now-this.windowMs&&p.at<=now);const points:HistoryPoint[]=[];let peakMemoryBytes:bigint|undefined,peakCpuPercent:number|undefined,peakCpuLowerBound:number|undefined;
+  for(const p of raw){const last=points.at(-1);if(last&&p.at-last.at>this.gapMs)points.push({at:last.at+this.gapMs,gap:true});points.push({...p});if(p.memoryBytes!==undefined){const v=BigInt(p.memoryBytes);peakMemoryBytes=peakMemoryBytes===undefined||v>peakMemoryBytes?v:peakMemoryBytes;}if(p.cpuPercent!==undefined)peakCpuPercent=Math.max(peakCpuPercent??0,p.cpuPercent);if(p.cpuLowerBound!==undefined)peakCpuLowerBound=Math.max(peakCpuLowerBound??0,p.cpuLowerBound);}
+  return {points,cpu:points.map(p=>p.cpuPercent),memory:points.map(p=>p.memoryBytes),peakMemoryBytes:peakMemoryBytes?.toString(),peakCpuPercent,peakCpuLowerBound,observedFrom:raw[0]?.at,observedTo:raw.at(-1)?.at,windowMs:this.windowMs};
  }
  clear(session?:string):void{if(session===undefined)this.series.clear();else for(const key of this.series.keys())if(JSON.parse(key)[0]===session)this.series.delete(key);}
 }

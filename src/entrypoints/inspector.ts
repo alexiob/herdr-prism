@@ -48,12 +48,12 @@ export async function main(argv = process.argv.slice(2)) {
     const connectNotes=(dir:string)=>{notesStore=new NotesStore(dir);notes=new NotesController(notesStore);notes.on('change',()=>{state.notes=notes!.value;if(!closing)paint();});};
     const editorInput=async(event:any)=>{
         if(!notes?.value?.editing)return false;
-        if(event.type==='paste'){if(event.overflow)state.notice='Paste exceeds 1 MiB; nothing inserted';else notes.paste(event.text,{columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});return true;}
-        if(event.type==='mouse'){if(event.release)return true;const tab=frame.tabRegions?.find(r=>r.y===event.y&&event.x>=r.x&&event.x<r.x+r.width);if(!tab)return true;await notes.end();return false;}
+        if(event.type==='paste'){state.notesFreeScroll=false;if(event.overflow)state.notice='Paste exceeds 1 MiB; nothing inserted';else notes.paste(event.text,{columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});return true;}
+        if(event.type==='mouse'){if(event.release)return true;if(event.button===64||event.button===65){handleRowWheel(state,event.x,event.y,event.button===64?-3:3,frame);state.notesFreeScroll=true;return true;}const tab=frame.tabRegions?.find(r=>r.y===event.y&&event.x>=r.x&&event.x<r.x+r.width);if(!tab)return true;await notes.end();return false;}
         if(event.key==='ctrl+s'){await notes.flush();return true;}
         if(event.key==='escape'){await notes.end();return true;}
         if(['tab','shift+tab','ctrl+c'].includes(event.key)){await notes.end();return false;}
-        return notes.key(event.key,{columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});
+        state.notesFreeScroll=false;return notes.key(event.key,{columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});
     };
     const paint = () => { syncBoundSelection();syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
     if (args.options.demo) {

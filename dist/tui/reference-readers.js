@@ -26,7 +26,7 @@ export function addReferencePage(state, key, page, revision) {
 export function showReferenceSources(state, key, reference, page, revision, append = false) {
     const previous = state.refSources;
     if (!previous) {
-        const position = { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll };
+        const position = { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll, detailViewId: state.detailViewId };
         if (state.detail !== undefined) {
             state.refParent = { text: state.detail, document: state.detailDocument, position };
             state.detail = undefined;

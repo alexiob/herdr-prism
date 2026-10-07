@@ -86,6 +86,12 @@ export class NativePublisher {
                 continue;
             }
             const resource = session.resource, git = session.git;
+            // A newborn or unreadable job has no CPU delta yet. Show the measured
+            // lower bound instead of erasing active compilation or implying zero.
+            const lowerBound = options.selfJobs && resource?.availability !== 'not_applicable' && resource?.cpuPercent === undefined && resource?.cpuLowerBound !== undefined;
+            const cpu = resource?.availability === 'not_applicable' ? undefined : lowerBound ? resource?.cpuLowerBound : resource?.cpuPercent;
+            const warming = options.selfJobs && resource?.availability !== 'not_applicable' && resource?.processes.length && cpu === undefined;
+            const freshness = resource?.availability === 'not_applicable' ? 'shared' : resource?.availability === 'stale' ? 'cached' : lowerBound ? 'partial' : warming ? 'warming up' : resource?.availability === 'known' ? '' : resource?.availability ?? 'unavailable';
             const groupKey = group(session), groupLabel = groupKey && groupKey !== previousGroup ? (options.grouping === 'tab' ? `Tab: ${tabName(session)}` : `Project: ${path.basename(groupKey.replace(/\\/g, '/'))}`) : '';
             previousGroup = groupKey;
             const state = stateOf(session);
@@ -93,12 +99,12 @@ export class NativePublisher {
                 hat_harness: truncate(pane.agent ?? session.evidence.provider, 16),
                 hat_line: truncate(String(pane.name ?? pane.terminal_title_stripped ?? pane.title_stripped ?? session.evidence.title ?? session.evidence.provider).split('|')[0].trim(), 16),
                 hat_goal: truncate(session.evidence.goals.at(-1)?.objective ? `Goal: ${session.evidence.goals.at(-1).objective}` : session.evidence.task ? `Task: ${session.evidence.task}` : '', 100),
-                hat_load: `${resource?.availability === 'stale' ? '~ ' : ''}${options.harnessOnly ? 'H ' : ''}CPU ${number(resource?.cpuPercent)}%  ${resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS'} ${compactBytes(resource?.memoryBytes)}`,
+                hat_load: `${resource?.availability === 'stale' ? '~ ' : ''}${options.harnessOnly ? 'H ' : ''}CPU ${lowerBound ? '≥' : ''}${number(cpu)}%  ${resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS'} ${compactBytes(resource?.memoryBytes)}`,
                 hat_counts: `p${resource?.processes.length ?? '—'} a${this.descendants(session, graph)} m${session.evidence.reason === 'metadata only; transcript body not loaded' || session.evidence.availability === 'unavailable' && !session.evidence.messages.length ? '—' : session.evidence.messages.filter(m => m.role !== 'tool').length} r${session.refCoverage === 'unavailable' ? '—' : session.refs?.length ?? '—'}${session.refCoverage === 'partial' || session.refCoverage === 'retained' ? '+' : ''}`,
                 hat_branch: truncate(git?.branch ?? git?.branchState ?? 'Git —', 12), hat_add: git?.added === undefined ? '' : `+${number(git.added)}`, hat_del: git?.deleted === undefined ? '' : `-${number(git.deleted)}`,
                 hat_div: `↑${number(git?.ahead)} ↓${number(git?.behind)}`, hat_conflict: git?.conflicts ? `conflicts ${git.conflicts}` : '',
                 hat_last: truncate(session.evidence.messages.filter(m => m.kind !== 'inter-agent' && m.role === 'assistant').at(-1)?.text ?? '', 100),
-                hat_rank: `${grouped ? '' : attention(session) + ':'}${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability === 'stale' ? 'cached' : resource?.availability ?? 'unavailable', hat_group: truncate(groupLabel, 28), hat_attention: state === 'blocked' ? '! INPUT REQUIRED' : state === 'done' ? '✓ READY TO REVIEW' : state === 'idle' ? '○ IDLE' : state === 'paused' ? 'Ⅱ PAUSED' : state === 'working' ? '● WORKING' : ''
+                hat_rank: `${grouped ? '' : attention(session) + ':'}${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: freshness, hat_group: truncate(groupLabel, 28), hat_attention: state === 'blocked' ? '! INPUT REQUIRED' : state === 'done' ? '✓ READY TO REVIEW' : state === 'idle' ? '○ IDLE' : state === 'paused' ? 'Ⅱ PAUSED' : state === 'working' ? '● WORKING' : ''
             };
             for (const key of keys)
                 tokens[key] = sanitize(tokens[key]).replace(/[\r\n\t]/g, ' ');

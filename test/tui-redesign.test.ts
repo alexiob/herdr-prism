@@ -56,7 +56,7 @@ test('all visible action summaries fit with arrows, help and matching drawn mous
     for(const region of frame.rowRegions){
       const row=frame.rows[region.index];
       assert.ok(row.help,`${tab}/${row.id}: help missing`);
-      if(row.action)assert.ok(region.display.endsWith('→'),`${tab}/${row.id}: arrow missing`);
+      if(region.actionX!==undefined)assert.ok(region.display.endsWith('→'),`${tab}/${row.id}: arrow missing`);
       assert.ok(cellWidth(region.display)<=region.width);
     }
     assert.ok(frame.tabRegions.some((region:any)=>region.tab===tab),`${tab}: tab not visible`);
@@ -91,7 +91,7 @@ test('Overview Notes link selects the edit entry and restores the Overview ancho
  handleKey(state,'shift+tab',data,frame);frame=renderScreen(data,state,50,24);assert.equal(state.tab,'Overview');assert.equal(state.cursorId,anchor);
 });
 test('mixed reference facts and actions allow reading the entire path before selecting the action list',()=>{
- const data=fixture(),state=createUiState();state.selectedKey=data.sessions[0]!.key;state.tab='Refs';const ref=data.sessions[0]!.refs![0]!;ref.target='/EARLY/'+('long-directory/'.repeat(30))+'ending.ts';state.cursorId=ref.id;let frame=renderScreen(data,state,36,18);const action=handleKey(state,'enter',data,frame)!;showDetail(state,action.text??'',action.document);frame=renderScreen(data,state,36,18);assert.match(frame.lines.join('\n'),/EARLY/);handleKey(state,'end',data,frame);frame=renderScreen(data,state,36,18);handleKey(state,'up',data,frame);frame=renderScreen(data,state,36,18);assert.equal(handleKey(state,'enter',data,frame)?.type,'source');handleKey(state,'home',data,frame);frame=renderScreen(data,state,36,18);assert.match(frame.lines.join('\n'),/EARLY/);assert.equal(state.scroll,0);
+ const data=fixture(),state=createUiState();state.selectedKey=data.sessions[0]!.key;state.tab='Refs';const ref=data.sessions[0]!.refs![0]!;ref.target='/EARLY/'+('long-directory/'.repeat(30))+'ending.ts';state.cursorId=ref.id;let frame=renderScreen(data,state,36,18);const action=handleKey(state,'enter',data,frame)!;showDetail(state,action.text??'',action.document);frame=renderScreen(data,state,36,18);assert.match(frame.lines.join('\n'),/EARLY/);for(let i=0;i<3&&frame.rows[state.cursor]?.section!=='actions';i++){handleKey(state,'right',data,frame);frame=renderScreen(data,state,36,18);}handleKey(state,'end',data,frame);frame=renderScreen(data,state,36,18);assert.equal(handleKey(state,'enter',data,frame)?.type,'source');for(let i=0;i<3&&frame.rows[state.cursor]?.section!=='target';i++){handleKey(state,'left',data,frame);frame=renderScreen(data,state,36,18);}handleKey(state,'home',data,frame);frame=renderScreen(data,state,36,18);assert.match(frame.lines.join('\n'),/EARLY/);assert.equal(state.scroll,0);
 });
 test('coverage-only details occupy the full pane instead of leaving an empty left column',()=>{
  const data=fixture(),state=createUiState();state.selectedKey=data.sessions[0]!.key;state.tab='Processes';state.cursorId='scope';const action=handleKey(state,'enter',data,renderScreen(data,state,116,30))!;showDetail(state,action.text??'',action.document);const frame=renderScreen(data,state,116,30);

@@ -1,13 +1,14 @@
+import { agentRows } from "./agents.js";
 import { renderNotes } from "./notes.js";
 import { orderedTabs } from "./types.js";
 import { sanitize, wrap, number, bytes, age } from "./text.js";
 import { visibleReferences } from "./reference-readers.js";
-import { overviewRows, processDocument, referenceDocument, gitDocument, identityDocument, rowHelp, resourceDocument, factRow } from "./facts.js";
+import { overviewRows, processDocument, referenceDocument, gitDocument, rowHelp, resourceDocument, factRow } from "./facts.js";
 import { renderLayout, groupRows, sectionReaderKey } from "./layout.js";
 import { documentText, summary } from "./widgets.js";
 export { addReferencePage, showReferenceSources } from "./reference-readers.js";
 export function createUiState() { return { tab: 'Overview', cursor: 0, scroll: 0, collapsed: new Set(), expanded: new Set(), filter: '', editingFilter: false, pin: false, subtree: false, ascii: false, monochrome: false, help: false, numberPrefix: '', numberTargets: new Map(), view: 'lineage', pagedMessages: new Map(), messageReaders: new Map(), readers: new Map(), followMessages: true, pagedRefs: new Map() }; }
-export function showDetail(state, text, document) { const position = { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll }; if (state.detail !== undefined)
+export function showDetail(state, text, document) { const position = { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll, detailViewId: state.detailViewId }; if (state.detail !== undefined)
     (state.detailStack ??= []).push({ text: state.detail, document: state.detailDocument, position });
 else if (state.refSources)
     state.sourceDetailReader = position;
@@ -16,7 +17,7 @@ else
     const reader = state.messageReaders.get(state.selectedKey) ?? { lastIds: [], following: false, newCount: 0 };
     reader.following = false;
     state.messageReaders.set(state.selectedKey, reader);
-} state.detail = text.slice(0, 1024 * 1024); state.detailDocument = document; state.cursor = 0; state.scroll = 0; state.cursorId = undefined; }
+} state.readerSequence = (state.readerSequence ?? 0) + 1; state.detailViewId = state.readerSequence; state.detail = text.slice(0, 1024 * 1024); state.detailDocument = document; state.cursor = 0; state.scroll = 0; state.cursorId = undefined; }
 export function closeDetail(state) { const prior = state.detailStack?.pop(); if (state.detail !== undefined && prior) {
     state.detail = prior.text;
     state.detailDocument = prior.document;
@@ -63,57 +64,7 @@ const resident = (value) => { if (value !== undefined && /^\d+$/.test(value)) {
         return `${number(Number(amount) / 1024)}KiB`;
 } return bytes(value); };
 const match = (text, state) => !state.filter || sanitize(text).toLocaleLowerCase().includes(state.filter.toLocaleLowerCase());
-const pathName = (value) => value?.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1);
-const checkoutBadge = (session) => `${pathName(session.git?.root ?? session.evidence.cwd) ?? 'checkout unavailable'}@${session.git?.branch ?? session.git?.branchState ?? 'branch unavailable'}`;
 function overview(session, state, columns, now, data) { return overviewRows(session, state, now, data); }
-function agentRows(data, state, numeric, columns) {
-    const rows = [];
-    const nodes = new Map(data.sessions.map(s => [s.key, s]));
-    let index = 0;
-    const hidden = (s) => { let key = s.parentKey; const seen = new Set(); while (key && !seen.has(key)) {
-        seen.add(key);
-        if (state.collapsed.has(key))
-            return true;
-        key = nodes.get(key)?.parentKey;
-    } return false; };
-    let sessions = data.sessions;
-    if (state.view === 'worktrees')
-        sessions = [...sessions].sort((a, b) => (a.git?.familyKey ?? '').localeCompare(b.git?.familyKey ?? '') || (a.git?.checkoutKey ?? a.evidence.cwd ?? '').localeCompare(b.git?.checkoutKey ?? b.evidence.cwd ?? ''));
-    let familyGroup = '';
-    let checkoutGroup = '';
-    for (const session of sessions) {
-        if (state.view === 'lineage' && hidden(session))
-            continue;
-        const title = `${session.evidence.provider} ${session.evidence.title ?? session.evidence.id} ${session.evidence.state ?? 'unknown'}`;
-        if (!match(title, state))
-            continue;
-        if (state.view === 'worktrees') {
-            const family = session.git?.familyKey;
-            const familyKey = family ?? 'unknown-family';
-            if (familyKey !== familyGroup) {
-                rows.push({ id: `family:${familyKey}`, text: family ? `Repository ${family}` : 'Repository family unavailable' });
-                familyGroup = familyKey;
-                checkoutGroup = '';
-            }
-            const checkout = session.git?.checkoutKey ?? session.git?.root ?? session.evidence.cwd ?? 'unknown-checkout';
-            if (checkout !== checkoutGroup) {
-                rows.push({ id: `checkout:${checkout}`, text: `  Checkout ${session.git?.root ?? session.evidence.cwd ?? 'unavailable'} · ${session.git?.branch ?? session.git?.branchState ?? 'branch unavailable'}` });
-                checkoutGroup = checkout;
-            }
-        }
-        const value = ++index;
-        numeric.set(value, session.key);
-        const glyph = session.children.length ? (state.collapsed.has(session.key) ? (state.ascii ? '+' : '▸') : (state.ascii ? '-' : '▾')) : (state.ascii ? '·' : '·');
-        const depth = state.view === 'lineage' ? Math.min(session.depth, 5) : 1;
-        const live = session.attachment ? '' : ' · no pane';
-        rows.push({ id: session.key, text: `${' '.repeat(depth * 2)}${glyph} A${value} ${session.depth > 5 && state.view === 'lineage' ? `d${session.depth} ` : ''}${summary(session.evidence.title ?? session.evidence.id, Math.max(1, columns - 6 - depth * 2 - 8 - (session.evidence.state ?? 'unknown').length))} · ${session.evidence.state ?? 'unknown'}${columns >= 80 && state.view === 'lineage' ? ` · ${checkoutBadge(session)}` : ''}${live}`, help: 'Enter inspects this agent inside Prism. f focuses its live pane; Space folds children. Numbers + Enter select a displayed Prism target.', document: identityDocument(session, data, Date.now()), action: { type: 'select', sessionKey: session.key }, disclosureColumn: session.children.length ? depth * 2 + 1 : undefined });
-        if (state.expanded.has(session.key)) {
-            rows.push({ id: session.key + ':goal', text: `  Goal: ${session.evidence.goals.at(-1)?.objective ?? 'not reported'}` });
-            rows.push({ id: session.key + ':branch', text: `  ${session.git?.branch ?? session.evidence.cwd ?? 'Checkout unavailable'} · ${session.evidence.messages.length} messages` });
-        }
-    }
-    return rows;
-}
 function contentRows(session, state, columns, now, data) {
     const rows = [];
     if (state.tab === 'Overview')
@@ -198,8 +149,7 @@ function contentRows(session, state, columns, now, data) {
             const full = state.expanded.has(message.id);
             const lines = wrap(full ? message.text.slice(0, 128 * 1024) : message.text.slice(0, Math.max(256, columns * 12)), Math.max(1, columns - 8), full ? 2000 : 3);
             const limit = lines.length;
-            for (const [i, line] of lines.slice(0, Math.min(limit, 2000)).entries())
-                rows.push({ ...block, id: `${message.id}:line:${i}`, role: 'text', help, text: `  ${line}`, action: { type: 'message', sessionKey: session.key, id: message.id, text: message.text }, copy: message.text });
+            rows.at(-1).continuations = lines.slice(0, Math.min(limit, 2000)).map(line => ({ text: `  ${line}`, role: 'text' }));
             for (const tool of tools)
                 rows.push({ ...block, sourceId: message.id, id: `${message.id}:tool:${tool.id}`, role: 'secondary', help: 'Enter opens this recorded tool result; s opens its source message. Left/right switches panels; each panel scrolls independently.', text: `  ${tool.status} ${tool.name}: ${tool.summary ?? ''}`, action: { type: 'message', text: `${tool.status} ${tool.name}\n${tool.summary ?? 'No recorded result'}${tool.editedPaths?.length ? `\nEdited paths: ${tool.editedPaths.join('\n')}` : ''}` }, copy: tool.summary ?? tool.name });
         }
@@ -374,37 +324,58 @@ export function handleRowClick(state, x, y, data, screen) {
     const row = screen.rows[region.index];
     if (!row)
         return;
-    if (row.selectable === false) {
-        if (screen.sectionRegions) {
-            state.cursor = region.index;
-            state.cursorId = row.id;
-        }
-        return;
-    }
+    const changed = state.cursor !== region.index;
     state.cursor = region.index;
     state.cursorId = row.id;
     state.numberPrefix = '';
-    return handleKey(state, x === region.disclosureX ? 'space' : 'enter', data, screen);
+    if (changed)
+        resetEntryScroll(state, screen);
+    if (row.selectable === false)
+        return;
+    return x === region.disclosureX ? handleKey(state, 'space', data, screen) : x === region.actionX ? handleKey(state, 'enter', data, screen) : undefined;
 }
-/** Mouse wheels route to the hovered Messages viewport without touching its sibling. */
-export function handleRowWheel(state, x, y, delta, screen) {
-    if (state.help || !screen.sectionRegions)
-        return false;
-    const region = screen.sectionRegions.find(region => x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height);
-    if (region?.indices.length) {
-        const reader = state.sectionReaders?.get(sectionReaderKey(state, region.id)), current = screen.rows[state.cursor]?.section === region.id ? state.cursor : region.indices.find(index => screen.rows[index]?.id === reader?.cursorId) ?? region.indices[0];
-        const at = region.indices.indexOf(current);
-        state.cursor = region.indices[Math.max(0, Math.min(at + delta, region.indices.length - 1))];
-        state.cursorId = screen.rows[state.cursor]?.id;
-        if (region.id === 'Retained messages') {
-            const reader = state.messageReaders.get(state.selectedKey ?? '');
-            if (reader) {
-                reader.following = state.cursor === region.indices.at(-1);
-                if (reader.following)
-                    reader.newCount = 0;
-            }
+function resetEntryScroll(state, screen) { const region = screen.sectionRegions?.find(region => region.indices.includes(state.cursor)); if (region) {
+    const reader = state.sectionReaders?.get(sectionReaderKey(state, region.id));
+    if (reader)
+        reader.freeScroll = false;
+} }
+function scrollRegion(state, region, delta, screen) {
+    const readers = state.sectionReaders ??= new Map(), key = sectionReaderKey(state, region.id), reader = readers.get(key) ?? { cursor: region.indices[0] ?? 0, scroll: 0 };
+    const scroll = Math.max(0, Math.min(reader.scroll + delta, Math.max(0, region.total - Math.max(1, region.contentHeight))));
+    const visible = region.lineIndices.slice(scroll, scroll + Math.max(1, region.contentHeight)).filter(index => index >= 0);
+    if (!visible.includes(state.cursor))
+        state.cursor = visible[0] ?? region.indices[0] ?? state.cursor;
+    state.cursorId = screen.rows[state.cursor]?.id;
+    reader.cursor = state.cursor;
+    reader.cursorId = state.cursorId;
+    reader.scroll = scroll;
+    reader.freeScroll = true;
+    readers.set(key, reader);
+    state.scroll = scroll;
+    if (region.id === 'Retained messages') {
+        const messages = state.messageReaders.get(state.selectedKey ?? '');
+        if (messages) {
+            messages.following = scroll >= region.total - region.contentHeight && delta > 0;
+            if (messages.following)
+                messages.newCount = 0;
         }
     }
+}
+/** Wheels move a panel's content lines; arrow keys move whole logical entries. */
+export function handleRowWheel(state, x, y, delta, screen) {
+    if (state.tab === 'Notes' && !state.help && state.detail === undefined) {
+        const region = screen.sectionRegions?.find(region => x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height);
+        if (region) {
+            state.notesScroll = Math.max(0, Math.min((state.notesScroll ?? 0) + delta, Math.max(0, region.total - region.contentHeight)));
+            state.notesFreeScroll = state.notes?.editing === true;
+        }
+        return true;
+    }
+    if (!screen.sectionRegions)
+        return false;
+    const region = screen.sectionRegions.find(region => x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height);
+    if (region?.indices.length)
+        scrollRegion(state, region, delta, screen);
     return true;
 }
 export function handleKey(state, key, data, screen) {
@@ -413,6 +384,7 @@ export function handleKey(state, key, data, screen) {
             if (key === 'escape' || key === '?' || key === 'help')
                 closeHelp(state);
             else if (['up', 'k', 'down', 'j', 'home', 'end', 'pageup', 'pagedown'].includes(key)) {
+                resetEntryScroll(state, screen);
                 state.cursor += key === 'up' || key === 'k' ? -1 : key === 'home' ? -state.cursor : key === 'end' ? screen.rows.length : key === 'pageup' ? -screen.bodyHeight : key === 'pagedown' ? screen.bodyHeight : 1;
                 state.cursorId = undefined;
             }
@@ -426,6 +398,8 @@ export function handleKey(state, key, data, screen) {
         if (key === '?' || key === 'help') {
             state.helpReader = { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll };
             state.helpText = screen.rows[state.cursor]?.help ?? 'Confirm only the captured process. Escape cancels. No signal is sent until you confirm.';
+            state.readerSequence = (state.readerSequence ?? 0) + 1;
+            state.helpViewId = state.readerSequence;
             state.help = true;
             state.cursor = 0;
             state.cursorId = undefined;
@@ -514,6 +488,8 @@ export function handleKey(state, key, data, screen) {
             state.helpText = screen.rows[state.cursor]?.help ?? 'Scroll to read recorded content; Escape returns to the previous entry.';
             if (state.boundSessionKey && state.selectedKey !== state.boundSessionKey && !state.pin)
                 state.helpText += '\n\nYou are inspecting another agent. Escape closes this help; Shift+F then returns to following this panel’s bound agent.';
+            state.readerSequence = (state.readerSequence ?? 0) + 1;
+            state.helpViewId = state.readerSequence;
             state.help = true;
             state.cursor = 0;
             state.cursorId = undefined;
@@ -585,19 +561,25 @@ export function handleKey(state, key, data, screen) {
     if (!state.help && screen.sectionRegions) {
         const current = screen.sectionRegions.find(region => region.indices.includes(state.cursor)) ?? screen.sectionRegions[0];
         if (key === 'left' || key === 'right') {
-            const available = screen.sectionRegions.filter(region => region.indices.length), at = available.indexOf(current), next = available[(Math.max(0, at) + (key === 'right' ? 1 : available.length - 1)) % available.length];
+            const available = screen.sectionRegions.filter(region => region.indices.length), at = available.indexOf(current), neighbors = available.filter(region => region.height > 0 && (key === 'right' ? region.x > current.x : region.x < current.x)).sort((a, b) => Math.abs(a.y - current.y) - Math.abs(b.y - current.y)), next = neighbors[0] ?? available[(Math.max(0, at) + (key === 'right' ? 1 : available.length - 1)) % available.length];
             if (next) {
                 const saved = state.sectionReaders?.get(sectionReaderKey(state, next.id));
                 state.cursor = next.indices.find(index => screen.rows[index]?.id === saved?.cursorId) ?? next.indices[0];
                 state.cursorId = screen.rows[state.cursor]?.id;
+                resetEntryScroll(state, screen);
             }
             return;
         }
-        const moves = { j: 1, down: 1, k: -1, up: -1, pagedown: Math.max(1, current.height - 2), pageup: -Math.max(1, current.height - 2) };
+        if (key === 'pagedown' || key === 'pageup') {
+            scrollRegion(state, current, (key === 'pagedown' ? 1 : -1) * Math.max(1, current.contentHeight), screen);
+            return;
+        }
+        const moves = { j: 1, down: 1, k: -1, up: -1 };
         if (key in moves || ['home', 'g', 'end', 'G'].includes(key)) {
             const at = current.indices.indexOf(state.cursor), target = key === 'home' || key === 'g' ? 0 : key === 'end' || key === 'G' ? current.indices.length - 1 : at + moves[key];
             state.cursor = current.indices[Math.max(0, Math.min(target, current.indices.length - 1))] ?? state.cursor;
             state.cursorId = screen.rows[state.cursor]?.id;
+            resetEntryScroll(state, screen);
             if (current.id === 'Retained messages') {
                 const reader = state.messageReaders.get(state.selectedKey ?? '');
                 if (reader) {
@@ -624,6 +606,7 @@ export function handleKey(state, key, data, screen) {
     if (key in moves) {
         state.cursor += moves[key];
         state.cursorId = undefined;
+        resetEntryScroll(state, screen);
         const reader = state.selectedKey ? state.messageReaders.get(state.selectedKey) : undefined;
         if (reader && state.tab === 'Messages' && state.detail === undefined)
             reader.following = state.cursor >= screen.rows.length - 1;
@@ -632,6 +615,7 @@ export function handleKey(state, key, data, screen) {
         return;
     }
     if (key === 'home' || key === 'g') {
+        resetEntryScroll(state, screen);
         state.cursor = 0;
         state.cursorId = undefined;
         const reader = state.selectedKey ? state.messageReaders.get(state.selectedKey) : undefined;
@@ -640,6 +624,7 @@ export function handleKey(state, key, data, screen) {
         return;
     }
     if (key === 'end' || key === 'G') {
+        resetEntryScroll(state, screen);
         state.cursor = screen.rows.length - 1;
         state.cursorId = undefined;
         const reader = state.selectedKey ? state.messageReaders.get(state.selectedKey) : undefined;
@@ -664,7 +649,7 @@ export function handleKey(state, key, data, screen) {
             return row.action?.type === 'ref-sources' ? row.action : undefined;
         if (state.tab === 'Agents') {
             const session = data.sessions.find(s => s.key === row.action?.sessionKey);
-            if (session?.children.length) {
+            if (session && data.sessions.some(child => child.parentKey === session.key)) {
                 state.collapsed.has(session.key) ? state.collapsed.delete(session.key) : state.collapsed.add(session.key);
             }
             else if (session) {

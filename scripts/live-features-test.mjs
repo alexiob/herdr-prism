@@ -53,7 +53,7 @@ export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH
  const pane=async id=>(await rpc.call('pane.get',{pane_id:id})).pane;
  const text=async id=>(await exec(herdr,['--session',name,'pane','read',id,'--source','visible','--lines','60'],{env:options.env,cwd:directory,encoding:'utf8',timeout:30000,windowsHide:true,maxBuffer:4*1024*1024})).stdout;
  const source=`plugin:${pluginId}`;
- const evidence={kind:'actual-isolated-herdr-features',ok:false,pluginId,platform:process.platform,arch:process.arch,node:process.version,release,directory,fixtureNotice:'Synthetic Pi-shaped version-3 records and idle Node fixtures with explicit process.title=pi; no paid provider or provider-version compatibility claim.',checks:{},limits:['Headless server and actual terminal readback; native sidebar pixels and multi-client renderer differences are not certified.','Hidden transcript/body pause is observed; macOS/Linux keep harness-only CPU/RSS live, while Windows inspector resources remain cached. Internal Git/process read counts are not directly instrumented.']};
+ const evidence={kind:'actual-isolated-herdr-features',ok:false,pluginId,platform:process.platform,arch:process.arch,node:process.version,release,directory,fixtureNotice:'Synthetic Pi-shaped version-3 records and idle Node fixtures with explicit process.title=pi; no paid provider or provider-version compatibility claim.',checks:{},limits:['Headless server and actual terminal readback; native sidebar pixels and multi-client renderer differences are not certified.','Hidden transcript/body pause is observed; Native cards keep verified Self+jobs CPU and cumulative RSS/WS live on each platform. Internal Git/process read counts are not directly instrumented.']};
  const save=async()=>writeFile(path.join(proof,'features.json'),JSON.stringify(evidence,null,2)+'\n',{mode:0o600});
  const stage=async(label,run)=>{console.log(JSON.stringify({stage:label,status:'running'}));const value=await run();evidence.checks[label]=value;await save();console.log(JSON.stringify({stage:label,status:'passed'}));return value;};
  let installed,store,controller,pausedPid,probeCollector,success=false;
@@ -101,22 +101,18 @@ export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH
    assert.notEqual((await snapshot()).focused_tab_id,beta.tab_id,'the beta inspector must be hidden during this probe');
    await appendFile(betaFile,JSON.stringify({type:'message',id:'hidden-message',timestamp:new Date().toISOString(),message:{role:'assistant',content:[{type:'text',text:'SYNTHETIC HIDDEN MESSAGE'}],stopReason:'stop'}})+'\n');
    let hidden;
-   if(process.platform==='win32'){
-    await delay(3200);hidden=await pane(beta.pane_id);assert.equal(hidden.tokens[token('fresh')],'cached');assert.match(hidden.tokens[token('load')],/^~ CPU /);
-   }else{
-    // Exercise only this harness's synthetic process. Its measured CPU must change
-    // while the hidden inspector's newly appended transcript remains unread.
-    await cli(['pane','send-text',beta.pane_id,'FIXTURE_CPU_BURST\n']);
-    hidden=await until('hidden native harness CPU remains live',async()=>{
-     const value=await pane(beta.pane_id);assert.equal(value.tokens?.[token('last')],before.tokens[token('last')],'hidden body must remain paused throughout the resource probe');
-     const cpu=/^H CPU ([\d.,]+)%/.exec(value.tokens?.[token('load')]??'');
-     return cpu&&Number(cpu[1].replaceAll(',',''))>1&&value.tokens?.[token('load')]!==before.tokens[token('load')]&&value.tokens?.[token('fresh')]===undefined&&value;
-    },12000);
-    assert.match(hidden.tokens[token('load')],/^H CPU [\d.,]+%  RSS (?!—)/);assert.match(hidden.tokens[token('counts')],/^p1 /);
-   }
+   // The hidden transcript remains paused while one shared host batch keeps
+   // native Self+jobs CPU and cumulative RSS/WS current on every platform.
+   await cli(['pane','send-text',beta.pane_id,'FIXTURE_CPU_BURST\n']);
+   hidden=await until('hidden native Self+jobs CPU remains live',async()=>{
+    const value=await pane(beta.pane_id);assert.equal(value.tokens?.[token('last')],before.tokens[token('last')],'hidden body must remain paused throughout the resource probe');
+    const cpu=/^CPU ≥?([\d.,]+)%/.exec(value.tokens?.[token('load')]??'');
+    return cpu&&Number(cpu[1].replaceAll(',',''))>1&&value.tokens?.[token('load')]!==before.tokens[token('load')]&&[undefined,'','partial'].includes(value.tokens?.[token('fresh')])&&value;
+   },12000);
+   assert.match(hidden.tokens[token('load')],/^CPU ≥?[\d.,]+%  (?:RSS|WS) (?!—)/);assert.match(hidden.tokens[token('counts')],/^p1 /);
    assert.equal(hidden.tokens[token('last')],before.tokens[token('last')]);assert.notEqual((await snapshot()).focused_tab_id,beta.tab_id);
    await cli(['tab','focus',beta.tab_id]);await until('visible fixture body resumes',async()=>(await pane(beta.pane_id)).tokens?.[token('last')]?.includes('HIDDEN MESSAGE'));
-   return{newBodyNotHydratedWhileHidden:true,bodyHydratedAfterVisible:true,resourcePolicy:process.platform==='win32'?'cached inspector resources':'live harness-only CPU/RSS',cachedInspectorResources:process.platform==='win32',boundedSyntheticCpuBurstObservedWhileHidden:process.platform!=='win32',beforeHiddenLoad:before.tokens[token('load')],hiddenLoad:hidden.tokens[token('load')]};
+   return{newBodyNotHydratedWhileHidden:true,bodyHydratedAfterVisible:true,resourcePolicy:'live verified Self+jobs CPU and cumulative RSS/WS',cachedInspectorResources:false,boundedSyntheticCpuBurstObservedWhileHidden:true,beforeHiddenLoad:before.tokens[token('load')],hiddenLoad:hidden.tokens[token('load')]};
   });
   if(references)await stage('referenceHistoryNavigation',async()=>{
    const base=Date.now()-100000,record=(id,body,at)=>({type:'message',id,timestamp:new Date(at).toISOString(),message:{role:'assistant',content:[{type:'text',text:body}],stopReason:'stop'}});
@@ -134,7 +130,12 @@ export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH
   await stage('persistentNotesAndEditHold',async()=>{
    let panel=await ownPane(beta.tab_id,beta.terminal_id);const screen=()=>text(panel.pane_id),send=value=>cli(['pane','send-text',panel.pane_id,value]);
    await send('p');await until('Notes follow enabled',async()=>(await screen()).includes('Follow'));
-   await send('G\r');await until('Notes selected through Overview link',async()=>(await screen()).includes('[Notes]'));
+   // Activate the drawn Notes arrow. Headless PTY dimensions can differ from
+   // layout rectangles, so test the actual displayed hit target rather than
+   // assuming a column order or a global End shortcut.
+   const overview=(await screen()).split('\n'),noteLine=overview.findIndex(line=>/│[^\n]*\bNotes\s/.test(line)),noteColumn=noteLine<0?-1:overview[noteLine].indexOf('→',overview[noteLine].indexOf('Notes'));
+   assert.ok(noteLine>=0&&noteColumn>=0,'Overview Notes arrow is drawn');
+   await send(`\x1b[<0;${noteColumn+1};${noteLine+1}M\x1b[<0;${noteColumn+1};${noteLine+1}m`);await until('Notes selected through Overview link',async()=>(await screen()).includes('[Notes]'));
    await send('\r');await until('Notes editing',async()=>(await screen()).includes('Editing'));
    const markdown='# Persistent notes\n\nq and p are literal text.\n';await send('\x1b[200~'+markdown+'\x1b[201~');
    const gamma=(await cli(['pane','split',beta.pane_id,'--direction','down','--no-focus'])).pane,gammaFile=await fixture('fixture-gamma');

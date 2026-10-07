@@ -47,3 +47,10 @@ test('stale harness-only native sample shows both its scope and cache marker',as
  const session:any={key:'x',depth:0,children:[],attachment:pane,evidence:{id:'x',provider:'codex',messages:[],tools:[],usage:[],goals:[]},resource:{availability:'stale',cpuPercent:5,memoryBytes:'3200000',memoryLabel:'RSS sum',processes:[]}};
  await publisher.publish([session],10000,[session],{harnessOnly:true});assert.equal(tokens.hat_load,'~ H CPU 5%  RSS 3.2MB');
 });
+test('native job totals publish measured CPU lower bounds during partial coverage and keep warmup unknown',async()=>{
+ let tokens:any;const pane={pane_id:'p',terminal_id:'t'};const publisher=new native.NativePublisher({call:async(method:string,params:any)=>{if(method==='pane.get')return{pane};if(method==='pane.report_metadata')tokens=params.tokens;return{};}});
+ const session:any={key:'x',depth:0,children:[],attachment:pane,evidence:{id:'x',provider:'codex',messages:[],tools:[],usage:[],goals:[]},resource:{availability:'known',memoryBytes:'600000000',memoryLabel:'RSS sum',cpuLowerBound:100,cpuCoverage:{readable:1,total:2},coverage:{readable:2,total:2},processes:[{cpuPercent:100},{}]}};
+ await publisher.publish([session],10000,[session],{selfJobs:true});assert.match(tokens.hat_load,/CPU ≥100%.*RSS 600MB/);assert.match(tokens.hat_fresh,/partial/);
+ session.resource.cpuLowerBound=undefined;session.resource.processes=[{},{}];session.resource.cpuCoverage.readable=0;await publisher.publish([session],16000,[session],{selfJobs:true});assert.match(tokens.hat_load,/CPU —%/);assert.match(tokens.hat_fresh,/warming/);
+ session.resource.availability='not_applicable';session.resource.sharedWith='other';session.resource.processes=[{cpuPercent:100}];await publisher.publish([session],22000,[session],{selfJobs:true});assert.match(tokens.hat_load,/CPU —%/);assert.match(tokens.hat_fresh,/shared/);
+});

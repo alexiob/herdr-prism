@@ -66,6 +66,7 @@ export async function main(argv = process.argv.slice(2)) {
         if (!notes?.value?.editing)
             return false;
         if (event.type === 'paste') {
+            state.notesFreeScroll = false;
             if (event.overflow)
                 state.notice = 'Paste exceeds 1 MiB; nothing inserted';
             else
@@ -75,6 +76,11 @@ export async function main(argv = process.argv.slice(2)) {
         if (event.type === 'mouse') {
             if (event.release)
                 return true;
+            if (event.button === 64 || event.button === 65) {
+                handleRowWheel(state, event.x, event.y, event.button === 64 ? -3 : 3, frame);
+                state.notesFreeScroll = true;
+                return true;
+            }
             const tab = frame.tabRegions?.find(r => r.y === event.y && event.x >= r.x && event.x < r.x + r.width);
             if (!tab)
                 return true;
@@ -93,6 +99,7 @@ export async function main(argv = process.argv.slice(2)) {
             await notes.end();
             return false;
         }
+        state.notesFreeScroll = false;
         return notes.key(event.key, { columns: ui.columns, height: ui.rows, tabOrder: state.tabOrder });
     };
     const paint = () => { syncBoundSelection(); syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };

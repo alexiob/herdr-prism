@@ -1,8 +1,11 @@
-import {cellWidth,sanitize,truncate,wrap} from './text.ts';
+import {cellWidth,sanitize,truncate} from './text.ts';
 import {styleSpans} from './theme.ts';
 import type {ColorRole,TextSpan,ThemeName} from './theme.ts';
-import {tabLabel} from './types.ts';
-import {processPanelHeights} from './layout.ts';
+import {renderLayout,sectionReaderKey} from './layout.ts';
+import type {LayoutSection} from './layout.ts';
+import {createUiState} from './screen.ts';
+import {renderNotes} from './notes.ts';
+import type {DashboardData,DetailDocument,RenderedScreen,ScreenRow,Tab} from './types.ts';
 
 export const inspectorPreviewTabs=['Overview','Notes','To-do','Git','Agents','Processes','Refs','Messages'] as const;
 export const previewViews=[...inspectorPreviewTabs,'Notes editor','Sidebar','Help','Detail'] as const;
@@ -12,12 +15,13 @@ export interface PreviewEntry {
 }
 interface DetailField {label:string;value:string;role?:ColorRole;}
 interface Section {title:string;entries:PreviewEntry[];description?:string[];descriptionRole?:ColorRole;fields?:DetailField[];column?:0|1;}
-export interface PreviewOptions {width?:number;height?:number;selected?:number;scroll?:number;sectionScroll?:Record<string,number>;ascii?:boolean;theme?:ThemeName;entry?:PreviewEntry;}
+export interface PreviewOptions {width?:number;height?:number;selected?:number;scroll?:number;sectionScroll?:Record<string,number>;freeScroll?:boolean;activeSection?:string;ascii?:boolean;theme?:ThemeName;entry?:PreviewEntry;}
 export interface PreviewFrame {
   view:PreviewView;lines:string[];spans:TextSpan[][];entries:(PreviewEntry&{display:string})[];
   selectedLine?:number;bodyStart:number;bodyHeight:number;columns:1|2;scroll:number;footer:string;theme:ThemeName;
-  positions:{entry:number;line:number;column:number;width:number}[];
-  sectionScroll?:Record<string,number>;sectionRegions?:{id:string;line:number;height:number;entries:number[];}[];
+  positions:{entry:number;line:number;column:number;width:number;actionColumn?:number}[];
+  terminalCursor?:{line:number;column:number};
+  sectionScroll?:Record<string,number>;sectionRegions?:{id:string;line:number;column:number;width:number;height:number;contentHeight:number;total:number;scroll:number;entries:number[];}[];
 }
 const goal='Build reliable monitoring for local and remote harness sessions, with readable telemetry and safe installation.';
 const note='# Session notes\n\n## Decisions\n- Run Prism on each remote server.\n- Keep visibility API work upstream.\n\n## Follow-up\nVerify the saved draft after reconnecting.';
@@ -50,14 +54,11 @@ const sections:Record<Exclude<PreviewView,'Help'|'Detail'>,Section[]>={
       link('notes','Notes','Saved 14:32','Notes','Enter opens private Markdown notes for this agent on the collecting server.'),
     ]},
   ],
-  Agents:[{title:'Agent tree',description:['Prism target · state · checkout'],entries:[
-    link('agent-root','▾ A1 Monitor','working · remote-monitor','Overview','Enter inspects this agent within Prism. f focuses its live Herdr pane. Space folds children; number + Enter selects the displayed Prism target.'),
-    link('agent-parser','  ▾ A2 Parser','working · parser','Overview','Enter inspects Parser. f explicitly moves native focus when its pane exists. Space folds its nested children.'),
-    link('agent-source','    A3 Source','waiting · parser','Overview','Enter inspects the nested source worker. Waiting is the reported state; no CPU work is requested for a background agent.'),
-    link('agent-test','  A4 Linux tests','done · main','Overview','Enter inspects the test worker. Transcript-only sessions have no live pane to focus.'),
-  ]},{title:'Selected agent',entries:[
-    fact('agent-task','Task','Implement exact source cursors','Parser worker\n\nTask: Implement exact source cursors for paged reference history.\nParent: Monitor\nDepth: 1\nProvider: codex\nState: working\nCheckout: /work/trees/parser','The selected row determines which agent is inspected on Enter. This summary holds its task; full ancestry and identity remain in details.'),
-    fact('agent-cached','Load','cached · 8s old','Last observed selected-scope load:\nCPU: 18%\nRSS sum: 92 MiB\nSample: 8 seconds ago\n\nBackground agents are not resampled by this view.','Cached readings are explicitly labeled. Merely browsing the tree does not trigger heavy collection for every agent.','warning'),
+  Agents:[{title:'Panel owner and sub-agents',description:['Only this agent’s recorded worker tree'],entries:[
+    link('agent-root','▾ A1 Monitor','working','Overview','Panel owner. Enter inspects; f focuses a live pane; Space folds recorded children. ? explains the selected entry.'),
+    link('agent-parser','  ▾ A2 Parser','working','Overview','Reported task: implement exact source cursors. Enter inspects Parser; d opens identity; Space folds its children.'),
+    link('agent-source','    · A3 Source','waiting','Overview','Nested worker. Reported task: verify original reference records. Enter inspects; Shift+F returns to the panel owner.'),
+    link('agent-test','  · A4 Linux tests','done · no pane','Overview','Completed worker. Enter inspects its retained evidence. No live pane is available for native focus.'),
   ]}],
   Processes:[{title:'Owned processes',description:['PID      Name        CPU     RSS', '4/4 readable · self + jobs'],entries:[
     fact('p1','4102 prism','68%    184M','Process: prism-harness\nPID: 4102\nPPID: 4000\nCPU: 68%\nRSS: 184 MiB\nThreads: 12\nOwner: Monitor\nBirth identity: verified\n\nK opens a confirmation in live process views. Demo actions send no OS signal.','Enter opens the full process name, identity, owner, threads and measurements. Space folds process children.'),
@@ -98,9 +99,7 @@ const sections:Record<Exclude<PreviewView,'Help'|'Detail'>,Section[]>={
     {title:'Next agent · background',description:['● codex Parser','  Task: Exact source cursors','  CPU — · RSS — · cached','  local/project parser'],entries:[]}],
 };
 
-const span=(text:string,role:ColorRole='text',selected=false):TextSpan=>({text,role,selected});
 const pad=(text:string,width:number)=>text+' '.repeat(Math.max(0,width-cellWidth(text)));
-function asciiText(text:string):string{return text.replace(/[┌┐└┘├┤]/g,'+').replace(/[─▱]/g,'-').replace(/│/g,'|').replace(/→/g,'>').replace(/←/g,'<').replace(/▾/g,'v').replace(/▸/g,'>').replace(/●/g,'*').replace(/·/g,'.').replace(/✎/g,'*').replace(/↑/g,'^').replace(/↓/g,'v').replace(/—/g,'-').replace(/[▁▂▃▄▅▆▇█▰]/g,'#');}
 /** Summaries stop at whole words; exact original text stays in the detail. */
 function summarize(value:string,width:number):string{
   const text=sanitize(value).replace(/[\r\n\t]/g,' ').trim();if(cellWidth(text)<=width)return text;
@@ -120,20 +119,6 @@ function compactEntry(entry:PreviewEntry,width:number):string{
   const prefix=cellWidth(label)<11?pad(label,11):label+' · ';
   const text=!value?summarize(label,room):cellWidth(prefix)<room?prefix+summarize(value,room-cellWidth(prefix)):summarize(label,room);
   return pad(text,room)+arrow;
-}
-function readableWrap(value:string,width:number):string[]{
-  const lines:string[]=[];
-  for(const raw of sanitize(value).replace(/\r/g,'').split('\n')){
-    let rest=raw;if(!rest){lines.push('');continue;}
-    while(cellWidth(rest)>width){
-      const fit=wrap(rest,width,1)[0]!;const boundary=fit.lastIndexOf(' ');
-      const separator=Math.max(fit.lastIndexOf('/'),fit.lastIndexOf('\\'));
-      const cut=boundary>0?boundary:separator>0?separator+1:fit.length;
-      lines.push(rest.slice(0,cut).trimEnd());rest=rest.slice(cut).replace(/^ +/,'');
-    }
-    lines.push(rest);
-  }
-  return lines;
 }
 const accountDetail='Account / limits\n\nPlan: Pro\nScope: Account-wide, shared by sessions and devices\nFive-hour used: 12.5%\nWeekly used: 89.2%\nNext reset: 1h 0m\nCredits: 38672.413016\nReported: 10s ago\nSource: Selected session provider observation';
 sections.Overview.push({title:'Account / limits',column:0,entries:[
@@ -231,118 +216,70 @@ function structuredDetail(entry:PreviewEntry):Section[]|undefined{
     return [{title:entry.label,entries:[],description:narrative,descriptionRole:'text'},section('Recorded facts',fields,1)];
   }
 }
-function semanticText(text:string,role:ColorRole='text',selected=false):TextSpan[]{
-  return text.split(/([+]\d+|-\d+)/g).filter(Boolean).map(part=>span(part,/^\+\d+$/.test(part)?'positive':/^-\d+$/.test(part)?'negative':role,selected));
-}
-function fieldSpans(text:string,role:ColorRole='text'):TextSpan[]{
-  if(/^(?:unavailable|—)/i.test(text.trim()))return [span(text,'warning')];
-  return text.split(/(\b(?:tokens|MiB|GiB|KiB|lines|files|commits|seconds|minutes)\b)/g).filter(Boolean).map(part=>span(part,/^(?:tokens|MiB|GiB|KiB|lines|files|commits|seconds|minutes)$/.test(part)?'secondary':role));
-}
-
+/** The fixtures supply content; the live renderer owns all geometry and scrolling. */
 export function renderPreview(view:PreviewView,options:PreviewOptions={}):PreviewFrame{
   const width=Math.max(26,Math.floor(options.width??50)),height=Math.max(10,Math.floor(options.height??34));
-  const theme=options.theme??'dark';let two=view==='Overview'&&width>=80;
-  const allEntries:(PreviewEntry&{display:string})[]=[];
-  const positions:PreviewFrame['positions']=[];
-  type BodyLine={parts:TextSpan[];entries:{index:number;column:number;width:number}[]};
-  const sectionLines=(items:Section[],innerWidth:number):BodyLine[]=>{
-    const result:BodyLine[]=[];
-    for(const section of items){
-      const heading=`┌ ${section.title} `;result.push({parts:[span(heading,'accent'),span('─'.repeat(Math.max(0,innerWidth-cellWidth(heading)-1))+'┐','border')],entries:[]});
-      for(const field of section.fields??[]){
-        const labelWidth=12,valueWidth=innerWidth-4-labelWidth;
-        if(cellWidth(field.label)>labelWidth)for(const label of readableWrap(field.label,innerWidth-4))result.push({parts:[span('│ ','border'),span(pad(label,innerWidth-4),'secondary'),span(' │','border')],entries:[]});
-        for(const [index,line]of readableWrap(field.value,valueWidth).entries())result.push({parts:[
-          span('│ ','border'),span(pad(index||cellWidth(field.label)>labelWidth?'':field.label,labelWidth),'secondary'),
-          ...fieldSpans(pad(line,valueWidth),field.role),span(' │','border'),
-        ],entries:[]});
-      }
-      for(const text of section.description??[])for(const line of readableWrap(text,innerWidth-4))result.push({parts:[span('│ ','border'),...semanticText(pad(line,innerWidth-4),section.descriptionRole??'secondary'),span(' │','border')],entries:[]});
-      for(const entry of section.entries){
-        const index=allEntries.length,display=compactEntry(entry,innerWidth-4);allEntries.push({...entry,display});
-        const interior=semanticText(' '+display+' ',entry.role??'text',index===(options.selected??0));
-        if(entry.messageBand!==undefined)for(const part of interior)part.surface=entry.messageBand?'messageOdd':'messageEven';
-        result.push({parts:[span('│','border'),...interior,span('│','border')],entries:[{index,column:2,width:innerWidth-2}]});
-      }
-      result.push({parts:[span('└'+'─'.repeat(innerWidth-2)+'┘','border')],entries:[]});
-    }
-    return result;
-  };
-  const columns=(leftItems:Section[],rightItems:Section[]):BodyLine[]=>{
-    const colWidth=Math.floor((width-2)/2),left=sectionLines(leftItems,colWidth),right=sectionLines(rightItems,width-colWidth-2);
-    return Array.from({length:Math.max(left.length,right.length)},(_,i)=>{
-      const l=left[i],r=right[i];return {parts:[...(l?.parts??[span(' '.repeat(colWidth))]),span('  '),...(r?.parts??[span(' '.repeat(width-colWidth-2))])],entries:[...l?.entries??[],...(r?.entries??[]).map(e=>({...e,column:e.column+colWidth+2}))]};
-    });
-  };
-  let body:BodyLine[],panelBodies:BodyLine[][]|undefined;
-  const processPreview=view==='Detail'&&/^p\d+$/.test(options.entry?.id??'');
+  const theme=options.theme??'dark',state=createUiState(),detailId=options.entry?.id??'';
+  const detailContext:Tab=detailId.startsWith('ref-')?'Refs':detailId==='process-scope'||/^p\d+$/.test(detailId)?'Processes':detailId.startsWith('git-')?'Git':detailId.startsWith('agent-')?'Agents':detailId.startsWith('message-')?'Messages':detailId.startsWith('todo-')?'To-do':'Overview';
+  state.tab=view==='Notes editor'?'Notes':view==='Detail'||view==='Help'?detailContext:inspectorPreviewTabs.includes(view as any)?view as Tab:'Overview';
+  state.tabOrder=[...inspectorPreviewTabs];state.selectedKey='preview-monitor';state.theme=theme;state.ascii=Boolean(options.ascii);state.monochrome=theme==='mono';state.scroll=options.scroll??0;
+  state.notice='DESIGN ONLY · synthetic data';
+  const data:DashboardData={sessions:[{key:state.selectedKey,depth:0,children:[],evidence:{id:'Monitor',title:'Monitor',provider:'codex',model:'demo-model',state:'working',messages:[],tools:[],usage:[],goals:[],availability:'known'}}],updatedAt:0,stale:false,diagnostics:[],demo:true,server:{id:'preview-server',host:'local',session:'main'}};
+  const entries:PreviewFrame['entries']=[],entryIndices=new Map<string,number>();
+  const processPreview=view==='Detail'&&/^p\d+$/.test(detailId);
+  let document:DetailDocument|undefined,items:Section[];
   if(view==='Help'||view==='Detail'){
     const entry=options.entry??sections.Overview[0]!.entries[0]!;
-    const title=view==='Help'?`Help · ${entry.label}`:`Detail · ${entry.label}`;
+    const title=(view==='Help'?'Help':'Detail')+' · '+entry.label;
     const text=view==='Help'?`${entry.help}\n\nEnter opens ${entry.target??'full content'}.\n? shows this entry's help.\nEscape returns to your previous selection.`:entry.detail??`${entry.label}\n\n${entry.value??''}\n\nDestination: ${entry.target??'none'}`;
-    const detail=view==='Detail'?structuredDetail(entry):undefined;
-    two=width>=80&&Boolean(detail?.some(section=>section.column===1));
-    body=two?columns(detail!.filter(section=>section.column!==1),detail!.filter(section=>section.column===1)):sectionLines(detail??[{title,description:text.split('\n'),descriptionRole:'text',entries:[]}],width);
-    if(processPreview){const heading=sectionLines([{title:'Process facts',entries:[]}],width);panelBodies=[[heading[0]!,...body,heading.at(-1)!],sectionLines([{title:'Output · shared terminal',description:['[DEMO] Shared harness terminal',...Array.from({length:40},(_,i)=>`Build step ${i+1}: retained output`)],descriptionRole:'text',entries:[]}],width)];body=panelBodies.flat();}
-  }else if(view==='Messages'){panelBodies=sections.Messages.map(section=>sectionLines([section],width));body=panelBodies.flat();}
-  else if(two){
-    const items=sections.Overview;body=columns([items[1]!,items[2]!,...items.filter(s=>s.title==='Account / limits')],[items[0]!,items[3]!,items[4]!]);
-  }else body=sectionLines(sections[view],width);
-  const detailId=options.entry?.id??'';
-  const detailContext=detailId.startsWith('ref-')?'Refs':detailId==='process-scope'||/^p\d+$/.test(detailId)?'Processes':detailId.startsWith('git-')?'Git':detailId.startsWith('agent-')?'Agents':detailId.startsWith('message-')?'Messages':detailId.startsWith('todo-')?'To-do':'Overview';
-  const detailTitles:Record<string,string>={memory:'Memory',cpu:'CPU',context:'Recorded usage',tokens:'Recorded usage',turn:'Timing','process-scope':'Scope coverage','agent-cached':'Cached resources'};
-  const detailTitle=detailTitles[detailId]??(detailContext==='Processes'?'Process details':detailContext==='Refs'?'Reference details':detailContext==='Git'?'Git checkout':options.entry?.label??'Detail');
-  const active=view==='Notes editor'?'Notes':view==='Detail'||view==='Help'?detailContext:inspectorPreviewTabs.includes(view as any)?view:'Overview';
-  const tabParts=inspectorPreviewTabs.map(tab=>({name:tabLabel(tab,width<50),active:tab===active}));
-  const tabLines:TextSpan[][]=[];let tabLine:TextSpan[]=[],used=0;
-  const finishTabLine=()=>{if(used<width)tabLine.push({...span(' '.repeat(width-used),'secondary'),surface:'tabbar'});tabLines.push(tabLine);tabLine=[];used=0;};
-  for(const item of tabParts){
-    const label=item.active?'['+item.name+']':item.name,size=cellWidth(label);
-    if(used+size>width&&tabLine.length)finishTabLine();
-    tabLine.push({...span(label,item.active?'accent':'secondary'),surface:item.active?'activeTab':'tab',bold:item.active});used+=size;
-    if(used<width){tabLine.push({...span(' ','secondary'),surface:'tabbar'});used++;}
-  }
-  if(tabLine.length)finishTabLine();
-  const chrome:TextSpan[][]=[
-    [span(truncate(`PRISM · DESIGN · ${view==='Detail'?detailTitle:view}`,width),'accent')],
-    [span(width<50?'Monitor · codex · working':'Monitor · codex / demo-model · working','text')],
-    [span(truncate('local/main · Self + jobs · Follow',width),'secondary')],...tabLines,
-  ];
-  if((view==='Messages'||processPreview)&&chrome.length>height-8)chrome.splice(1,Math.min(2,chrome.length-(height-8)));
-  const bodyStart=chrome.length,bodyHeight=Math.max(1,height-bodyStart-2);
-  const selected=Math.max(0,Math.min(options.selected??0,allEntries.length-1));
-  const sectionScroll:Record<string,number>={},sectionRegions:NonNullable<PreviewFrame['sectionRegions']>=[];
-  if(panelBodies){
-    body=[];
-    const heights=processPreview?processPanelHeights(panelBodies[0]!.length-2,bodyHeight):panelBodies.map((_,i)=>Math.floor(bodyHeight/panelBodies!.length)+(i<bodyHeight%panelBodies!.length?1:0));
-    for(const [i,source]of panelBodies.entries()){
-      const id=processPreview?(i?'Output':'Process facts'):sections.Messages[i]!.title,panelHeight=heights[i]!,contentHeight=Math.max(0,panelHeight-(panelHeight>=3?2:1)),content=source.slice(1,-1);
-      const selectedAt=content.findIndex(line=>line.entries.some(entry=>entry.index===selected));
-      let scroll=Math.max(0,Math.min(options.sectionScroll?.[id]??(selectedAt>=0?options.scroll??0:0),Math.max(0,content.length-contentHeight)));
-      if(selectedAt>=0){if(selectedAt<scroll)scroll=selectedAt;if(selectedAt>=scroll+contentHeight)scroll=Math.max(0,selectedAt-contentHeight+1);}
-      sectionScroll[id]=scroll;sectionRegions.push({id,line:bodyStart+body.length,height:panelHeight,entries:content.flatMap(line=>line.entries.map(entry=>entry.index))});
-      if(panelHeight)body.push(source[0]!);body.push(...content.slice(scroll,scroll+contentHeight));
-      for(let blank=Math.min(contentHeight,Math.max(0,content.length-scroll));blank<contentHeight;blank++)body.push({parts:[span('│'+' '.repeat(Math.max(0,width-2))+'│','border')],entries:[]});
-      if(panelHeight>=3)body.push(source.at(-1)!);
+    items=view==='Detail'?structuredDetail(entry)??[{title,description:text.split('\n'),descriptionRole:'text',entries:[]}]:[{title,description:text.split('\n'),descriptionRole:'text',entries:[]}];
+    document={title,sections:[],help:entry.help,...(processPreview?{processTarget:{key:entry.id,owner:state.selectedKey,pid:Number(entry.id.slice(1)),name:entry.label}}:{})};
+    state.detail=text;state.detailDocument=document;state.help=view==='Help';
+    if(processPreview)items=[...items,{title:'Output',description:['[DEMO] Shared harness terminal',...Array.from({length:40},(_,i)=>`Build step ${i+1}: retained output`)],descriptionRole:'text',entries:[]}];
+  }else if(view==='Overview'){
+    const fixture=sections.Overview;
+    items=[fixture[1]!,fixture[2]!,...fixture.filter(section=>section.title==='Account / limits'),...([fixture[0]!,fixture[3]!,fixture[4]!].map(section=>({...section,column:1 as const})))];
+    // Narrow layouts retain the familiar top-to-bottom order.
+    if(width<80)items=fixture;
+  }else items=sections[view];
+  const two=width>=80&&items.some(section=>section.column===1)&&items.some(section=>section.column!==1);
+  const layout:LayoutSection[]=items.map(section=>{
+    const rowWidth=two?Math.floor((width-2)/2):width;
+    const rows:ScreenRow[]=section.entries.map(entry=>{
+      entryIndices.set(entry.id,entries.length);entries.push({...entry,display:compactEntry(entry,rowWidth-4)});
+      const row:ScreenRow={id:entry.id,section:section.title,text:[entry.label,entry.value].filter(Boolean).join(' · '),label:entry.label,value:entry.value,help:entry.help,role:entry.role,...(entry.target||entry.detail?{action:{type:'message',text:entry.detail??entry.value??entry.label}}:{})};
+      if(view==='Agents'){row.label=undefined;row.value=undefined;row.role='identity';if(entry.id==='agent-parser')row.continuations=[{text:'    Task: Implement exact source cursors',role:'secondary'}];}
+      if(entry.id==='cpu')row.value='124%     ▁▂▄▆▅█';
+      if(entry.id==='memory'){row.value='620 MiB  ▂▂▃▄▆█';row.gapBefore=1;}
+      if(view==='Messages'&&section.title==='Retained messages')row.continuations=[{text:entry.detail?.split('\n\n').slice(1).join('\n\n')??entry.value??'',role:entry.role??'text'}];
+      return row;
+    });
+    return {id:processPreview&&section.title==='Output'?'output':section.title,title:section.title,rows,column:section.column,fields:section.fields,description:section.descriptionRole==='text'?undefined:section.description,text:section.descriptionRole==='text'?section.description?.join('\n'):undefined,viewport:true};
+  });
+  const selected=Math.max(0,Math.min(options.selected??0,entries.length-1));state.cursor=document?Math.max(0,options.scroll??0):selected;state.cursorId=entries[selected]?.id;
+  state.sectionReaders=new Map(layout.map((section,index)=>[sectionReaderKey(state,section.id),{cursor:state.cursor,cursorId:state.cursorId,freeScroll:options.freeScroll,scroll:options.sectionScroll?.[section.id]??(section.rows.some(row=>row.id===state.cursorId)||document&&index===0?options.scroll??0:0)}]));
+  // Process facts and output receive their runtime panel IDs during layout.
+  if(processPreview)for(const id of ['Process facts','Output'])state.sectionReaders.set(sectionReaderKey(state,id),{cursor:0,freeScroll:options.freeScroll,scroll:options.sectionScroll?.[id]??options.scroll??0});
+  if(options.activeSection&&!entries.length){const part=layout.find(section=>section.id===options.activeSection||processPreview&&(options.activeSection==='Output'?section.id==='output':options.activeSection==='Process facts'&&section.id!=='output'));if(part)state.cursorId=part.rows[0]?.id??(part.fields?.length?`${part.id}:field:0`:`${part.id}:text:0`);}
+  let rendered:RenderedScreen;
+  if(view==='Notes'||view==='Notes editor'){
+    state.notes={sessionKey:state.selectedKey,title:'Monitor',text:note,cursor:note.length,editing:view==='Notes editor',status:'saved'};state.notesScroll=options.scroll??0;state.notesFreeScroll=options.freeScroll;
+    rendered=renderNotes(data,state,width,height,0);
+    if(view==='Notes editor')entries.length=0;
+    else{
+      const source=sections.Notes[0]!.entries[0]!;entries.splice(0,entries.length,{...source,display:rendered.rowRegions?.[0]?.display??source.label});entryIndices.clear();entryIndices.set('notes-edit',0);
     }
+  }else rendered=renderLayout(data,state,layout,width,height,0,new Map(),document,view==='Messages'||processPreview?6:1);
+  const spans=rendered.spans!,positions:PreviewFrame['positions']=[];
+  for(const region of rendered.rowRegions??[]){
+    const row=rendered.rows[region.index]!,entry=entryIndices.get(row.id);if(entry===undefined)continue;
+    positions.push({entry,line:region.y-1,column:region.x-1,width:region.width,actionColumn:region.actionX===undefined?undefined:region.actionX-1});
+    if(region.actionX!==undefined||!positions.slice(0,-1).some(position=>position.entry===entry))entries[entry]!.display=region.display;
   }
-  const selectedBodyLine=body.findIndex(line=>line.entries.some(e=>e.index===selected));
-  let scroll=panelBodies?0:Math.max(0,Math.min(options.scroll??0,Math.max(0,body.length-bodyHeight)));
-  if(selectedBodyLine>=0&&(selectedBodyLine<scroll||selectedBodyLine>=scroll+bodyHeight))scroll=Math.max(0,selectedBodyLine-bodyHeight+1);
-  const spans=[...chrome];
-  for(let i=scroll;i<Math.min(body.length,scroll+bodyHeight);i++){
-    const line=body[i]!;
-    for(const position of line.entries)positions.push({entry:position.index,line:bodyStart+i-scroll,column:position.column,width:position.width});
-    // A visible marker also communicates selection in monochrome terminals.
-    const parts=line.parts.map(p=>({...p}));
-    for(const position of line.entries)if(position.index===selected){const part=parts.find(p=>p.selected);if(part)part.text='›'+part.text.slice(1);}
-    spans.push(parts);
-  }
-  while(spans.length<height-2)spans.push([span('')]);
+  const sectionScroll:Record<string,number>={};
+  const sectionRegions=rendered.sectionRegions?.map(region=>{sectionScroll[region.id]=region.scroll;return{id:region.id,line:region.y-1,column:region.x-1,width:region.width,height:region.height,contentHeight:region.contentHeight,total:region.total,scroll:region.scroll,entries:[...new Set(region.indices.flatMap(index=>{const entry=entryIndices.get(rendered.rows[index]?.id??'');return entry===undefined?[]:[entry];}))]};});
   const footer=processPreview?'←→ panel · ↑↓ scroll · r refresh · Esc · ? help':view==='Help'||view==='Detail'?'↑↓ scroll · Esc back · ? help':view==='Agents'?'Enter inspect · f focus · ? help':view==='Messages'?'←→ panel · ↑↓ scroll · Enter · ? help':view==='Notes editor'?'Ctrl+S save · Esc read · text inserts':view==='Sidebar'?'Ctrl+B i opens Prism · ? help in Prism':view==='Notes'?'Enter edit · Ctrl+S save · ? help':'Enter open · Tab views · ? help';
-  spans.push([span(truncate(`DESIGN ONLY · synthetic data${body.length>bodyHeight?` · ${scroll+1}/${body.length}`:''}`,width),'warning')],[span(truncate(footer,width),'secondary')]);
-  if(options.ascii)for(const line of spans)for(const part of line)part.text=asciiText(part.text).replace(/›/g,'>');
-  return {view,lines:spans.map(parts=>parts.map(p=>p.text).join('').trimEnd()),spans,entries:allEntries,selectedLine:selectedBodyLine<0?undefined:bodyStart+selectedBodyLine-scroll,bodyStart,bodyHeight,columns:two?2:1,scroll,footer,theme,positions,sectionScroll:panelBodies?sectionScroll:undefined,sectionRegions:panelBodies?sectionRegions:undefined};
+  return {view,lines:rendered.lines.map(line=>line.trimEnd()),spans,entries,selectedLine:rendered.selectedLine,bodyStart:rendered.bodyStart,bodyHeight:rendered.bodyHeight,columns:sectionRegions?.some(region=>region.height>0&&region.column>0)?2:1,scroll:state.scroll,footer,theme,positions,sectionScroll:sectionRegions?sectionScroll:undefined,sectionRegions,terminalCursor:rendered.terminalCursor};
 }
 export function formatPreview(frame:PreviewFrame,options:{color?:boolean;depth?:4|8|24}={}):string{
   return frame.spans.map(line=>styleSpans(line,{theme:frame.theme,...options})).join('\n')+'\n';
