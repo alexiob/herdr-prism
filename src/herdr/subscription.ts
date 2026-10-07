@@ -40,17 +40,18 @@ export class SnapshotCache extends EventEmitter {
     if(this.stopped)throw new Error('Snapshot cache closed');
     if(this.reading){this.dirty=true;return this.reading;}
     this.reading=(async()=>{
-      let snapshot:HerdrSnapshot;
+      let snapshot:HerdrSnapshot,readStartedAt:number;
       do {
         await this.ensureSubscribed();
         this.dirty=false;
+        readStartedAt=performance.now();
         const result=await this.client.call('session.snapshot');snapshot=result.snapshot??result;
         if(!snapshot || !Array.isArray(snapshot.agents) || !Array.isArray(snapshot.panes) || typeof snapshot.protocol!=='number')throw new Error('Invalid Herdr snapshot');
         if(this.stopped)return snapshot;this.snapshot=snapshot;this.stale=false;
         const ids=snapshot.agents.map(a=>a.pane_id).sort().join(',');
         if(ids!==this.tracked){const generation=this.generation;await this.client.call('events.subscribe',{subscriptions:[...lifecycleSubscriptions.map(type=>({type})),...snapshot.agents.map(a=>({type:'pane.agent_status_changed',pane_id:a.pane_id}))]});if(generation===this.generation)this.tracked=ids;else this.dirty=true;}
       }while(this.dirty&&!this.stopped);
-      if(!this.stopped)this.emit('snapshot',snapshot!);return snapshot!;
+      if(!this.stopped)this.emit('snapshot',snapshot!,readStartedAt!);return snapshot!;
     })().finally(()=>{this.reading=undefined;});return this.reading;
   }
   close(){this.stopped=true;this.subscribed=false;this.generation++;clearTimeout(this.refreshTimer);clearTimeout(this.reconnectTimer);clearInterval(this.safetyTimer);this.client.off('event',this.onEvent);this.client.off('disconnected',this.onDisconnect);}

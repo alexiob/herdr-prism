@@ -35,17 +35,26 @@ export class CollectorHost {
  private visibility=new Map<string,{key?:string;visible:boolean;subtree:boolean;expanded:boolean}>();
  private queue:Promise<any>=Promise.resolve();
  private snapshot?:HerdrSnapshot;private snapshotAt=-Infinity;private snapshotHash='';private snapshotRevision=0;
+ private snapshotReadStartedAt=-Infinity;private layoutNotBefore=-Infinity;
  private records?:PanelRecord[];
  private ownerTerminalId?:string;
 
  constructor(collector:Collector,store:StateStore,rpc:Rpc){this.collector=collector;this.rpc=rpc;this.views=new PanelViews(store,rpc);}
+ private async acceptSnapshot(snapshot:HerdrSnapshot,readStartedAt:number){
+  if(!Number.isFinite(readStartedAt)||readStartedAt<0)throw new Error('Invalid authoritative snapshot ordering');
+  // A completed open sizes its panel and seeds width geometry. Older reads
+  // queued behind it must never turn that programmatic change into a resize.
+  if(readStartedAt<Math.max(this.snapshotReadStartedAt,this.layoutNotBefore))return false;
+  if(!snapshot||!Array.isArray(snapshot.panes)||!Array.isArray(snapshot.agents))throw new Error('Invalid authoritative visibility snapshot');
+  this.snapshotReadStartedAt=readStartedAt;this.snapshot=snapshot;this.snapshotAt=Date.now();
+  const hash=createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');if(hash!==this.snapshotHash){this.snapshotHash=hash;this.snapshotRevision++;}
+  this.records=await this.views.records();this.ownerTerminalId=focusedPanelOwner(this.records,snapshot);return true;
+ }
  private async inventory(force=false){
   if(force||!this.snapshot||Date.now()-this.snapshotAt>=1000){
+   const readStartedAt=performance.now();
    const response=await this.rpc.call('session.snapshot'),snapshot=response.snapshot??response;
-   if(!snapshot||!Array.isArray(snapshot.panes)||!Array.isArray(snapshot.agents))throw new Error('Invalid authoritative visibility snapshot');
-   this.snapshot=snapshot;this.snapshotAt=Date.now();const hash=createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');if(hash!==this.snapshotHash){this.snapshotHash=hash;this.snapshotRevision++;}
-   this.records=await this.views.records();
-   this.ownerTerminalId=focusedPanelOwner(this.records,snapshot);
+   await this.acceptSnapshot(snapshot,readStartedAt);
   }
   return {snapshot:this.snapshot!,records:this.records!};
  }
@@ -58,9 +67,9 @@ export class CollectorHost {
  }
  request(op:string,p:any={}){const result=this.queue.then(()=>this.dispatch(op,p));this.queue=result.catch(()=>{});return result;}
  private async dispatch(op:string,p:any={}){
-  if(op==='native-snapshot'){const snapshot=p.snapshot as HerdrSnapshot;if(!snapshot||!Array.isArray(snapshot.panes)||!Array.isArray(snapshot.agents))throw new Error('Invalid authoritative visibility snapshot');this.snapshot=snapshot;this.snapshotAt=Date.now();const hash=createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');if(hash!==this.snapshotHash){this.snapshotHash=hash;this.snapshotRevision++;}this.records=await this.views.records();this.ownerTerminalId=focusedPanelOwner(this.records,snapshot);await this.updateVisibility();return{observed:true};}
+  if(op==='native-snapshot'){if(!await this.acceptSnapshot(p.snapshot,p.readStartedAt))return{observed:false};await this.updateVisibility();return{observed:true};}
   if(op==='maintenance'){const {snapshot,records}=await this.inventory(true);await this.views.reconcile(snapshot,records);await this.updateVisibility();return{alive:true};}
-  if(op==='open-view'){try{return await this.views.open(p.targetPaneId);}finally{this.snapshotAt=-Infinity;}}
+  if(op==='open-view'){try{return await this.views.open(p.targetPaneId);}finally{this.layoutNotBefore=performance.now();this.snapshotAt=-Infinity;}}
   if(op==='views')return this.views.records();
   if(op==='view.inspect'){
    const record=(await this.views.records()).find(row=>row.terminalId===p.terminalId);if(!record)throw new Error('Unowned view terminal');
@@ -127,7 +136,7 @@ export async function runCollectorService(options:Record<string,string|boolean>=
  try{
   await store.init();lease=await store.acquire();if(context.settings.nativeMode!=='inspector-only'){const migration=await migrateNativeLayout(context.configPath,context.stateDir,context.settings.theme);if(migration.changed)await rpc.call('server.reload_config');}collector=new Collector({rpc,endpoint:context.endpoint,settings:context.settings,stateDir:context.serverStateDir});
   const host=new CollectorHost(collector,store,rpc),global=new StateStore(context.stateDir);captureWidths=()=>host.views.captureWidths();
-  sharedSnapshots=new SnapshotCache(rpc);sharedSnapshots.on('snapshot',snapshot=>{if(!stopping)void host.request('native-snapshot',{snapshot}).catch(()=>{});});
+  sharedSnapshots=new SnapshotCache(rpc);sharedSnapshots.on('snapshot',(snapshot,readStartedAt)=>{if(!stopping)void host.request('native-snapshot',{snapshot,readStartedAt}).catch(()=>{});});
   mailbox=new MailboxServer(context.serverStateDir,lease.token,async(op,p)=>{
    if(op==='ping')return{alive:true,ready,stale:collector!.data.stale,diagnostics:collector!.data.diagnostics,kind:'collector-service'};
    if(op==='shutdown'){setTimeout(()=>void stop(),50);return{stopping:true};}

@@ -403,7 +403,9 @@ CPU and memory history start in the same column and fill the remaining width of
 their panel. Overview and resource detail charts resize with the pane; their
 scale retains the observed period peak when columns are coalesced. CPU uses a scale of at least
 one logical core (100%); RSS is scaled against the displayed history peak.
-Missing readings remain gaps rather than measured zero.
+Each reading forms a step until the next sample, for at most five seconds. This
+keeps wider charts continuous without inventing intermediate measurements.
+Unavailable readings and collection outages leave gaps rather than measured zero.
 History retains measured observations when a new process is warming up its CPU
 baseline. Detail views show the latest measured time and sample count; an explicit
 collection gap stays blank. Reading one panel's history cannot discard another

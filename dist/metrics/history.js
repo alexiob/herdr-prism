@@ -31,7 +31,7 @@ export class SampleHistory {
             if (p.cpuLowerBound !== undefined)
                 peakCpuLowerBound = Math.max(peakCpuLowerBound ?? 0, p.cpuLowerBound);
         }
-        return { points, cpu: points.map(p => p.cpuPercent), memory: points.map(p => p.memoryBytes), peakMemoryBytes: peakMemoryBytes?.toString(), peakCpuPercent, peakCpuLowerBound, observedFrom: raw[0]?.at, observedTo: raw.at(-1)?.at, windowMs: this.windowMs };
+        return { points, cpu: points.map(p => p.cpuPercent), memory: points.map(p => p.memoryBytes), peakMemoryBytes: peakMemoryBytes?.toString(), peakCpuPercent, peakCpuLowerBound, observedFrom: raw[0]?.at, observedTo: raw.at(-1)?.at, windowMs: this.windowMs, gapMs: this.gapMs };
     }
     clear(session) { if (session === undefined)
         this.series.clear();

@@ -68,10 +68,11 @@ export class SnapshotCache extends EventEmitter {
             return this.reading;
         }
         this.reading = (async () => {
-            let snapshot;
+            let snapshot, readStartedAt;
             do {
                 await this.ensureSubscribed();
                 this.dirty = false;
+                readStartedAt = performance.now();
                 const result = await this.client.call('session.snapshot');
                 snapshot = result.snapshot ?? result;
                 if (!snapshot || !Array.isArray(snapshot.agents) || !Array.isArray(snapshot.panes) || typeof snapshot.protocol !== 'number')
@@ -91,7 +92,7 @@ export class SnapshotCache extends EventEmitter {
                 }
             } while (this.dirty && !this.stopped);
             if (!this.stopped)
-                this.emit('snapshot', snapshot);
+                this.emit('snapshot', snapshot, readStartedAt);
             return snapshot;
         })().finally(() => { this.reading = undefined; });
         return this.reading;

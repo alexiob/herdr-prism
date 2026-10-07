@@ -37,14 +37,14 @@ RSS is median summed resident memory during each 8-second phase.
 
 | Panels / visibility / workload | Prism CPU, before → after | Prism RSS, before → after | Internal snapshot RPCs, before → after |
 | --- | --- | --- | --- |
-| 8 / visible / idle | 62.42% → 16.29% | 1585 → 1035 MiB | 171 → 18 |
-| 8 / visible / echo | 56.77% → 18.50% | 1614 → 1123 MiB | 163 → 16 |
-| 8 / hidden / idle | 54.78% → 5.61% | 1636 → 1316 MiB | 164 → 17 |
-| 8 / hidden / echo | 51.93% → 5.78% | 1645 → 1308 MiB | 167 → 18 |
+| 8 / visible / idle | 62.42% → 19.33% | 1585 → 1062 MiB | 171 → 20 |
+| 8 / visible / echo | 56.77% → 20.98% | 1614 → 1164 MiB | 163 → 16 |
+| 8 / hidden / idle | 54.78% → 7.08% | 1636 → 1372 MiB | 164 → 16 |
+| 8 / hidden / echo | 51.93% → 6.85% | 1645 → 1365 MiB | 167 → 17 |
 
-Eight visible panels used about 74% less CPU in the no-input phase and 67% less
-in the echo phase. Eight hidden panels used about 89% less CPU while echo traffic
-continued. Snapshot traffic fell from 163–171 requests per phase to 16–18.
+Eight visible panels used about 69% less CPU in the no-input phase and 63% less
+in the echo phase. Eight hidden panels used about 87% less CPU while echo traffic
+continued. Snapshot traffic fell from 163–171 requests per phase to 16–20.
 Memory improved, but eight separate frontends and one collector still have a
 substantial resident footprint; these results do not establish negligible memory
 use or a guarantee under arbitrary compilation and provider workloads.
@@ -53,8 +53,8 @@ The initial baseline covers all 14 cases for 0, 1, 4 and 8 panels in
 `artifacts/interactivity-baseline/interactivity.json`. A full intermediate
 optimization run is in `artifacts/interactivity-visibility/interactivity.json`.
 The table above uses the final compiled build with responsive charts and the
-additional metadata-only redraw suppression:
-`artifacts/interactivity-ready-eight/interactivity.json`. Its four eight-panel
+additional metadata-only redraw suppression, snapshot ordering and step charts:
+`artifacts/interactivity-chart-steps-eight/interactivity.json`. Its four eight-panel
 phases all passed. Before measurement, every visible panel was checked for its
 own canonical owner/selected key, expected header/body and 200 retained messages.
 Generated artifacts are local and excluded from Git; their checksums, system
@@ -67,15 +67,15 @@ TUI. The optimized core and client tests use the same exact compiled release.
 
 | Panels / visibility | Key-to-grid p95, before → after | p99, before → after |
 | --- | --- | --- |
-| 8 / visible | 30.18 → 16.19 ms | 52.60 → 19.83 ms |
-| 8 / hidden | 45.19 → 8.40 ms | 65.92 → 13.19 ms |
+| 8 / visible | 30.18 → 16.20 ms | 52.60 → 18.31 ms |
+| 8 / hidden | 45.19 → 8.28 ms | 65.92 → 22.74 ms |
 
 The successful baseline is
 `artifacts/interactivity-client-baseline-eight/interactivity.json`; the final two
-phases are in `artifacts/interactivity-client-ready-eight/interactivity.json`.
+phases are in `artifacts/interactivity-client-chart-steps-eight/interactivity.json`.
 Both final core and direct runs verified panel content before measurement and
 reaped their owned processes. The final consolidated comparison is
-`artifacts/interactivity-ready-eight/comparison.json`.
+`artifacts/interactivity-chart-steps-eight/comparison.json`.
 
 Earlier 0/1-panel controls varied between runs: the Prism-off p95 was 1.94–4.07 ms,
 and one-visible-panel p95 was 7.49–7.67 ms with noisier p99 tails. The eight-panel

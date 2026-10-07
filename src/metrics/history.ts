@@ -8,7 +8,7 @@ export class SampleHistory {
  // not a read: an earlier view must not discard newer measured observations.
  view(session:string,scope:string,now=Date.now()) {const key=JSON.stringify([session,scope]);const raw=(this.series.get(key)??[]).filter(p=>p.at>=now-this.windowMs&&p.at<=now);const points:HistoryPoint[]=[];let peakMemoryBytes:bigint|undefined,peakCpuPercent:number|undefined,peakCpuLowerBound:number|undefined;
   for(const p of raw){const last=points.at(-1);if(last&&p.at-last.at>this.gapMs)points.push({at:last.at+this.gapMs,gap:true});points.push({...p});if(p.memoryBytes!==undefined){const v=BigInt(p.memoryBytes);peakMemoryBytes=peakMemoryBytes===undefined||v>peakMemoryBytes?v:peakMemoryBytes;}if(p.cpuPercent!==undefined)peakCpuPercent=Math.max(peakCpuPercent??0,p.cpuPercent);if(p.cpuLowerBound!==undefined)peakCpuLowerBound=Math.max(peakCpuLowerBound??0,p.cpuLowerBound);}
-  return {points,cpu:points.map(p=>p.cpuPercent),memory:points.map(p=>p.memoryBytes),peakMemoryBytes:peakMemoryBytes?.toString(),peakCpuPercent,peakCpuLowerBound,observedFrom:raw[0]?.at,observedTo:raw.at(-1)?.at,windowMs:this.windowMs};
+  return {points,cpu:points.map(p=>p.cpuPercent),memory:points.map(p=>p.memoryBytes),peakMemoryBytes:peakMemoryBytes?.toString(),peakCpuPercent,peakCpuLowerBound,observedFrom:raw[0]?.at,observedTo:raw.at(-1)?.at,windowMs:this.windowMs,gapMs:this.gapMs};
  }
  clear(session?:string):void{if(session===undefined)this.series.clear();else for(const key of this.series.keys())if(JSON.parse(key)[0]===session)this.series.delete(key);}
 }

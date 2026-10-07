@@ -111,8 +111,9 @@ checkout; they are neither sent to the model nor copied into diagnostic exports.
 CPU 100% means one logical core; aggregate usage can exceed 100%. Resident memory
 is RSS on Unix and working-set sum on Windows; shared pages may be counted by
 several processes. Charts cover the observed period, up to 15 minutes, with
-the newest sample at right and adapt to the allocated panel width; columns use their last measured sample and retain
-explicit gaps. CPU and memory details include scale, sample time, scope and
+the newest sample at right and adapt to the allocated panel width. Each measured
+reading forms a step until the next sample, for at most five seconds. Unavailable
+readings and explicit collection gaps stop the step. CPU and memory details include scale, sample time, scope and
 coverage; memory scale is its observed chart peak, not host-memory percent. Unreadable or
 warming-up processes produce partial/lower-bound coverage; `—` is unavailable,
 `0` is measured zero and cached values carry age. Subtree includes recorded

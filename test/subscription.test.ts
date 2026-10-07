@@ -12,9 +12,11 @@ async function fixture(t:any,handler:(request:any,socket:Duplex,generation:numbe
 
 test('subscription precedes snapshot and an event during its read yields the latest complete snapshot',async t=>{
  const calls:string[]=[];let first:any,reads=0;const f=await fixture(t,(request,socket)=>{calls.push(request.method);if(request.method==='events.subscribe')answer(socket,request,{});else if(++reads===1)first={request,socket};else answer(socket,request,{snapshot:snapshot('latest')});});
- const emitted:any[]=[];f.cache.on('snapshot',value=>emitted.push(value));const started=f.cache.start();
+ const emitted:any[]=[];f.cache.on('snapshot',(value,readStartedAt)=>emitted.push({value,readStartedAt}));const started=f.cache.start();
  while(!first)await new Promise(resolve=>setImmediate(resolve));assert.equal(calls[0],'events.subscribe');f.eventSocket().push(JSON.stringify({event:'pane_updated',data:{pane_id:'latest'}})+'\n');answer(first.socket,first.request,{snapshot:snapshot('old')});
+ const finalReadNotBefore=performance.now();
  assert.equal((await started).agents[0].pane_id,'latest');assert.equal(f.cache.snapshot?.agents[0].pane_id,'latest');assert.equal(emitted.length,1);assert.ok(reads>=2);
+ assert.equal(emitted[0].value.agents[0].pane_id,'latest');assert.ok(emitted[0].readStartedAt>=finalReadNotBefore,'published ordering describes the final snapshot RPC rather than the superseded first read');
 });
 
 test('events_lost marks stale immediately and resubscribes before publishing recovered snapshot',async t=>{
