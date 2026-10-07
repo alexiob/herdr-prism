@@ -276,7 +276,6 @@ export function renderPreview(view, options = {}) {
                 row.value = '124%     ▁▂▄▆▅█';
             if (entry.id === 'memory') {
                 row.value = '620 MiB  ▂▂▃▄▆█';
-                row.gapBefore = 1;
             }
             if (view === 'Messages' && section.title === 'Retained messages')
                 row.continuations = [{ text: entry.detail?.split('\n\n').slice(1).join('\n\n') ?? entry.value ?? '', role: entry.role ?? 'text' }];

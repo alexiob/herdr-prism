@@ -136,7 +136,6 @@ export function overviewRows(session:SessionView,state:UiState,now:number,data:D
  const cpuValue=aggregateCpu(session),memoryValue=resident(r?.memoryBytes),metricWidth=Math.max(8,cellWidth(cpuValue),cellWidth(memoryValue));
  add('cpu','CPU',`${pad(cpuValue,metricWidth)} ${resourceHistory(session,'cpu',8,state.ascii,now).chart}`,resourceDocument(session,'cpu',state,now),'Resources',0,'quantity');
  add('memory',r?.memoryLabel==='working-set sum'?'WS sum':'RSS sum',`${pad(memoryValue,metricWidth)} ${resourceHistory(session,'memory',8,state.ascii,now).chart}`,resourceDocument(session,'memory',state,now),'Resources',0,'quantity');
- rows.at(-1)!.gapBefore=1;
  link('coverage','Processes',r?.coverage?`${r.coverage.readable}/${r.coverage.total} readable`:'—','Processes','Resources',0);
  }
  add('context','Context',u?.contextPercent===undefined?'—':percent(u.contextPercent)+' '+meter(u.contextPercent,8,state.ascii),usageDocument(session,now),'Usage',0,'quantity');

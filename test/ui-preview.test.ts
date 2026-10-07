@@ -161,13 +161,12 @@ test('message preview selects its complete multiline entry with a single action 
   assert.ok(parts.filter((part:any)=>part.surface).every((part:any)=>part.selected));
 });
 
-test('Overview preview separates CPU and RSS chart entries with one blank line',()=>{
+test('Overview preview keeps CPU and RSS chart entries on adjacent rows',()=>{
   const frame=api.renderPreview('Overview',{width:80,height:40});
   const cpu=frame.entries.findIndex((entry:any)=>entry.id==='cpu'),memory=frame.entries.findIndex((entry:any)=>entry.id==='memory');
   const cpuLine=frame.positions.find((position:any)=>position.entry===cpu).line;
   const memoryLine=frame.positions.find((position:any)=>position.entry===memory).line;
-  assert.equal(memoryLine-cpuLine,2);
-  assert.match(frame.lines[cpuLine+1].slice(0,39),/^│\s+│$/);
+  assert.equal(memoryLine-cpuLine,1);
 });
 
 test('notes editor preview keeps the actual editor caret inside a short viewport',()=>{

@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {demoData} from '../src/runtime/demo.ts';
 import {createUiState,renderScreen,handleKey,handleRowClick,handleRowWheel,showDetail} from '../src/tui/screen.ts';
-import {fitSpans} from '../src/tui/widgets.ts';
 import {cellWidth} from '../src/tui/text.ts';
 
 test('message preview lines share one selection and one navigation arrow',()=>{
@@ -42,11 +41,11 @@ test('all subpanels remain in bounds and independently scroll even at tiny dimen
  }
 });
 
-test('CPU and memory charts have one neutral separating line',()=>{
+test('CPU and memory charts occupy adjacent rows',()=>{
  const data=demoData(),state=createUiState();state.selectedKey=data.sessions[0]!.key;
  const frame=renderScreen(data,state,120,40),cpu=frame.rows.findIndex(row=>row.id==='cpu'),memory=frame.rows.findIndex(row=>row.id==='memory');
  const cpuLine=frame.rowRegions!.find(region=>region.index===cpu)!,memoryLine=frame.rowRegions!.find(region=>region.index===memory)!;
- assert.equal(memoryLine.y-cpuLine.y,2);assert.ok(fitSpans(frame.spans![cpuLine.y]!,frame.sectionRegions!.find(region=>region.id==='Resources')!.width).every(span=>!span.selected&&!span.surface));
+ assert.equal(memoryLine.y-cpuLine.y,1);
 });
 
 test('new detail readers start at their own beginning and closing nested details restores the prior viewport',()=>{

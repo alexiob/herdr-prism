@@ -292,7 +292,7 @@ cycles through each subpanel. List entries alternate subtle backgrounds; selecti
 uses a stronger, separate highlight. A multiline entry moves and highlights as one
 item, with one right arrow. Click its body to select; Enter or its arrow opens it.
 Wheels and paging read long entries within their subpanel. CPU and memory charts
-share a left edge and have a blank line between them.
+share a left edge and occupy adjacent rows.
 
 Agents shows this panel’s owner and only its recorded sub-agent tree. Each worker
 has a concise status and reported task or goal; unrelated host sessions are excluded.

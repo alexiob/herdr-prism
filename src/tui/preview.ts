@@ -250,7 +250,7 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
       const row:ScreenRow={id:entry.id,section:section.title,text:[entry.label,entry.value].filter(Boolean).join(' · '),label:entry.label,value:entry.value,help:entry.help,role:entry.role,...(entry.target||entry.detail?{action:{type:'message',text:entry.detail??entry.value??entry.label}}:{})};
       if(view==='Agents'){row.label=undefined;row.value=undefined;row.role='identity';if(entry.id==='agent-parser')row.continuations=[{text:'    Task: Implement exact source cursors',role:'secondary'}];}
       if(entry.id==='cpu')row.value='124%     ▁▂▄▆▅█';
-      if(entry.id==='memory'){row.value='620 MiB  ▂▂▃▄▆█';row.gapBefore=1;}
+      if(entry.id==='memory'){row.value='620 MiB  ▂▂▃▄▆█';}
       if(view==='Messages'&&section.title==='Retained messages')row.continuations=[{text:entry.detail?.split('\n\n').slice(1).join('\n\n')??entry.value??'',role:entry.role??'text'}];
       return row;
     });
