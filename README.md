@@ -384,6 +384,13 @@ The Rust helper reports collection/encoding timings and can recover from a timeo
 or exit with a bounded restart budget. CPU warms up again after a helper restart.
 See [batch collection, benchmarks and the Rust digest design](docs/process-batching.md).
 
+If a frontend exits during startup or disconnects after repeated failed polls,
+Prism keeps a private `view-failure-*.json` receipt under the collecting server's
+plugin state directory, `servers/<endpoint-hash>/`. It records the failing phase,
+a bounded error message, PID and time, so a removed terminal's startup error can
+still be inspected. Notes and transcript fields are excluded; complete removal
+deletes these receipts with the plugin's state.
+
 Install Prism on each remote Herdr server to collect that host's sessions,
 transcripts, processes and Git state. The dashboard identifies its server and
 native rows retain Herdr's machine label. See [remote setup and limitations](docs/remote.md).

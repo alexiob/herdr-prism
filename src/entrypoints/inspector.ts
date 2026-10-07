@@ -9,6 +9,7 @@ import { serviceContext } from '../runtime/service.ts';
 import { acquireAdmission } from '../runtime/admission.ts';
 import { FollowSelection,clearInspectionOverlays,resumeBoundSelection,boundNoteAdoption, inspectorVisible, localSelection as selectLocal } from '../runtime/follow.ts';
 import { RemoteCollector } from '../runtime/remote-collector.ts';
+import {ViewFailureReporter} from '../runtime/view-failure.ts';
 import {panelViewStore,waitForPanelRecord} from '../runtime/panel-views.ts';
 import { demoData } from '../runtime/demo.ts';
 import { HerdrClient } from '../herdr/client.ts';
@@ -41,6 +42,8 @@ export async function main(argv = process.argv.slice(2)) {
     let syncVisibility = () => {};let syncBoundSelection=()=>{};let panelVisible=()=>true;
     let notes:NotesController|undefined;let notesStore:NotesStore|undefined;let ownNotesTerminalId:string|undefined;
     let inputQueue=Promise.resolve();
+    let startupPhase='context';let failureReporter:ViewFailureReporter|undefined;
+    const recordFailure=async(error:unknown,phase=startupPhase)=>{await failureReporter?.record(phase==='remote-start'?'remote:'+collector?.startupPhase:phase,error).catch(()=>{});};
     const ensureNotes=async(reload=false)=>{if(state.tab!=='Notes'||!state.selectedKey||notes?.value?.editing||!panelVisible())return;const session=data.sessions.find(s=>s.key===state.selectedKey);if(!session||!notes)return;const changed=notes.value?.sessionKey!==session.key;if(changed&&notesStore&&ownNotesTerminalId){const identity=boundNoteAdoption(session,state.selectedKey,state.boundSessionKey,ownNotesTerminalId);if(identity)await notesStore.adoptOwnPlaceholder(identity);}await notes.open(session.key,session.evidence.title??session.evidence.id,reload);if(changed)state.notesScroll=0;state.notes=notes.value;};
     const connectNotes=(dir:string)=>{notesStore=new NotesStore(dir);notes=new NotesController(notesStore);notes.on('change',()=>{state.notes=notes!.value;if(!closing)paint();});};
     const editorInput=async(event:any)=>{
@@ -79,17 +82,20 @@ export async function main(argv = process.argv.slice(2)) {
             disabled: boolean;
         }>('lifecycle'))?.disabled)
             throw new Error('Plugin is deactivated');
+        failureReporter=new ViewFailureReporter(context.serverStateDir,process.env.HERDR_PANE_ID??'pid:'+process.pid);
         const rpc = new HerdrClient(context.endpoint);
-        const admission = await acquireAdmission(context.stateDir);
+        startupPhase='admission';const admission = await acquireAdmission(context.stateDir).catch(async error=>{await recordFailure(error);rpc.close();throw error;});
         let lease: Awaited<ReturnType<StateStore['acquire']>> | undefined;
         cleanup = async () => { ui.close(); rpc.close(); await lease?.release(); await admission.release(); };
         try {
+            startupPhase='server-state';
             const serverStore = new StateStore(context.serverStateDir);
             await serverStore.init();
             await serverStore.read<any>('preferences');
             const cache = new SnapshotCache(rpc);
             cleanup = async () => { ui.close(); cache.close(); rpc.close(); await lease?.release(); await admission.release(); };
-            await cache.start();
+            startupPhase='snapshot-start';await cache.start();
+            startupPhase='pane-identity';
             let paneId = process.env.HERDR_PANE_ID;
             const current = paneId ? await rpc.call('pane.current', {caller_pane_id:paneId}) : undefined;
             paneId = current?.pane?.pane_id ?? current?.pane_id ?? paneId;
@@ -97,10 +103,10 @@ export async function main(argv = process.argv.slice(2)) {
             const ownPane = cache.snapshot?.panes.find(p=>p.terminal_id===terminalId);
             if (!paneId || !terminalId || typeof ownPane?.tab_id!=='string') throw new Error('Inspector requires its registered Herdr pane identity');
             const tabId = ownPane.tab_id;
-            const record=await waitForPanelRecord(serverStore,{paneId,terminalId,tabId});
+            startupPhase='bound-record';const record=await waitForPanelRecord(serverStore,{paneId,terminalId,tabId});
             const targetTerminalId=record.targetTerminalId!;ownNotesTerminalId=targetTerminalId;
             const store = panelViewStore(context.serverStateDir,tabId,targetTerminalId);
-            await store.init();lease=await store.acquire();
+            startupPhase='view-lease';await store.init();lease=await store.acquire();
             const preferences=await store.read<any>('preferences');
             collector = new RemoteCollector(context,paneId,terminalId);
             const followSelection = new FollowSelection();
@@ -129,12 +135,12 @@ export async function main(argv = process.argv.slice(2)) {
             const localSelection=()=>selectLocal(data,tabId,cache.snapshot,targetTerminalId);
             syncBoundSelection=()=>{state.boundSessionKey=localSelection();};
             try {
-                await collector.start();data=collector.data;
+                startupPhase='remote-start';await collector.start();data=collector.data;
                 if(!state.pin||!state.selectedKey||!data.sessions.some(s=>s.key===state.selectedKey))state.selectedKey=localSelection();
-                syncVisibility();await collector.refresh();data=collector.data;
+                startupPhase='selected-poll';syncVisibility();await collector.refresh();data=collector.data;
                 if(closing){await stop();return;}
-                if(args.options.once||!process.stdin.isTTY){paint();await cleanup();return;}
-                connectNotes(context.serverStateDir);await ensureNotes();ui.start();
+                if(args.options.once||!process.stdin.isTTY){if(!args.options.once)await recordFailure(new Error('Inspector standard input is not a TTY'),'interactive-tty');paint();await cleanup();return;}
+                startupPhase='notes-open';connectNotes(context.serverStateDir);await ensureNotes();startupPhase='ui-start';ui.start();
                 const follow = async () => {
                     const snapshot=cache.snapshot;
                     if(!snapshot||state.pin||state.processConfirmation||state.notes?.editing||!context.settings.follow)return;
@@ -147,7 +153,7 @@ export async function main(argv = process.argv.slice(2)) {
                 collector.on('data', (next: DashboardData) => { data = next; if (!state.processConfirmation&&!state.notes?.editing&&(!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey)))
                     state.selectedKey = localSelection(); paint(); queueFollow(); });
                 collector.on('diagnostic', (message: string) => { state.notice = message; paint(); });
-                collector.once('disconnected',()=>{inputQueue=inputQueue.then(()=>stop());});
+                collector.once('disconnected',(error:Error)=>{inputQueue=inputQueue.then(async()=>{await recordFailure(error,'poll-disconnect');await stop();});});
                 ui.on('resize',paint);
                 let referenceRequest=false;let contentRequest=0;let outputRequest=0;
                 const refreshProcessOutput=async(sessionKey:string,target:NonNullable<UiAction['processTarget']>,document=state.detailDocument)=>{
@@ -292,16 +298,18 @@ export async function main(argv = process.argv.slice(2)) {
                         paint();
                 }};
                 ui.on('input',(event:any)=>{if(!closing)inputQueue=inputQueue.then(()=>processInput(event));});
-                paint();
-                await follow();
-                await collector.markReady();
+                startupPhase='initial-paint';paint();
+                startupPhase='initial-follow';await follow();
+                startupPhase='ready-receipt';await collector.markReady();startupPhase='running';
             }
             catch (error) {
+                await recordFailure(error);
                 await cleanup();
                 throw error;
             }
         }
         catch (error) {
+            await recordFailure(error);
             await cleanup();
             throw error;
         }

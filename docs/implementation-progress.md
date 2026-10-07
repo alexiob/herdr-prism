@@ -944,3 +944,21 @@ assumption is replaced by independent worker CPU-counter brackets and exact unit
 conversion, preserving identity/memory/cleanup assertions. The native probe passed
 locally with the shipped helper. Actual corrected hidden-content acceptance also
 passed locally (`artifacts/prism-batch-mac-features-gate/features.json`).
+
+All ten jobs passed on `4bb1fd5` in Actions run37612489492, including both Windows
+versions' real long-path ACL, concurrent Notes, ConPTY, live lifecycle, feature,
+independent-panel and pinned ordinary GitHub installation tests. Local final suite:
+518 tests,493 passed,25 platform/opt-in skips,zero failures. Warm actual collector
+refresh measured504ms and a following ping750ms; this does not prove a10s event
+queue delay. The instrumented live deactivate/reactivate succeeded, restored all
+four exact bindings and focus, and produced no failure receipt. No speculative
+refresh/event scheduling change was made. The transient initialping guard remains
+proven by its blocked-mailbox regression.
+
+Frontend startup/poll failure receipts now survive PTY removal in private server
+state. They contain phase, a512-character-bounded error message, PID and time,
+exclude stack/Notes/transcript/token fields, record once per frontend and never
+recreate removed state. Phase labels cover binding, lease, owner readiness,
+registration, polling, painting and first-ready acknowledgement. The focused
+20-test recheck and TypeScript/build passed; the final matrix will verify this
+small diagnostic addition as well.

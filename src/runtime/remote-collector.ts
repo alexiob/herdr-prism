@@ -13,12 +13,15 @@ export class RemoteCollector extends EventEmitter {
  private client?:MailboxClient;private timer?:NodeJS.Timeout;private pending?:Promise<void>;private stopped=false;
  private key?:string;private visible=false;private subtree=false;private expanded=false;
  private failures=0;
+ private phase='idle';
  constructor(context:Awaited<ReturnType<typeof serviceContext>>,paneId:string,terminalId:string){super();this.context=context;this.paneId=paneId;this.terminalId=terminalId;}
  get displayedSessionKey(){return this.key;}
+ get startupPhase(){return this.phase;}
  async start(){
+  this.phase='ensure-owner';
   const owner=await ensureCollectorService(this.context);this.client=new MailboxClient(this.context.serverStateDir,owner.marker.token,10000,16*1024*1024);
-  await this.client.request('view.register',{paneId:this.paneId,terminalId:this.terminalId,pid:process.pid});await this.refresh();
-  this.timer=setInterval(()=>{if(this.pending)return;void this.refresh().catch(error=>{this.data={...this.data,stale:true};this.emit('diagnostic',error.message);this.emit('data',this.data);if(++this.failures>=3){clearInterval(this.timer);this.emit('disconnected');}});},500);
+  this.phase='register';await this.client.request('view.register',{paneId:this.paneId,terminalId:this.terminalId,pid:process.pid});this.phase='initial-poll';await this.refresh();this.phase='running';
+  this.timer=setInterval(()=>{if(this.pending)return;void this.refresh().catch(error=>{this.data={...this.data,stale:true};this.emit('diagnostic',error.message);this.emit('data',this.data);if(++this.failures>=3){clearInterval(this.timer);this.emit('disconnected',error);}});},500);
  }
  setVisibleSession(key?:string,visible=true){this.key=key;this.visible=visible;}
  setScope(subtree:boolean){this.subtree=subtree;}
