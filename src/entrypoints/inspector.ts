@@ -15,8 +15,10 @@ import { HerdrClient } from '../herdr/client.ts';
 import { SnapshotCache } from '../herdr/subscription.ts';
 import { StateStore } from '../state/store.ts';
 import { TerminalUi } from '../tui/terminal.ts';
-import { createUiState, renderScreen, handleKey, handleRowClick, showDetail, addMessagePage, addReferencePage, showReferenceSources } from '../tui/screen.ts';
+import { createUiState, renderScreen, handleKey, handleRowClick, handleRowWheel, showDetail, addMessagePage, addReferencePage, showReferenceSources } from '../tui/screen.ts';
+import {withProcessOutput} from '../process/output.ts';
 import {messageDocument} from '../tui/facts.ts';
+import {documentText} from '../tui/widgets.ts';
 import {visibleReferences} from '../tui/reference-readers.ts';
 import { diagnosticExport } from '../tui/export.ts';
 import { copyText, openTarget } from '../tui/platform.ts';
@@ -95,7 +97,10 @@ export async function main(argv = process.argv.slice(2)) {
             const ownPane = cache.snapshot?.panes.find(p=>p.terminal_id===terminalId);
             if (!paneId || !terminalId || typeof ownPane?.tab_id!=='string') throw new Error('Inspector requires its registered Herdr pane identity');
             const tabId = ownPane.tab_id;
-            const store = panelViewStore(context.serverStateDir,tabId);
+            const record=(await serverStore.read<import('../runtime/panel-views.ts').PanelRecord[]>('views'))?.find(row=>row.terminalId===terminalId&&row.open);
+            if(!record?.targetTerminalId)throw new Error('Inspector requires its registered native target terminal');
+            const targetTerminalId=record.targetTerminalId;
+            const store = panelViewStore(context.serverStateDir,tabId,targetTerminalId);
             await store.init();lease=await store.acquire();
             const preferences=await store.read<any>('preferences');
             collector = new RemoteCollector(context,paneId,terminalId);
@@ -121,7 +126,7 @@ export async function main(argv = process.argv.slice(2)) {
             // The service owns its own admission check; do not hold a UI's gate
             // while waiting for its detached owner to start.
             await admission.release();
-            const localSelection=()=>selectLocal(data,tabId,cache.snapshot);
+            const localSelection=()=>selectLocal(data,tabId,cache.snapshot,targetTerminalId);
             try {
                 await collector.start();data=collector.data;
                 if(!state.pin||!state.selectedKey||!data.sessions.some(s=>s.key===state.selectedKey))state.selectedKey=localSelection();
@@ -132,7 +137,7 @@ export async function main(argv = process.argv.slice(2)) {
                 const follow = async () => {
                     const snapshot=cache.snapshot;
                     if(!snapshot||state.pin||state.processConfirmation||state.notes?.editing||!context.settings.follow)return;
-                    const selectedKey=followSelection.observeLocal(snapshot,data,tabId,state.pin);
+                    const selectedKey=followSelection.observeLocal(snapshot,data,tabId,state.pin,targetTerminalId);
                     if(selectedKey){await notes?.end();state.selectedKey=selectedKey;await ensureNotes();paint();}
                 };
                 const queueFollow=()=>{inputQueue=inputQueue.then(async()=>{if(!closing){await ensureNotes();await follow();paint();}}).catch(error=>{state.notice=(error as Error).message;if(!closing)paint();});};
@@ -143,7 +148,15 @@ export async function main(argv = process.argv.slice(2)) {
                 collector.on('diagnostic', (message: string) => { state.notice = message; paint(); });
                 collector.once('disconnected',()=>{inputQueue=inputQueue.then(()=>stop());});
                 ui.on('resize',paint);
-                let referenceRequest=false;let contentRequest=0;
+                let referenceRequest=false;let contentRequest=0;let outputRequest=0;
+                const refreshProcessOutput=async(sessionKey:string,target:NonNullable<UiAction['processTarget']>,document=state.detailDocument)=>{
+                    if(!document||state.help||!panelVisible()||state.selectedKey!==sessionKey)return;
+                    const request=++outputRequest;
+                    try{const output=await collector!.processOutput(sessionKey,target);
+                        if(closing||request!==outputRequest||state.help||!panelVisible()||state.selectedKey!==sessionKey||state.detailDocument!==document)return;
+                        state.detailDocument=withProcessOutput(document,output);state.detail=documentText(state.detailDocument);paint();
+                    }catch(error){if(!closing&&request===outputRequest&&!state.help&&panelVisible()&&state.selectedKey===sessionKey&&state.detailDocument===document){state.detailDocument=withProcessOutput(document,{availability:'unavailable',scope:'shared-terminal',pid:target.pid,owner:target.owner,processKey:target.key,capturedAt:Date.now(),reason:(error as Error).message});state.detail=documentText(state.detailDocument);paint();}}
+                };
                 const perform = async (action: UiAction) => {
                     if (action.type === 'quit'){contentRequest++;return stop();}
                     if (action.type === 'pin') {
@@ -154,6 +167,7 @@ export async function main(argv = process.argv.slice(2)) {
                         }
                         return;
                     }
+                    if(action.type==='process-output'){if(action.sessionKey&&action.processTarget)void refreshProcessOutput(action.sessionKey,action.processTarget);return;}
                     if(action.type==='terminate-process'){const result=await collector!.terminateProcess(action.sessionKey!,action.processTarget!);state.notice=`${result.platform==='win32'?'Termination':'SIGTERM'} requested for PID ${result.pid}`;return;}
                     if (action.type === 'scope') {
                         collector!.setScope(state.subtree);
@@ -235,7 +249,8 @@ export async function main(argv = process.argv.slice(2)) {
                         const message = action.id && action.sessionKey ? await collector!.message(action.sessionKey, action.id) : undefined;
                         if(closing||key!==state.selectedKey||tab!==state.tab||request!==contentRequest)return;
                         const text = message ? `${message.role}\n${message.text}\n${(message.tools ?? []).map(t => `${t.status} ${t.name}: ${t.summary ?? ''}`).join('\n')}` : action.text ?? 'No detail';
-                        showDetail(state, text, action.document??(message?messageDocument(message):undefined));
+                        const document=action.document??(message?messageDocument(message):undefined);showDetail(state,text,document);
+                        if(document?.processTarget&&key)void refreshProcessOutput(key,document.processTarget,document);
                         return;
                     }
                 };
@@ -245,8 +260,10 @@ export async function main(argv = process.argv.slice(2)) {
                         if (event.release)
                             return;
                         if (event.button === 64 || event.button === 65) {
-                            state.cursor += event.button === 64 ? -3 : 3;
-                            state.cursorId = undefined;
+                            if(!handleRowWheel(state,event.x,event.y,event.button===64?-3:3,frame)){
+                                state.cursor += event.button === 64 ? -3 : 3;
+                                state.cursorId = undefined;
+                            }
                         }
                         else if (event.button === 0) {
                             const action = handleRowClick(state, event.x, event.y, data, frame);
@@ -284,7 +301,11 @@ export async function main(argv = process.argv.slice(2)) {
     async function stop() { if (stopping)
         return stopping; closing = true; collector?.setVisibleSession(state.selectedKey,false); stopping=cleanup().then(()=>{finished=true;}).catch(error=>{closing=false;stopping=undefined;state.notice='Cannot close until notes are saved: '+(error as Error).message;paint();}); return stopping; }
     if (args.options.demo){
-        const demoInput=async(event:any)=>{try{if(await editorInput(event)){paint();return;}if (event.type !== 'key')
+        const demoInput=async(event:any)=>{try{if(await editorInput(event)){paint();return;}
+        if(event.type==='mouse'&&!event.release&&(event.button===64||event.button===65)){
+            if(!handleRowWheel(state,event.x,event.y,event.button===64?-3:3,frame)){state.cursor+=event.button===64?-3:3;state.cursorId=undefined;}paint();return;
+        }
+        if (event.type !== 'key')
             return; const action = handleKey(state, event.key, data, frame); if (action?.type === 'quit')
             await stop();
         else if (action?.type === 'focus'||action?.type==='select')
@@ -292,8 +313,12 @@ export async function main(argv = process.argv.slice(2)) {
         else if(action?.type==='terminate-process')state.notice=`Demo: simulated termination of PID ${action.processTarget!.pid}; no OS signal sent`;
         else if(action?.type==='tab')await ensureNotes();
         else if(action?.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});}
-        else if (action?.type === 'message')
-            showDetail(state, action.text ?? '',action.document);
+        else if (action?.type === 'message'){
+            const target=action.document?.processTarget;
+            const document=target?withProcessOutput(action.document!,{availability:'known',scope:'shared-terminal',pid:target.pid,owner:target.owner,processKey:target.key,capturedAt:Date.now(),text:'[DEMO] Shared harness terminal\n$ build\nCompiling project…\nBuild completed.\nThis fixture does not capture a real process.'}):action.document;
+            showDetail(state,document?documentText(document):action.text??'',document);
+        }
+        else if(action?.type==='process-output')state.notice='Demo: retained output is a fixture; no terminal capture requested';
         else if(action?.type==='ref-sources'){
             const session=data.sessions.find(session=>session.key===action.sessionKey),reference=session?.refs?.find(ref=>ref.id===action.id);if(reference)showReferenceSources(state,session!.key,reference,{sources:reference.sources??[{messageId:reference.messageId,source:reference.source}],hasMore:false,partial:true,observedAt:Date.now()},session!.evidence.contentRevision);
         }

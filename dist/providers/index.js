@@ -33,7 +33,7 @@ export class ProviderIndex {
     activeRefs;
     detailedRefs;
     detailGeneration = 0;
-    referenceHistory;
+    referenceHistories = new Map();
     metadataIndex = new Map();
     scanRound = 0;
     metadataCache = new Map();
@@ -579,12 +579,18 @@ export class ProviderIndex {
         if (!evidence?.path || evidence.availability === 'unavailable')
             return;
         const key = `${provider}:${evidence.id}`;
-        if (this.referenceHistory?.key !== key) {
-            this.referenceHistory?.reader.close();
-            this.referenceHistory = { key, reader: new ReferenceHistory(provider, this.maxRecord, evidence.id) };
+        let reader = this.referenceHistories.get(key);
+        if (!reader)
+            reader = new ReferenceHistory(provider, this.maxRecord, evidence.id);
+        this.referenceHistories.delete(key);
+        this.referenceHistories.set(key, reader);
+        while (this.referenceHistories.size > 128) {
+            const first = this.referenceHistories.keys().next().value;
+            this.referenceHistories.get(first).close();
+            this.referenceHistories.delete(first);
         }
         const files = [...this.entries.values()].filter(entry => entry.provider === provider && entry.adapter.evidence.id === evidence.id).sort((a, b) => (a.adapter.evidence.startedAt ?? 0) - (b.adapter.evidence.startedAt ?? 0) || a.path.localeCompare(b.path)).map(entry => entry.path);
-        return this.referenceHistory.reader.read(files, () => !this.closed && isCurrent());
+        return reader.read(files, () => !this.closed && isCurrent());
     }
     referenceFiles(provider, ref) {
         const evidence = this.resolveSnapshotCached(provider, ref);
@@ -616,5 +622,6 @@ export class ProviderIndex {
             return;
         return readReferenceMessage(cursor, this.maxRecord, () => !this.closed && isCurrent());
     }
-    close() { this.closed = true; this.referenceHistory?.reader.close(); this.referenceHistory = undefined; this.entries.clear(); this.sessions.clear(); this.inventory.clear(); this.metadataIndex.clear(); this.metadataCache.clear(); this.pathAliases.clear(); this.snapshots = Object.freeze([]); this.assemblyKey = undefined; }
+    close() { this.closed = true; for (const reader of this.referenceHistories.values())
+        reader.close(); this.referenceHistories.clear(); this.entries.clear(); this.sessions.clear(); this.inventory.clear(); this.metadataIndex.clear(); this.metadataCache.clear(); this.pathAliases.clear(); this.snapshots = Object.freeze([]); this.assemblyKey = undefined; }
 }

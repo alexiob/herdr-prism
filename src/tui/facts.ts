@@ -1,10 +1,11 @@
+import {outputHelp} from '../process/output.ts';
 import {accountRows} from './account.ts';
 import type {DashboardData,SessionView,UiState,ScreenRow,DetailDocument,DetailSection,DetailField,UiRef} from './types.ts';
 import type {OwnedProcess} from '../process/ownership.ts';
 import type {Message} from '../model/types.ts';
 import type {ColorRole} from './theme.ts';
-import {age,number,bytes,spark} from './text.ts';
-import {documentText,meter} from './widgets.ts';
+import {age,number,bytes,spark,cellWidth} from './text.ts';
+import {documentText,meter,pad} from './widgets.ts';
 export const unavailable='—';
 export const field=(label:string,value:unknown,role?:ColorRole):DetailField=>({label,value:value===undefined||value===null?'—':String(value),role});
 const section=(id:string,title:string,fields:DetailField[],column:0|1=0):DetailSection=>({id,title,fields,column});
@@ -119,7 +120,9 @@ export function workDocument(session:SessionView,id:string,data:DashboardData,no
  return doc;
 }
 export function processDocument(session:SessionView,process:OwnedProcess,now:number):DetailDocument{
- const denied=process.availability==='unavailable';return {processTarget:denied?undefined:{key:process.key,owner:process.owner,pid:process.pid,name:process.name,isHarness:process.isHarness},help:'Shift+K asks to terminate this exact process. Cancel is selected initially. Only this PID is signaled; killing a harness can end its agent session. Escape returns.',title:'Process details',capturedAt:now,sections:[section('identity','Identity',[field('Name',process.name,'identity'),field('PID',process.pid,'identity'),field('PPID',process.ppid,'identity'),field('Birth',process.startTime,'identity'),field('Identity',process.key,'identity')]),section('resources','Resources',[field('CPU',percent(denied?undefined:process.cpuPercent),'quantity'),field(session.resource?.memoryLabel==='working-set sum'?'WS':'RSS',resident(denied?undefined:process.rssBytes),'quantity'),field('Threads',number(denied?undefined:process.threads),'quantity'),field('Uptime',duration(denied?undefined:process.uptimeMs),'duration'),field('Read bytes',denied?'—':process.readBytes,'quantity'),field('Write bytes',denied?'—':process.writeBytes,'quantity'),field('Status',process.availability??'known',statusRole(process.availability??'known'))],1),section('ownership','Ownership',[field('Agent',process.owner,'identity'),field('Harness',process.isHarness?'Verified root':'Owned process')])]};
+ const denied=process.availability==='unavailable',target=denied?undefined:{key:process.key,owner:process.owner,pid:process.pid,name:process.name,isHarness:process.isHarness};const doc:DetailDocument={processTarget:target,help:'Shift+K asks to terminate this exact process. Cancel is selected initially. Only this PID is signaled; killing a harness can end its agent session. Escape returns.',title:'Process details',capturedAt:now,sections:[section('identity','Identity',[field('Name',process.name,'identity'),field('PID',process.pid,'identity'),field('PPID',process.ppid,'identity'),field('Birth',process.startTime,'identity'),field('Identity',process.key,'identity')]),section('resources','Resources',[field('CPU',percent(denied?undefined:process.cpuPercent),'quantity'),field(session.resource?.memoryLabel==='working-set sum'?'WS':'RSS',resident(denied?undefined:process.rssBytes),'quantity'),field('Threads',number(denied?undefined:process.threads),'quantity'),field('Uptime',duration(denied?undefined:process.uptimeMs),'duration'),field('Read bytes',denied?'—':process.readBytes,'quantity'),field('Write bytes',denied?'—':process.writeBytes,'quantity'),field('Status',process.availability??'known',statusRole(process.availability??'known'))],1),section('ownership','Ownership',[field('Agent',process.owner,'identity'),field('Harness',process.isHarness?'Verified root':'Owned process')])]};
+ doc.sections.push({id:'output',title:'Output',column:0,text:target?'Loading retained shared terminal output…':'Output unavailable: process sample is unreadable',rows:target?[{id:'process-output-refresh',text:'Refresh shared terminal output',help:outputHelp,action:{type:'process-output',sessionKey:session.key,processTarget:target}}]:[]});
+ doc.help=(doc.help??'')+' '+outputHelp;return doc;
 }
 export function referenceDocument(session:SessionView,ref:UiRef,now:number):DetailDocument{
  const open:ScreenRow={id:'ref-open:'+ref.id,text:'Open target',help:'Open this target with the configured file/browser opener. Nothing executes as a shell command.',action:{type:'open-ref',sessionKey:session.key,id:ref.id,target:ref.target,line:ref.line}};
@@ -137,8 +140,9 @@ export function overviewRows(session:SessionView,state:UiState,now:number,data:D
  if(e.task)add('task','Task',e.task,workDocument(session,'task',data,now),'Work',1);
  add('process-uptime','Timing',`Harness uptime ${duration(t.uptime)} · current turn ${duration(t.elapsed)}`,timingDocument(session,now),'Work',1,'duration');
  rows.at(-1)!.value=`${age(e.startedAt,now)} session · ${duration(t.elapsed)} turn`;
- add('cpu','CPU',`${percent(r?.cpuPercent)} ${resourceHistory(session,'cpu',8,state.ascii,now).chart}`,resourceDocument(session,'cpu',state,now),'Resources',0,'quantity');
- add('memory',r?.memoryLabel==='working-set sum'?'WS sum':'RSS sum',`${resident(r?.memoryBytes)} ${resourceHistory(session,'memory',8,state.ascii,now).chart}`,resourceDocument(session,'memory',state,now),'Resources',0,'quantity');
+ const cpuValue=percent(r?.cpuPercent),memoryValue=resident(r?.memoryBytes),metricWidth=Math.max(8,cellWidth(cpuValue),cellWidth(memoryValue));
+ add('cpu','CPU',`${pad(cpuValue,metricWidth)} ${resourceHistory(session,'cpu',8,state.ascii,now).chart}`,resourceDocument(session,'cpu',state,now),'Resources',0,'quantity');
+ add('memory',r?.memoryLabel==='working-set sum'?'WS sum':'RSS sum',`${pad(memoryValue,metricWidth)} ${resourceHistory(session,'memory',8,state.ascii,now).chart}`,resourceDocument(session,'memory',state,now),'Resources',0,'quantity');
  link('coverage','Processes',r?.coverage?`${r.coverage.readable}/${r.coverage.total} readable`:'—','Processes','Resources',0);
  add('context','Context',u?.contextPercent===undefined?'—':percent(u.contextPercent)+' '+meter(u.contextPercent,8,state.ascii),usageDocument(session,now),'Usage',0,'quantity');
  add('tokens','Tokens',`in ${number(u?.input)} · out ${number(u?.output)}`,usageDocument(session,now),'Usage',0,'quantity');

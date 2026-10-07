@@ -113,7 +113,7 @@ export async function activate(context, rpc, options = {}) {
     if (remembered.length) {
         const response = await rpc.call('session.snapshot'), snapshot = response.snapshot ?? response;
         for (const record of remembered.filter(r => r.open)) {
-            const target = snapshot.panes.find((p) => p.terminal_id === record.targetTerminalId) ?? snapshot.agents?.find((a) => a.tab_id === record.tabId);
+            const target = record.targetTerminalId ? snapshot.panes.find((p) => p.terminal_id === record.targetTerminalId) : snapshot.agents?.find((a) => a.tab_id === record.tabId);
             if (target)
                 opened = await openView(target.pane_id);
         }

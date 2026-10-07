@@ -195,9 +195,9 @@ source/revision with `herdr plugin list --plugin iob.herdr-prism --json`.
 | To-do | Complete ACTION lists enabled by default, with local checked state and source provenance |
 | Git | Exact checkout, colored line changes, tracking and snapshot facts |
 | Agents | Verified arbitrary-depth lineage and checkout grouping |
-| Processes | Readable process identities, exclusive ownership and resource coverage |
+| Processes | Readable process identities, ownership, resource coverage and retained terminal output |
 | Refs | Assistant links/files, explicit edit markers, exact source history and deliberate open/copy |
-| Messages | Visible user/assistant text, inline expansion and full detail |
+| Messages | Separate message and tool readers, inline expansion and full detail |
 
 Refs are recovered from the selected session's transcript history independently
 of the 200-message hot window. The coverage row shows when history is partial
@@ -263,6 +263,9 @@ shortcuts; it does not reload Prism's `settings.json`.**
 | `Home` / `End`, `PageUp` / `PageDown` | Navigate the current reader |
 | `Enter` | Open the selected detail or corresponding tab; inspect an agent inside Prism |
 | `Shift+K` in Processes or process details | Ask to terminate the selected process; Cancel is selected initially |
+| `r` in process details | Refresh the retained Output snapshot |
+| Left / right in Messages | Switch between Messages and Tool activity readers |
+| Mouse wheel in Messages | Scroll the reader under the pointer independently |
 | `f` in Agents | Explicitly focus the selected live Herdr pane |
 | `Space` | Fold/expand; open a reference's source history |
 | `Escape` | Return from details or close help/filter |
@@ -280,6 +283,12 @@ shortcuts; it does not reload Prism's `settings.json`.**
 Entries that open another view carry a right arrow. Overview Processes, Git,
 Agents, Messages, Refs, To-do and Notes entries open their matching tabs. At wide
 widths, Overview uses two columns; left/right moves between visible columns.
+The tab strip has a dedicated background; the active tab has its own contrasting
+background and bold label. Messages and Tool activity keep separate scroll
+positions. Each message forms one block with a subtle alternating background;
+selection uses a stronger, separate highlight. Expanding a message scrolls only
+its reader.
+
 Fact details align quiet labels with colored quantities, identities, paths,
 durations and Git changes. Long rows show a concise summary; Enter retains full
 wrapped content. Dark, light and monochrome themes are supported through
@@ -315,20 +324,45 @@ Numeric Agents selection preserves the target that was displayed when typing
 began. Selecting an agent stays inside Prism. `f` focuses a live pane; transcript-only
 descendants remain inspectable. Prism numbers are separate from Herdr focus indices.
 
-An unpinned panel opens on an agent in its own tab. Follow watches that tab's
-last focused agent, including session changes while keyboard focus is inside
-Prism. Explicit child/history inspection stays selected until the native focus
-or binding changes. Pinning and Notes editing hold the selected conversation.
+Each Prism panel belongs to the native agent pane it was opened beside. Several
+agent panes in one tab can each have a Prism panel; opening Prism again for the
+same agent reuses that agent's panel. Follow tracks that bound pane's conversation,
+so focusing a neighboring agent does not move an existing inspector. Explicit
+child/history inspection stays selected until the bound conversation changes.
+Pinning and Notes editing hold the selected conversation.
 
-Full transcript, refs, To-do, Git and frequent resource updates follow only the
-selected inspector session. Closing the pane or changing its server's active
-workspace/tab pauses that work; other agents retain lightweight inventory and
+New panels aim for **60 content columns**, constrained by the available split
+space. Resize a panel using Herdr's normal pane-resize controls; Prism saves that
+width separately for each bound agent view on the collecting server. Reopening
+or reactivating restores its own width. Whole-terminal or outer-layout resizing
+does not overwrite the saved preference. Herdr's split limits and available space
+can constrain the restored size; complete removal of Prism's private state removes
+these preferences.
+
+Full transcript, refs, To-do, Git and frequent resource updates follow the union
+of sessions displayed by visible Prism panels, with each panel keeping its own
+self/subtree scope. Closing one panel leaves the other visible panels running.
+Closing all panels or changing the server's active workspace/tab pauses that work;
+other agents retain lightweight inventory and
 explicitly stale cached detail summaries. Native cards refresh checkout identity
 without status/diff scans (30-second cache), and on macOS/Linux sample only the
 verified harness PIDs every five seconds, including after plugin restarts. Reopening warms up CPU measurements and catches
 up selected content. Herdr 0.9.3 exposes no attached-client visibility query, so
 last-client disconnect and background-machine pause remain an outstanding gate.
 Verified roots of other agents remain process attribution boundaries.
+
+Process details automatically fetch an **Output · shared terminal** snapshot from
+the owning harness pane. Press `r` to refresh. It contains up to 200 retained lines
+and 64 KiB, fetched only while that process detail is visible. This is the shared
+terminal stream, so child-process details can include harness UI and other jobs.
+Prism cannot recover uncaptured output or retroactively separate stdout/stderr
+from an already-running pipe. The snapshot remains in the reader rather than
+being persisted or added to diagnostic exports. Remote captures run on the
+process-owning server.
+
+CPU and memory history start in the same column. CPU uses a scale of at least
+one logical core (100%); RSS is scaled against the displayed history peak.
+Missing readings remain gaps rather than measured zero.
 
 Install Prism on each remote Herdr server to collect that host's sessions,
 transcripts, processes and Git state. The dashboard identifies its server and

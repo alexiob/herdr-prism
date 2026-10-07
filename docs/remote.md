@@ -80,13 +80,14 @@ Native cards on each macOS/Linux server retain lightweight checkout metadata
 (no status/diff scans) and five-second samples of verified harness PIDs. These
 are independent of the inspector and do not enumerate child processes.
 
-The current selected-session gate pauses heavy transcript, refs, To-do, Git and
-process work when the inspector closes or its server's active workspace/tab
+The current gate collects the union of sessions displayed by visible panels,
+keeping each panel's scope separate. It pauses heavy transcript, refs, To-do, Git
+and process work when all inspectors close or their server's active workspace/tab
 changes or another pane is zoomed. It does **not** establish that a client is currently viewing that
 machine: the public `session.snapshot` API reports server focus, but no attached
 client list or visible-pane union. Switching to another machine or disconnecting
 the last SSH client can leave the remote server's focus unchanged while Prism's
-collector continues its selected-session work.
+collector continues work for its server-visible panels.
 
 This is an outstanding part of the requested visibility guarantee, including
 local detached servers. Terminal focus reports describe only the focused pane;

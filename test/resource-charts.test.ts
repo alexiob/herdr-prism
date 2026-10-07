@@ -77,3 +77,6 @@ test('ASCII measured zero stays visible and differs from an unavailable chart co
  assert.deepEqual(historyValues(root,'cpu',8,30000),[undefined,undefined,undefined,0]);
  assert.deepEqual(historyValues(root,'memory',8,30000),[undefined,undefined,0]);
  });
+test('overview CPU and resident-memory graphs share a fixed left edge across numeric lengths',()=>{
+ for(const [cpu,memory] of [[4.7,'2469606195'],[124.2,'65536'],[0,'0'],[2345.7,'107374182400']] as const){const root=sampled();root.resource={...root.resource!,cpuPercent:cpu,memoryBytes:memory};const state=createUiState();state.selectedKey=root.key;const frame=renderScreen({sessions:[root],updatedAt:30000,stale:false,diagnostics:[]},state,80,34,30000);const cpuLine=frame.lines.find(l=>/^│.? CPU\s|^│.?CPU\s/.test(l))??frame.lines.find(l=>l.includes('CPU')&&/[▁▂▃▄▅▆▇█]/.test(l));const memLine=frame.lines.find(l=>l.includes('RSS sum')&&/[▁▂▃▄▅▆▇█]/.test(l));assert.ok(cpuLine&&memLine);assert.equal(cpuLine.search(/[▁▂▃▄▅▆▇█]/),memLine.search(/[▁▂▃▄▅▆▇█]/));}
+});

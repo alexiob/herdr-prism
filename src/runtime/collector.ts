@@ -1,5 +1,6 @@
 import {parseAccountLimits,visibleAccountLimits} from '../metrics/account-limits.ts';
 import type {AccountLimits} from '../metrics/account-limits.ts';
+import type {ProcessOutput} from '../process/output.ts';
 import {ActivityMonitor,activityState} from './activity.ts';
 import {SidebarInventory} from './sidebar.ts';
 import type {SidebarProcessSampler} from './sidebar.ts';
@@ -88,6 +89,7 @@ export class Collector extends EventEmitter {
     private historical = new Map<string, SessionEvidence>();
     private paneOpen = false;
     private visibleSession?: string;
+    private visibleSelections?: {key?:string;subtree:boolean;expanded:boolean}[];
     private visibilityGeneration = 0;
     private sampledGeneration?: number;
     private warmup = true;
@@ -113,15 +115,53 @@ export class Collector extends EventEmitter {
             return; this.timer = setInterval(() => void this.refresh(), 1000); this.scheduleProcessSample(); })().finally(() => { this.starting = undefined; }); return this.starting; }
     invalidate() { void this.refresh(); }
     get displayedSessionKey(): string | undefined { return this.visibleSession; }
+    /** All displayed views share collection, but retain independent selection and scope. */
+    setVisibleSelections(selections:{key?:string;subtree:boolean;expanded:boolean}[]) {
+        const next=[...new Map(selections.map(value=>[JSON.stringify([value.key,value.subtree,value.expanded]),{...value}])).values()].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+        if(this.visibleSelections&&JSON.stringify(next)===JSON.stringify(this.visibleSelections))return;
+        const previous=this.observedKeys();
+        this.visibleSelections=next;this.paneOpen=next.length>0;this.visibleSession=next.find(v=>v.key)?.key;
+        const observed=this.observedKeys();
+        this.visibilityGeneration++;
+        this.warmup=!previous.size||![...observed].some(key=>previous.has(key));
+        for(const key of observed)if(!previous.has(key))this.todoHydrated.delete(key);
+        this.index.setDetailedRefs([]);this.updateResources();this.scheduleProcessSample();
+        if(this.timer||this.starting)void this.refresh().then(()=>this.refresh());
+    }
+    isSessionVisible(key:string):boolean {return this.paneOpen&&(this.visibleSelections ? this.visibleSelections.some(v=>v.key===key) : this.visibleSession===key);}
+    isSessionInScope(key:string,owner:string,subtree:boolean):boolean {return owner===key||subtree&&this.descendants(key).includes(owner);}
+    private observedKeys():Set<string> {
+        if(!this.paneOpen)return new Set();
+        const selections=this.visibleSelections??[{key:this.visibleSession,subtree:this.subtree,expanded:this.processesExpanded}];
+        return new Set(selections.flatMap(v=>v.key?[v.key,...v.subtree?this.descendants(v.key):[]]:[]));
+    }
+    private observedScopes(key:string):('self'|'subtree')[] {
+        const selections=this.visibleSelections??[{key:this.visibleSession,subtree:this.subtree,expanded:this.processesExpanded}];
+        return [...new Set(selections.filter(v=>v.key&&(v.key===key||!this.visibleSelections&&v.subtree&&this.descendants(v.key).includes(key))).map(v=>v.subtree?'subtree' as const:'self' as const))];
+    }
+    /** Scope is projected for the requesting view; shared data never adopts its preferences. */
+    dataForView(key?:string,subtree=false):DashboardData {
+        return {...this.data,sessions:this.data.sessions.map(session=>this.resourceView(session,subtree,key))};
+    }
     /** The foreground inspector owns this gate; finite hooks never open it. */
     setVisibleSession(key?: string, open = true) {
-        if (this.visibleSession === key && this.paneOpen === open) return;
+        if (!this.visibleSelections && this.visibleSession === key && this.paneOpen === open) return;
+        this.visibleSelections=undefined;
         this.visibleSession = key; this.paneOpen = open; this.visibilityGeneration++; this.warmup = true; if(open && key)this.todoHydrated.delete(key);
         this.index.setDetailedRefs([]);
         this.scheduleProcessSample();
         if (this.timer || this.starting) void this.refresh().then(() => this.refresh());
     }
-    private detailedRef(snapshot: HerdrSnapshot) {
+    private detailedRef(snapshot: HerdrSnapshot,key=this.visibleSession) {
+        if(this.visibleSelections){
+            if(!key)return;
+            const session=this.data.sessions.find(s=>s.key===key);
+            if(session)return {provider:session.evidence.provider,kind:session.evidence.path?'path' as const:'id' as const,value:session.evidence.path??session.evidence.id};
+            const agent=snapshot.agents.find(a=>a.agent_session?.kind==='id'&&sessionKey(a.agent??'unknown',a.agent_session.value)===key);
+            if(agent?.agent_session)return {provider:agent.agent??'unknown',kind:agent.agent_session.kind,value:agent.agent_session.value};
+            const split=key.indexOf(':');if(split>0)return {provider:key.slice(0,split),kind:'id' as const,value:key.slice(split+1)};
+            return;
+        }
         if (!this.paneOpen) return;
         if (!this.visibleSession) {
             const focused = snapshot.agents.find(a => a.focused || a.pane_id === snapshot.focused_pane_id) ?? snapshot.agents[0];
@@ -140,11 +180,12 @@ export class Collector extends EventEmitter {
     private scheduleProcessSample() {
         clearTimeout(this.sampleTimer); this.sampleTimer = undefined;
         if(this.stopped || !this.timer || !this.paneOpen || !this.visibleSession || this.sampling)return;
-        const keys = new Set([this.visibleSession,...this.subtree ? this.descendants(this.visibleSession) : []]);
+        const keys = this.observedKeys();
         const observed = this.data.sessions.filter(session=>keys.has(session.key));
         if(!observed.length)return;
         const idle = observed.every(session=>inactive(session.evidence.state));
-        const cadence = this.processesExpanded ? 1000 : idle ? Math.max(5000,this.settings.sampleIntervalMs) : this.settings.sampleIntervalMs;
+        const expanded=this.visibleSelections ? this.visibleSelections.some(v=>v.expanded) : this.processesExpanded;
+        const cadence = expanded ? 1000 : idle ? Math.max(5000,this.settings.sampleIntervalMs) : this.settings.sampleIntervalMs;
         this.sampleTimer = setTimeout(()=>{this.sampleTimer=undefined;void this.sampleProcesses();},Math.max(1,this.lastProcessAttemptAt+cadence-Date.now()));
     }
     private descendants(key: string) { const map = new Map(this.data.sessions.map(s => [s.key, s])); const seen = new Set<string>(); const queue = [...map.get(key)?.children ?? []]; while (queue.length) {
@@ -154,22 +195,24 @@ export class Collector extends EventEmitter {
         seen.add(k);
         queue.push(...map.get(k)?.children ?? []);
     } return [...seen]; }
-    private updateResources() { for (const session of this.data.sessions) {
-        const keys = this.subtree ? this.descendants(session.key) : [];
-        const observed = this.paneOpen && (session.key === this.visibleSession || this.subtree && this.visibleSession && this.descendants(this.visibleSession).includes(session.key));
-        if (observed && this.sampledGeneration === this.visibilityGeneration) {
-            session.resource = this.tracker.view(session.key, this.subtree, keys);
-            if (this.sampleError) session.resource = {...session.resource,availability:this.lastSample ? 'stale' : 'unavailable',reason:this.sampleError};
-        } else if (session.resource) session.resource = {...session.resource,availability:'stale',reason:observed ? 'Awaiting a fresh sample after visibility changed' : 'Updates paused while this session is not shown'};
-        const self = reduceUsage(session.evidence.usage,{rates:this.settings.costRates,activeTurnId:session.evidence.activeTurn?.id});
-        if (this.subtree && session.key === this.visibleSession) {
-            const aggregate = reduceUsageScope([session,...keys.map(k => this.data.sessions.find(s => s.key === k)!).filter(Boolean)].map(s => ({key:s.key,parentKey:s.parentKey,records:s.evidence.usage})),{rates:this.settings.costRates});
-            for(const field of ['model','contextUsed','contextLimit','contextPercent','generationTokensPerSecond','turnTokensPerSecond','turnMs','generationMs','turnUsage'] as const) { delete aggregate[field]; if(self[field] !== undefined) Object.assign(aggregate,{[field]:self[field]}); }
-            if (aggregate.availability === 'known' && keys.some(k => this.data.sessions.find(s => s.key === k)?.evidence.availability === 'stale')) {aggregate.availability = 'partial';aggregate.diagnostics.push('Descendant usage is cached while its updates are paused');}
-            session.usage = aggregate;
-        } else session.usage = self;
-        session.history = this.history.view(session.key,this.subtree ? 'subtree' : 'self');
-    } }
+    private resourceView(session:SessionView,subtree:boolean,selectedKey?:string):SessionView {
+        const view={...session},keys=subtree?this.descendants(session.key):[],observed=this.observedKeys().has(session.key);
+        if(observed&&this.sampledGeneration===this.visibilityGeneration){
+            view.resource=this.tracker.view(session.key,subtree,keys);
+            if(this.sampleError)view.resource={...view.resource,availability:this.lastSample?'stale':'unavailable',reason:this.sampleError};
+        }else if(view.resource)view.resource={...view.resource,availability:'stale',reason:observed?'Awaiting a fresh sample after visibility changed':'Updates paused while this session is not shown'};
+        const self=reduceUsage(session.evidence.usage,{rates:this.settings.costRates,activeTurnId:session.evidence.activeTurn?.id});
+        if(subtree&&session.key===selectedKey){
+            const aggregate=reduceUsageScope([session,...keys.map(k=>this.data.sessions.find(s=>s.key===k)!).filter(Boolean)].map(s=>({key:s.key,parentKey:s.parentKey,records:s.evidence.usage})),{rates:this.settings.costRates});
+            for(const field of ['model','contextUsed','contextLimit','contextPercent','generationTokensPerSecond','turnTokensPerSecond','turnMs','generationMs','turnUsage'] as const){delete aggregate[field];if(self[field]!==undefined)Object.assign(aggregate,{[field]:self[field]});}
+            if(aggregate.availability==='known'&&keys.some(k=>this.data.sessions.find(s=>s.key===k)?.evidence.availability==='stale')){aggregate.availability='partial';aggregate.diagnostics.push('Descendant usage is cached while its updates are paused');}
+            view.usage=aggregate;
+        }else view.usage=self;
+        view.history=this.history.view(session.key,subtree?'subtree':'self');return view;
+    }
+    private updateResources() {
+        for(const session of this.data.sessions)Object.assign(session,this.resourceView(session,this.visibleSelections?false:this.subtree,this.visibleSession));
+    }
     async refresh(): Promise<void> {
         if (this.stopped)
             return;
@@ -202,12 +245,14 @@ export class Collector extends EventEmitter {
                         if(!native.includes(origin))rejected.add(agent.terminal_id);
                     }
                 }
-                let detailRef = this.detailedRef(snapshot);
+                let detailRef=this.detailedRef(snapshot);
+                let detailRefs=this.visibleSelections ? this.visibleSelections.flatMap(v=>{const ref=v.key?this.detailedRef(snapshot,v.key):undefined;return ref?[ref]:[];}) : detailRef?[detailRef]:[];
                 const refKey=(provider:string,ref:{kind:'id'|'path';value:string})=>sessionKey(provider,this.index.resolveMetadataCached?.(provider,ref)?.id??ref.value);
                 const accepted=new Set(snapshot.agents.filter(a=>!rejected.has(a.terminal_id)&&a.agent_session).map(a=>refKey(a.agent??'unknown',a.agent_session!)));
                 const refused=new Set(snapshot.agents.filter(a=>rejected.has(a.terminal_id)&&a.agent_session).map(a=>refKey(a.agent??'unknown',a.agent_session!)));
+                detailRefs=detailRefs.filter(ref=>!refused.has(refKey(ref.provider,ref))||accepted.has(refKey(ref.provider,ref)));
                 if(detailRef&&refused.has(refKey(detailRef.provider,detailRef))&&!accepted.has(refKey(detailRef.provider,detailRef)))detailRef=undefined;
-                this.index.setDetailedRefs(detailRef ? [detailRef] : []);
+                this.index.setDetailedRefs([...new Map(detailRefs.map(ref=>[JSON.stringify(ref),ref])).values()]);
                 const all = this.paneOpen ? await this.index.refreshSnapshots() : [];
                 const known = new Map(all.map(s => [sessionKey(s.provider, s.id), s]));
                 const attachments = new Map<string, HerdrAgent[]>();
@@ -290,7 +335,7 @@ export class Collector extends EventEmitter {
                         const evidence={...node.evidence,goals:[...node.evidence.goals,...this.localGoals.get(node.key)??[]]};
                         if(evidence.provider==='claude')evidence.accountLimits=visibleAccountLimits(this.accountReports.get(node.key),'claude',evidence.id,Date.now());
                         if(historical)evidence.state='historical';
-                        if(node.key!==this.visibleSession&&evidence.messages.length){evidence.availability='stale';evidence.reason='Cached details; live updates resume when this session is shown';}
+                        if(!this.isSessionVisible(node.key)&&evidence.messages.length){evidence.availability='stale';evidence.reason='Cached details; live updates resume when this session is shown';}
                         return {...node,evidence,historical,attachments:attached,attachment:attached.find(a=>a.focused)??attached[0],resource:old?.resource,git:old?.git,refs:old?.refs??[],refCoverage:old?.refCoverage??'unavailable',refUpdatedAt:old?.refUpdatedAt,todos:old?.todos??[],todoStatus:old?.todoStatus??'source_unavailable',todoSourceMessageId:old?.todoSourceMessageId,todoReportedAt:old?.todoReportedAt};
                     }),updatedAt:Date.now(),stale:false};
                     this.updateResources();this.emit('data',this.data);
@@ -309,7 +354,7 @@ export class Collector extends EventEmitter {
                         this.historical.delete(this.historical.keys().next().value!);
                     if (this.localGoals.has(node.key))
                         node.evidence.goals = [...node.evidence.goals, ...this.localGoals.get(node.key)!];
-                    const detailed = generation === this.visibilityGeneration && this.paneOpen && (node.key === this.visibleSession || (!this.visibleSession && node.evidence.provider === detailRef?.provider && (detailRef.kind === 'path' ? node.evidence.path === detailRef.value : node.evidence.id === detailRef.value)));
+                    const detailed = generation === this.visibilityGeneration && this.paneOpen && (this.isSessionVisible(node.key) || (!this.visibleSelections && !this.visibleSession && node.evidence.provider === detailRef?.provider && (detailRef.kind === 'path' ? node.evidence.path === detailRef.value : node.evidence.id === detailRef.value)));
                     if (detailed && !this.visibleSession) this.visibleSession = node.key;
                     if (!detailed && node.evidence.messages.length) {node.evidence.availability = 'stale';node.evidence.reason = 'Cached details; live updates resume when this session is shown';}
                     const previous = previousSessions.find(s => s.key === node.key);
@@ -364,7 +409,7 @@ export class Collector extends EventEmitter {
                 this.updateResources();
                 this.scheduleProcessSample();
                 if (this.settings.nativeMode !== 'inspector-only') {
-                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource:this.sidebarSupported?this.sidebar.resource(a):!this.paneOpen || this.sampledGeneration !== this.visibilityGeneration || s.key !== this.visibleSession ? {...this.tracker.view(s.key),availability:'stale' as const,reason:'Updates paused while this session is not shown'} : this.sampleError ? { ...this.tracker.view(s.key), availability: this.lastSample ? 'stale' as const : 'unavailable' as const, reason: this.sampleError } : this.tracker.view(s.key),git:this.sidebar.gitIdentity(a,s.git) }))), Date.now(), views,{grouping:this.settings.ui?.nativeGrouping,tabs:snapshot.tabs,harnessOnly:this.sidebarSupported});
+                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource:this.sidebarSupported?this.sidebar.resource(a):!this.paneOpen || this.sampledGeneration !== this.visibilityGeneration || !this.isSessionVisible(s.key) ? {...this.tracker.view(s.key),availability:'stale' as const,reason:'Updates paused while this session is not shown'} : this.sampleError ? { ...this.tracker.view(s.key), availability: this.lastSample ? 'stale' as const : 'unavailable' as const, reason: this.sampleError } : this.tracker.view(s.key),git:this.sidebar.gitIdentity(a,s.git) }))), Date.now(), views,{grouping:this.settings.ui?.nativeGrouping,tabs:snapshot.tabs,harnessOnly:this.sidebarSupported});
                     if (!this.viewInstalled && !this.publisher.diagnostics.length && views.some(s => s.attachment)) {
                         await this.publisher.installView();
                         this.viewInstalled = true;
@@ -414,7 +459,7 @@ export class Collector extends EventEmitter {
             return this.sampling;
         this.lastProcessAttemptAt = Date.now();
         const generation = this.visibilityGeneration;
-        const observed = new Set([this.visibleSession, ...(this.subtree ? this.descendants(this.visibleSession) : [])]);
+        const observed = this.observedKeys();
         this.sampling = (async () => {
             try {
                 const batch = await this.sampler.sample();
@@ -463,9 +508,11 @@ export class Collector extends EventEmitter {
                 this.sampledGeneration = generation;
                 this.updateResources();
                 for (const session of this.data.sessions.filter(s => observed.has(s.key))) {
-                    const resource = session.resource!;
-                    this.history.add(session.key, this.subtree ? 'subtree' : 'self', { at: batch.sampledAt, cpuPercent: resource.cpuPercent, memoryBytes: resource.memoryBytes, gap: resource.availability === 'unavailable' });
-                    session.history = this.history.view(session.key, this.subtree ? 'subtree' : 'self');
+                    for(const scope of this.observedScopes(session.key)){
+                        const resource=this.tracker.view(session.key,scope==='subtree',scope==='subtree'?this.descendants(session.key):[]);
+                        this.history.add(session.key,scope,{at:batch.sampledAt,cpuPercent:resource.cpuPercent,memoryBytes:resource.memoryBytes,gap:resource.availability==='unavailable'});
+                    }
+                    session.history=this.history.view(session.key,this.visibleSelections?'self':this.subtree?'subtree':'self');
                 }
                 this.emit('data', this.data);
             }
@@ -474,7 +521,7 @@ export class Collector extends EventEmitter {
                 for (const session of this.data.sessions) {
                     if (session.resource)
                         session.resource = { ...session.resource, availability: 'stale', reason: (error as Error).message };
-                    this.history.add(session.key, this.subtree ? 'subtree' : 'self', { at: Date.now(), gap: true });
+                    if(observed.has(session.key))for(const scope of this.observedScopes(session.key))this.history.add(session.key,scope,{at:Date.now(),gap:true});
                 }
                 this.diagnostic('Process sample: ' + (error as Error).message);
                 this.emit('data', this.data);
@@ -482,14 +529,54 @@ export class Collector extends EventEmitter {
         })().finally(() => { this.sampling = undefined; this.scheduleProcessSample(); });
         return this.sampling;
     }
+    /** Read the retained owner terminal, never another process's stdout pipe. */
+    async processOutput(sessionKey:string,target:{key:string;owner:string},assertVisible:()=>Promise<void>,subtree=this.subtree):Promise<ProcessOutput|undefined>{
+        if(!target||typeof target.key!=='string'||target.key.length>4096||typeof target.owner!=='string')return;
+        const generation=this.visibilityGeneration,current=()=>!this.stopped&&this.isSessionVisible(sessionKey)&&generation===this.visibilityGeneration;
+        const inScope=()=>this.isSessionInScope(sessionKey,target.owner,subtree);
+        if(!current()||!inScope())return;
+        await assertVisible();if(!current())return;
+        if(!this.lastSample||this.sampledGeneration!==generation||Date.now()-this.lastSample.sampledAt>5000)await this.sampleProcesses();
+        if(!current()||!inScope()||this.sampleError||this.sampledGeneration!==generation)return;
+        const selected=this.tracker.view(target.owner).processes.find(p=>p.key===target.key&&p.owner===target.owner&&p.availability!=='unavailable');
+        if(!selected)return;
+        const unavailable=(reason:string):ProcessOutput=>({availability:'unavailable',scope:'shared-terminal',pid:selected.pid,owner:target.owner,processKey:target.key,capturedAt:Date.now(),reason});
+        const proofs=[...this.rootProofs.values()].filter(p=>p.root.sessionKey===target.owner&&p.bootId===this.lastSample?.bootId);
+        const sampled=new Map(this.lastSample!.processes.map(p=>[p.pid,p])),ancestors=new Set<number>();
+        let ancestor=sampled.get(selected.pid);
+        while(ancestor&&!ancestors.has(ancestor.pid)){ancestors.add(ancestor.pid);ancestor=ancestor.ppid===undefined?undefined:sampled.get(ancestor.ppid);}
+        const proof=proofs.find(p=>ancestors.has(p.root.pid)&&sampled.get(p.root.pid)?.startTime===p.root.startTime);
+        if(!proof)return unavailable('No verified harness terminal owns this process output');
+        const live=async()=>{
+            if(!current()||!inScope())return false;
+            const response=await this.rpc.call('agent.get',{target:proof.attachment.pane_id});if(!current()||!sameOccupant(proof.attachment,response.agent??response))return false;
+            const reply=await this.rpc.call('pane.process_info',{pane_id:proof.attachment.pane_id}),info=reply.process_info??reply;
+            return current()&&(info.foreground_processes??[]).some((p:any)=>p.pid===proof.root.pid&&matchesHarness(proof.attachment.agent??'unknown',p));
+        };
+        try{
+            if(!await live())return;
+            await assertVisible();if(!current())return;
+            const response=await this.rpc.call('pane.read',{pane_id:proof.attachment.pane_id,source:'recent_unwrapped',lines:200,format:'text',strip_ansi:true}),read=response.read;
+            if(!current())return;
+            await assertVisible();if(!await live())return;
+            if(!read||read.pane_id!==proof.attachment.pane_id||read.source!=='recent_unwrapped'||read.format!=='text'||typeof read.text!=='string')return unavailable('Herdr did not provide a supported terminal capture');
+            const encoded=Buffer.from(read.text),truncated=encoded.length>65536;let start=Math.max(0,encoded.length-65536);
+            // Preserve the byte cap without decoding a partial UTF-8 code point.
+            while(start<encoded.length&&(encoded[start]!&0xc0)===0x80)start++;
+            let text=truncated?encoded.subarray(start).toString('utf8'):read.text;
+            // A retained snapshot is display text, never terminal control sequences.
+            text=text.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$)/g,'').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g,'');
+            return{availability:'known',scope:'shared-terminal',pid:selected.pid,owner:target.owner,processKey:target.key,capturedAt:Date.now(),paneId:proof.attachment.pane_id,terminalId:proof.attachment.terminal_id,source:'recent_unwrapped',text,truncated};
+        }catch(error){if(current())return unavailable((error as Error).message.slice(0,500));}
+    }
     /** A confirmed view request operates on this server, never the viewer's OS. */
-    async terminateProcess(sessionKey:string,target:{key:string;owner:string},assertVisible:()=>Promise<void>){
+    async terminateProcess(sessionKey:string,target:{key:string;owner:string},assertVisible:()=>Promise<void>,subtree=this.subtree){
         if(!target||typeof target.key!=='string'||target.key.length>4096||typeof target.owner!=='string')throw new Error('Invalid process target');
         const generation=this.visibilityGeneration;
-        const current=()=>!this.stopped&&this.paneOpen&&this.visibleSession===sessionKey&&generation===this.visibilityGeneration;
-        const inScope=()=>target.owner===sessionKey||this.subtree&&this.descendants(sessionKey).includes(target.owner);
+        const current=()=>!this.stopped&&this.isSessionVisible(sessionKey)&&generation===this.visibilityGeneration;
+        const inScope=()=>this.isSessionInScope(sessionKey,target.owner,subtree);
         if(!current()||!inScope())throw new Error('Process view is closed or selection changed');
-        const selected=this.data.sessions.find(s=>s.key===sessionKey)?.resource?.processes.find(p=>p.key===target.key&&p.owner===target.owner);
+        const selected=this.dataForView(sessionKey,subtree).sessions.find(s=>s.key===sessionKey)?.resource?.processes.find(p=>p.key===target.key&&p.owner===target.owner);
         if(!selected||selected.availability==='unavailable')throw new Error('Process is no longer readable or owned in this view');
         // Wait out any older scan, then obtain fresh ownership/root occupant proofs.
         await this.sampling;
@@ -543,9 +630,9 @@ export class Collector extends EventEmitter {
         return current; const ref = session.evidence.path ? { kind: 'path' as const, value: session.evidence.path } : { kind: 'id' as const, value: session.evidence.id }; return this.index.readMessage(session.evidence.provider, ref, id); }
     async pageMessages(key: string, beforeId?: string) { const session = this.data.sessions.find(s => s.key === key); if (!session)
         return []; const ref = session.evidence.path ? { kind: 'path' as const, value: session.evidence.path } : { kind: 'id' as const, value: session.evidence.id }; return this.index.page(session.evidence.provider, ref, { beforeId, limit: 200 }); }
-    async pageReferences(key:string,options:ReferencePageOptions={}){const generation=this.visibilityGeneration,current=()=>!this.stopped&&this.paneOpen&&key===this.visibleSession&&generation===this.visibilityGeneration;const session=this.data.sessions.find(s=>s.key===key);if(!session||!current())return;const ref=session.evidence.path?{kind:'path' as const,value:session.evidence.path}:{kind:'id' as const,value:session.evidence.id};return this.index.pageReferences(session.evidence.provider,ref,options,current);}
-    async pageReferenceSources(key:string,targetId:string,options:ReferencePageOptions={}){const generation=this.visibilityGeneration,current=()=>!this.stopped&&this.paneOpen&&key===this.visibleSession&&generation===this.visibilityGeneration;const session=this.data.sessions.find(s=>s.key===key);if(!session||!current())return;const ref=session.evidence.path?{kind:'path' as const,value:session.evidence.path}:{kind:'id' as const,value:session.evidence.id};return this.index.pageReferenceSources(session.evidence.provider,ref,targetId,options,current);}
-    async referenceMessage(cursor:ReferenceCursor){const key=sessionKey(cursor.provider,cursor.sessionId),generation=this.visibilityGeneration,current=()=>!this.stopped&&this.paneOpen&&key===this.visibleSession&&generation===this.visibilityGeneration;if(!current())return;return this.index.readReferenceMessage(cursor,current);}
+    async pageReferences(key:string,options:ReferencePageOptions={}){const generation=this.visibilityGeneration,current=()=>!this.stopped&&this.isSessionVisible(key)&&generation===this.visibilityGeneration;const session=this.data.sessions.find(s=>s.key===key);if(!session||!current())return;const ref=session.evidence.path?{kind:'path' as const,value:session.evidence.path}:{kind:'id' as const,value:session.evidence.id};return this.index.pageReferences(session.evidence.provider,ref,options,current);}
+    async pageReferenceSources(key:string,targetId:string,options:ReferencePageOptions={}){const generation=this.visibilityGeneration,current=()=>!this.stopped&&this.isSessionVisible(key)&&generation===this.visibilityGeneration;const session=this.data.sessions.find(s=>s.key===key);if(!session||!current())return;const ref=session.evidence.path?{kind:'path' as const,value:session.evidence.path}:{kind:'id' as const,value:session.evidence.id};return this.index.pageReferenceSources(session.evidence.provider,ref,targetId,options,current);}
+    async referenceMessage(cursor:ReferenceCursor){const key=sessionKey(cursor.provider,cursor.sessionId),generation=this.visibilityGeneration,current=()=>!this.stopped&&this.isSessionVisible(key)&&generation===this.visibilityGeneration;if(!current())return;return this.index.readReferenceMessage(cursor,current);}
     async recordLaunch(record: {
         id: string;
         sessionKey: string;

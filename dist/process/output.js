@@ -1,0 +1,7 @@
+export const outputHelp = 'Retained output from the owning harness terminal. This is a shared terminal stream, not isolated stdout/stderr for the selected PID; it may contain harness UI and other owned jobs. Prism cannot retroactively tap an existing pipe or recover output that was not captured. Fetching is bounded to 200 retained lines / 64 KiB and happens only while this detail is visible. r refreshes the snapshot. Escape returns; ? shows help.';
+export function withProcessOutput(document, output) {
+    const sections = document.sections.filter(s => s.id !== 'output-provenance').map(section => section.id === 'output' ? { ...section, title: 'Output · shared terminal', text: output?.availability === 'known' ? (output.text || 'No retained terminal output') : 'Output unavailable: ' + (output?.reason ?? 'Process or view changed before capture') } : section);
+    if (output)
+        sections.push({ id: 'output-provenance', title: 'Output snapshot', column: 1, fields: [{ label: 'Scope', value: 'Shared harness terminal', role: 'identity' }, { label: 'Capture', value: new Date(output.capturedAt).toISOString(), role: 'duration' }, { label: 'Pane', value: output.paneId ?? '—', role: 'identity' }, { label: 'Limit', value: output.truncated ? 'Oldest text truncated to 64 KiB' : 'Up to 200 retained lines', role: 'quantity' }] });
+    return { ...document, sections };
+}

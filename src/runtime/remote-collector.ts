@@ -28,9 +28,10 @@ export class RemoteCollector extends EventEmitter {
   if(this.stopped||!this.client)return;if(this.pending)return this.pending;
   this.pending=(async()=>{const response=await this.client!.request<{data:DashboardData}>('view.poll',{terminalId:this.terminalId,key:this.key,visible:this.visible,subtree:this.subtree,expanded:this.expanded});if(!response.data||!Array.isArray(response.data.sessions))throw new Error('Invalid shared dashboard response');this.failures=0;if(!this.stopped){this.data=response.data;this.emit('data',this.data);}})().finally(()=>{this.pending=undefined;});return this.pending;
  }
- private async invoke(op:string,p:any){await this.refresh();return this.client!.request(op,p);}
+ private async invoke(op:string,p:any){await this.refresh();return this.client!.request(op,{...p,terminalId:this.terminalId});}
  private async page<T>(op:string,p:any):Promise<(T&{contentRevision?:string})|undefined>{const response=await this.invoke(op,p);if(response.data&&!this.stopped){this.data=response.data;this.emit('data',this.data);}return response.page?{...response.page,contentRevision:response.contentRevision}:undefined;}
  toggleTodo(...args:Parameters<Collector['toggleTodo']>){return this.invoke('toggle-todo',{session:args[0],id:args[1]});}
+ processOutput(session:string,target:{key:string;owner:string}){return this.invoke('process-output',{terminalId:this.terminalId,session,processTarget:{key:target.key,owner:target.owner}});}
  terminateProcess(session:string,target:{key:string;owner:string}){return this.invoke('terminate-process',{terminalId:this.terminalId,session,processTarget:{key:target.key,owner:target.owner}});}
  focus(...args:Parameters<Collector['focus']>){return this.invoke('focus',{session:args[0]});}
  message(...args:Parameters<Collector['message']>):ReturnType<Collector['message']>{return this.invoke('message',{session:args[0],id:args[1]});}

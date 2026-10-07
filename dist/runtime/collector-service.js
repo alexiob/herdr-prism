@@ -21,22 +21,17 @@ export class CollectorHost {
     rpc;
     visibility = new Map();
     queue = Promise.resolve();
-    appliedScope;
     constructor(collector, store, rpc) { this.collector = collector; this.rpc = rpc; this.views = new PanelViews(store, rpc); }
     async updateVisibility() {
-        const response = await this.rpc.call('session.snapshot'), snapshot = response.snapshot ?? response, records = await this.views.records();
+        const response = await this.rpc.call('session.snapshot'), snapshot = response.snapshot ?? response;
+        await this.views.observeWidths(snapshot);
+        const records = await this.views.records();
         const live = new Set(records.filter(r => r.open).map(r => r.terminalId));
         for (const terminal of this.visibility.keys())
             if (!live.has(terminal))
                 this.visibility.delete(terminal);
-        const visible = records.filter(r => r.open).map(r => ({ record: r, state: this.visibility.get(r.terminalId) })).find(v => v.state?.visible && inspectorVisible(snapshot, v.record.terminalId, v.record.paneId));
-        this.collector.setVisibleSession(visible?.state?.key, !!visible);
-        const subtree = visible?.state?.subtree ?? false;
-        if (this.appliedScope !== subtree) {
-            this.collector.setScope(subtree);
-            this.appliedScope = subtree;
-        }
-        this.collector.setProcessesExpanded(visible?.state?.expanded ?? false);
+        const visible = records.filter(r => r.open).flatMap(record => { const state = this.visibility.get(record.terminalId); return state?.visible && inspectorVisible(snapshot, record.terminalId, record.paneId) ? [{ key: state.key, subtree: state.subtree, expanded: state.expanded }] : []; });
+        this.collector.setVisibleSelections(visible);
     }
     request(op, p = {}) { const result = this.queue.then(() => this.dispatch(op, p)); this.queue = result.catch(() => { }); return result; }
     async dispatch(op, p = {}) {
@@ -65,7 +60,7 @@ export class CollectorHost {
                 throw new Error('Invalid view visibility');
             this.visibility.set(record.terminalId, { key: p.key, visible: p.visible, subtree: p.subtree, expanded: p.expanded });
             await this.updateVisibility();
-            return { data: this.collector.data, displayedSessionKey: p.key };
+            return { data: this.collector.dataForView(p.key, p.subtree), displayedSessionKey: p.key };
         }
         if (op === 'refresh') {
             await this.views.reconcile();
@@ -84,17 +79,17 @@ export class CollectorHost {
             await this.collector.toggleTodo(p.session, p.id);
             return { saved: true };
         }
-        if (op === 'terminate-process') {
+        if (op === 'terminate-process' || op === 'process-output') {
             const assertVisible = async () => {
                 const record = (await this.views.records()).find(r => r.terminalId === p.terminalId && r.open), state = this.visibility.get(p.terminalId);
                 if (!record || !state?.visible || state.key !== p.session)
-                    throw new Error('Process confirmation view is closed or selection changed');
+                    throw new Error('Process view is closed or selection changed');
                 const response = await this.rpc.call('session.snapshot');
                 if (!inspectorVisible(response.snapshot ?? response, record.terminalId, record.paneId))
-                    throw new Error('Process confirmation panel is no longer visible');
+                    throw new Error('Process panel is no longer visible');
             };
             await assertVisible();
-            return this.collector.terminateProcess(p.session, p.processTarget, assertVisible);
+            return op === 'process-output' ? this.collector.processOutput(p.session, p.processTarget, assertVisible, this.visibility.get(p.terminalId).subtree) : this.collector.terminateProcess(p.session, p.processTarget, assertVisible, this.visibility.get(p.terminalId).subtree);
         }
         if (op === 'focus') {
             await this.collector.focus(p.session);
@@ -108,7 +103,8 @@ export class CollectorHost {
             const session = this.collector.data.sessions.find(s => s.key === p.session);
             const options = op === 'page-references' ? { ...p.options, excludeIds: [...new Set([...(p.options?.excludeIds ?? []), ...(session?.refs ?? []).map(ref => ref.id)])] } : p.options;
             const page = op === 'page-references' ? await this.collector.pageReferences(p.session, options) : await this.collector.pageReferenceSources(p.session, p.targetId, options);
-            return { page, data: this.collector.data, contentRevision: this.collector.data.sessions.find(s => s.key === p.session)?.evidence.contentRevision };
+            const view = this.visibility.get(p.terminalId);
+            return { page, data: view ? this.collector.dataForView(view.key, view.subtree) : this.collector.data, contentRevision: this.collector.data.sessions.find(s => s.key === p.session)?.evidence.contentRevision };
         }
         if (op === 'reference-message')
             return this.collector.referenceMessage(p.cursor);
@@ -135,6 +131,7 @@ export async function runCollectorService(options = {}) {
     const context = await serviceContext(options), admission = await acquireAdmission(context.stateDir), store = new StateStore(context.serverStateDir);
     const rpc = new HerdrClient(context.endpoint);
     let lease, mailbox, collector, stopping;
+    let captureWidths;
     let ready = false;
     let finish = () => { };
     const done = new Promise(resolve => { finish = resolve; });
@@ -144,6 +141,7 @@ export async function runCollectorService(options = {}) {
             clearInterval(maintenance);
             await maintaining?.catch(() => { });
             await mailbox?.close();
+            await captureWidths?.().catch(() => { });
             await collector?.close({ clearNative: false });
         }
         finally {
@@ -166,6 +164,7 @@ export async function runCollectorService(options = {}) {
         }
         collector = new Collector({ rpc, endpoint: context.endpoint, settings: context.settings, stateDir: context.serverStateDir });
         const host = new CollectorHost(collector, store, rpc), global = new StateStore(context.stateDir);
+        captureWidths = () => host.views.captureWidths();
         mailbox = new MailboxServer(context.serverStateDir, lease.token, async (op, p) => {
             if (op === 'ping')
                 return { alive: true, ready, stale: collector.data.stale, diagnostics: collector.data.diagnostics, kind: 'collector-service' };

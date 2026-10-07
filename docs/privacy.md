@@ -20,9 +20,20 @@ bounded, controls/ANSI are sanitized for display, and no transcript content is
 evaluated or interpolated into shell commands. References open only after an
 explicit user action. Optional command/argument detail is not automatically shown.
 
+## Retained process output
+
+Opening a readable process detail requests a bounded snapshot from its verified
+owning harness terminal: at most 200 retained lines and 64 KiB. The snapshot can
+contain harness UI and output from other jobs sharing that terminal; it is not
+PID-isolated stdout/stderr. Prism does not open or tap existing process pipes.
+Control sequences are stripped before display. The capture travels through the
+private authenticated mailbox and stays in the detail reader; it is not archived
+in plugin state or included in diagnostic exports. Refresh is explicit (`r`),
+and requests are refused for closed, hidden or changed views/process identities.
+
 ## Explicit process termination
 
-`K` in Processes or process details opens a confirmation with Cancel selected.
+`Shift+K` in Processes or process details opens a confirmation with Cancel selected.
 Only confirmation sends a request to the authenticated collector on the server
 that owns the view. It rechecks actual panel visibility, sampled birth/boot and
 exclusive ownership, and rejects changed, inaccessible or stale targets. It sends
@@ -74,7 +85,7 @@ plugin directories/files get current-SID-only ACLs through explicit argv; existi
 directories are verified and fail clearly if foreign allow entries remain. The
 plugin does not silently strip foreign ACLs from an existing user directory.
 
-All per-tab inspectors share one collector/helper on their collecting server. Helpers use stdin/parent
+All per-agent-pane inspectors share one collector/helper on their collecting server. Helpers use stdin/parent
 lifetime supervision; there is no detached analytics daemon. Private mailbox
 requests use a random ownership token, bounded JSON and per-operation cleanup.
 Unconfigure requests owner-checked shutdown and restores still-owned config

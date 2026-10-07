@@ -3,34 +3,81 @@ import {StateStore,identityName} from '../state/store.ts';
 import {openPanel} from './actions.ts';
 import {join} from 'node:path';
 
+export const DEFAULT_PANEL_COLUMNS=60;
 export interface PanelRecord {tabId:string;paneId:string;terminalId:string;targetTerminalId?:string;open:boolean;pid?:number;}
-export function panelViewStore(serverStateDir:string,tabId:string){return new StateStore(join(serverStateDir,'views',identityName(tabId)));}
+export function panelViewStore(serverStateDir:string,tabId:string,targetTerminalId?:string){return new StateStore(join(serverStateDir,'views',identityName(targetTerminalId ? JSON.stringify([tabId,targetTerminalId]) : tabId)));}
 /** Only authoritative open responses and exact terminal identities own a view. */
 export class PanelViews {
  private store:StateStore;private rpc:Rpc;
+ private widths=new Map<string,{width:number;ratio:number;regionWidth:number;splitId:string}>();
  constructor(store:StateStore,rpc:Rpc){this.store=store;this.rpc=rpc;}
  private async current(pane:any){const owner=await this.store.read<any>('controller');if(owner?.kind==='collector-service')await this.store.write('controller',{...owner,paneId:pane.pane_id,terminalId:pane.terminal_id});}
+ private geometry(snapshot:any,record:PanelRecord){
+  const layout=snapshot.layouts?.find((value:any)=>value.tab_id===record.tabId),own=layout?.panes?.find((p:any)=>p.pane_id===record.paneId)?.rect;
+  const target=snapshot.panes?.find((p:any)=>p.terminal_id===record.targetTerminalId),native=layout?.panes?.find((p:any)=>p.pane_id===target?.pane_id)?.rect;
+  if(!own||!native||!Number.isSafeInteger(own.width)||own.width<1)return;
+  const contains=(outer:any,inner:any)=>outer&&inner.x>=outer.x&&inner.y>=outer.y&&inner.x+inner.width<=outer.x+outer.width&&inner.y+inner.height<=outer.y+outer.height;
+  const split=layout.splits?.filter((value:any)=>value.direction==='right'&&Number.isFinite(value.ratio)&&contains(value.rect,own)&&contains(value.rect,native)).sort((a:any,b:any)=>a.rect.width*a.rect.height-b.rect.width*b.rect.height)[0];
+  if(!split||!Number.isSafeInteger(split.rect.width)||split.rect.width<1)return;
+  return {width:own.width,ratio:split.ratio,regionWidth:split.rect.width,splitId:split.id};
+ }
+ /** Only a changed split ratio at the same region width is a user pane resize.
+  * Client/window and outer-layout resizes must not overwrite the saved desired width. */
+ async observeWidths(snapshot:any){
+  const records=await this.records(),live=new Set(records.filter(r=>r.open).map(r=>r.terminalId));
+  for(const terminal of this.widths.keys())if(!live.has(terminal))this.widths.delete(terminal);
+  for(const record of records.filter(r=>r.open&&r.targetTerminalId)){
+   const geometry=this.geometry(snapshot,record);if(!geometry)continue;
+   const previous=this.widths.get(record.terminalId);this.widths.set(record.terminalId,geometry);
+   if(previous&&geometry.regionWidth===previous.regionWidth&&geometry.splitId===previous.splitId&&Math.abs(geometry.ratio-previous.ratio)>0.00001&&geometry.width!==previous.width){
+    const store=panelViewStore(this.store.dir,record.tabId,record.targetTerminalId);await store.write('panel-size',{columns:geometry.width,custom:true});
+   }
+  }
+ }
+ private async sizePanel(record:PanelRecord,nativePaneId:string){
+  const response=await this.rpc.call('session.snapshot'),snapshot=response.snapshot??response,geometry=this.geometry(snapshot,record);if(!geometry)return;
+  const store=panelViewStore(this.store.dir,record.tabId,record.targetTerminalId),saved=await store.read<{columns:number;custom?:boolean}>('panel-size');
+  const requested=Number.isSafeInteger(saved?.columns)&&saved!.columns>=20&&saved!.columns<=1000?saved!.columns:DEFAULT_PANEL_COLUMNS;
+  const maximum=saved?.custom===true?geometry.regionWidth-32:Math.min(geometry.regionWidth-32,Math.floor(geometry.regionWidth*0.45));
+  const columns=Math.max(Math.min(20,Math.floor(geometry.regionWidth*0.4)),Math.min(requested,maximum));
+  const exported=await this.rpc.call('layout.export',{pane_id:record.paneId});
+  const find=(node:any,path:boolean[]=[]):{path:boolean[];ratio:number}|undefined=>{
+   if(!node||node.type!=='split')return;
+   if(node.direction==='right'&&node.first?.type==='pane'&&node.first.pane_id===nativePaneId&&node.second?.type==='pane'&&node.second.pane_id===record.paneId)return{path,ratio:node.ratio};
+   return find(node.first,[...path,false])??find(node.second,[...path,true]);
+  };
+  const split=find(exported.layout?.root);if(!split)throw new Error('New Prism panel no longer shares its native target split');
+  const ratio=Math.max(0.1,Math.min(0.9,split.ratio+(geometry.width-columns)/geometry.regionWidth));
+  await this.rpc.call('layout.set_split_ratio',{pane_id:record.paneId,path:split.path,ratio});
+  if(!saved)await store.write('panel-size',{columns:requested,custom:false});
+  const updated=await this.rpc.call('session.snapshot'),measured=this.geometry(updated.snapshot??updated,record);if(measured)this.widths.set(record.terminalId,measured);
+ }
  async records():Promise<PanelRecord[]>{
   const rows=await this.store.read<PanelRecord[]>('views')??[];
-  if(!Array.isArray(rows)||rows.length>128||rows.some(r=>!r||typeof r.tabId!=='string'||typeof r.paneId!=='string'||typeof r.terminalId!=='string'||typeof r.open!=='boolean'))throw new Error('Invalid panel ownership records');
+  if(!Array.isArray(rows)||rows.length>128||rows.some(r=>!r||typeof r.tabId!=='string'||typeof r.paneId!=='string'||typeof r.terminalId!=='string'||typeof r.open!=='boolean'||r.targetTerminalId!==undefined&&typeof r.targetTerminalId!=='string'))throw new Error('Invalid panel ownership records');
   return rows;
  }
  async open(targetPaneId?:string){
   const response=await this.rpc.call('session.snapshot'),snapshot=response.snapshot??response;
   const target=snapshot.panes?.find((p:any)=>p.pane_id===(targetPaneId??snapshot.focused_pane_id));
-  if(!target?.tab_id)throw new Error('No target agent tab for Prism');
+  if(!target?.tab_id||typeof target.terminal_id!=='string')throw new Error('No target agent terminal for Prism');
   const records=await this.records();
-  const current=records.find(r=>snapshot.panes.some((p:any)=>p.terminal_id===r.terminalId&&p.tab_id===target.tab_id));
+  const targetView=records.find(r=>r.terminalId===target.terminal_id);
+  const targetTerminalId=targetView?.targetTerminalId??target.terminal_id;
+  const current=records.find(r=>r.open&&(r.terminalId===target.terminal_id||r.targetTerminalId===targetTerminalId)&&snapshot.panes.some((p:any)=>p.terminal_id===r.terminalId&&p.tab_id===target.tab_id));
   if(current){const pane=snapshot.panes.find((p:any)=>p.terminal_id===current.terminalId);await this.current(pane);return this.rpc.call('plugin.pane.focus',{pane_id:pane.pane_id});}
-  if(records.length>=128&&!records.some(r=>r.tabId===target.tab_id)){
+  if(records.length>=128&&!records.some(r=>r.targetTerminalId===targetTerminalId)){
    const old=records.findIndex(r=>!r.open);if(old<0)throw new Error('Prism panel limit reached');records.splice(old,1);
   }
-  const opened=await openPanel(this.rpc,{targetPaneId:target.pane_id});
+  const nativeTarget=targetView?snapshot.panes.find((p:any)=>p.terminal_id===targetTerminalId):target;
+  if(!nativeTarget)throw new Error('Bound native target terminal is unavailable');
+  const opened=await openPanel(this.rpc,{targetPaneId:nativeTarget.pane_id});
   const owned=opened.plugin_pane;
   if(owned?.plugin_id!=='iob.herdr-prism'||owned.entrypoint!=='inspector'||typeof owned.pane?.pane_id!=='string'||typeof owned.pane?.terminal_id!=='string')throw new Error('Invalid dashboard ownership response');
-  const record:PanelRecord={tabId:target.tab_id,paneId:owned.pane.pane_id,terminalId:owned.pane.terminal_id,targetTerminalId:target.terminal_id,open:true};
-  await this.store.write('views',[...records.filter(r=>r.tabId!==target.tab_id),record]);
+  const record:PanelRecord={tabId:target.tab_id,paneId:owned.pane.pane_id,terminalId:owned.pane.terminal_id,targetTerminalId,open:true};
+  await this.store.write('views',[...records.filter(r=>r.targetTerminalId!==targetTerminalId),record]);
   await this.current(owned.pane);
+  await this.sizePanel(record,nativeTarget.pane_id);
   return opened;
  }
  async register(paneId:string,terminalId:string,pid:number){
@@ -42,6 +89,7 @@ export class PanelViews {
   record.pid=pid;record.paneId=paneId;record.open=true;await this.store.write('views',rows);
   return record;
  }
- async closed(terminalId:string){const rows=await this.records();const row=rows.find(r=>r.terminalId===terminalId);if(row){row.open=false;await this.store.write('views',rows);}}
+ async captureWidths(){const response=await this.rpc.call('session.snapshot');await this.observeWidths(response.snapshot??response);}
+ async closed(terminalId:string){await this.captureWidths();const rows=await this.records();const row=rows.find(r=>r.terminalId===terminalId);if(row){row.open=false;await this.store.write('views',rows);}}
  async reconcile(){const rows=await this.records(),response=await this.rpc.call('session.snapshot'),panes=(response.snapshot??response).panes;let changed=false;for(const row of rows)if(row.open&&!panes.some((p:any)=>p.terminal_id===row.terminalId)){row.open=false;changed=true;}if(changed)await this.store.write('views',rows);}
 }

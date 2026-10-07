@@ -1,9 +1,10 @@
 import {orderedTabs,tabLabel} from './types.ts';
-import type {DashboardData,UiState,ScreenRow,RenderedScreen,DetailDocument,DetailSection,TabRegion,RowRegion} from './types.ts';
+import type {DashboardData,UiState,ScreenRow,RenderedScreen,DetailDocument,DetailSection,TabRegion,RowRegion,SectionRegion} from './types.ts';
 import type {TextSpan} from './theme.ts';
 import {span,pad,summary,readableWrap,valueSpans,asciiText,fitSpans} from './widgets.ts';
 import {cellWidth,truncate,age} from './text.ts';
-export interface LayoutSection {id:string;title:string;rows:ScreenRow[];description?:string[];column?:0|1;fields?:DetailSection['fields'];text?:string;}
+export interface LayoutSection {id:string;title:string;rows:ScreenRow[];description?:string[];column?:0|1;fields?:DetailSection['fields'];text?:string;viewport?:boolean;}
+export const sectionReaderKey=(state:UiState,id:string)=>`${state.selectedKey??''}:${state.tab}:${id}`;
 interface BodyLine {parts:TextSpan[];positions:{index:number;column:number;width:number;display:string;disclosureX?:number}[];}
 
 export function groupRows(rows:ScreenRow[],fallback:string):LayoutSection[]{
@@ -17,13 +18,15 @@ export function renderLayout(data:DashboardData,state:UiState,sections:LayoutSec
   const tail=` · ${stateName}`;const metadata=(cellWidth(`${provider} · ${model}${tail}`)<=columns?`${provider} · ${model}`:truncate(provider,Math.max(1,columns-cellWidth(tail))))+tail;
   const header=[ [span(truncate(`${data.demo?'[DEMO] ':''}Prism · ${name}`,columns),'accent')], [span(metadata,'identity')], [span(truncate(`${data.server?data.server.host+'/'+data.server.session:'Server —'} · ${state.subtree?'Subtree':'Self + jobs'} · ${state.pin?'Pinned':'Follow'}`,columns),'secondary')] ];
   const tabRegions:TabRegion[]=[];let tabLine:TextSpan[]=[],used=0;
+  const finishTabLine=()=>{if(used<columns)tabLine.push({...span(' '.repeat(columns-used),'secondary'),surface:'tabbar'});header.push(tabLine);tabLine=[];used=0;};
   const order=orderedTabs(state),labels=order.map(tab=>tabLabel(tab,columns<50));
   for(const [i,tab]of order.entries()){
     const name=labels[i]!,label=(tab===state.tab?'['+name+']':name),size=cellWidth(label);
-    if(used+size>columns&&tabLine.length){header.push(tabLine);tabLine=[];used=0;}
-    tabRegions.push({tab,x:used+1,y:header.length+1,width:size});tabLine.push(span(label+' ',tab===state.tab?'accent':'secondary'));used+=size+1;
+    if(used+size>columns&&tabLine.length)finishTabLine();
+    tabRegions.push({tab,x:used+1,y:header.length+1,width:size});tabLine.push({...span(label,tab===state.tab?'accent':'secondary'),surface:tab===state.tab?'activeTab':'tab',bold:tab===state.tab});used+=size;
+    if(used<columns){tabLine.push({...span(' ','secondary'),surface:'tabbar'});used++;}
   }
-  if(tabLine.length)header.push(tabLine);
+  if(tabLine.length)finishTabLine();
   // Keep room for the selected entry in short terminals; tabs keep measured targets.
   if(header.length>height-2-minimumBodyRows){header.splice(1,Math.min(2,header.length-(height-2-minimumBodyRows)));for(const region of tabRegions)region.y=header.findIndex(line=>line.some(part=>part.text.trim()===(region.tab===state.tab?'['+labels[order.indexOf(region.tab)]+']':labels[order.indexOf(region.tab)])))+1;}
   const rows=sections.flatMap(section=>section.rows),indices=new Map(rows.map((row,i)=>[row,i]));
@@ -39,16 +42,36 @@ export function renderLayout(data:DashboardData,state:UiState,sections:LayoutSec
         const main=row.label?prefix+summary(row.value??'',Math.max(1,available-cellWidth(prefix))):summary(row.text,available);
         const display=pad(main,available)+arrow;
         const parts=row.label?[span(prefix,'secondary',selected),...valueSpans(pad(main.slice(prefix.length),available-cellWidth(prefix)),row.role,selected),span(arrow,'accent',selected)]:[...valueSpans(pad(main,available),row.role,selected),span(arrow,'accent',selected)];
-        lines.push({parts:[span('│','border'),span(selected?'›':' ',selected?'accent':'text',selected),...parts,span(' │','border')],positions:[{index,column:3,width:room,display,disclosureX:row.disclosureColumn?row.disclosureColumn+2:undefined}]});
+        const interior=[span(selected?'›':' ',selected?'accent':'text',selected),...parts,span(' ',row.role??'text',selected)];
+        if(row.messageBand!==undefined)for(const part of interior)part.surface=row.messageBand?'messageOdd':'messageEven';
+        lines.push({parts:[span('│','border'),...interior,span('│','border')],positions:[{index,column:3,width:room,display,disclosureX:row.disclosureColumn?row.disclosureColumn+2:undefined}]});
       }
       lines.push({parts:[span('└'+'─'.repeat(Math.max(0,width-2))+'┘','border')],positions:[]});
     }return lines;
   };
   const two=columns>=80&&sections.some(section=>section.column===1)&&sections.some(section=>section.column!==1);
+  const bodyStart=header.length,bodyHeight=Math.max(1,height-bodyStart-2),independent=!document&&sections.length>1&&sections.every(section=>section.viewport),sectionRegions:SectionRegion[]=[];
   let body:BodyLine[];
-  if(two){const leftWidth=Math.floor((columns-2)/2),left=sectionLines(sections.filter(s=>s.column!==1),leftWidth),right=sectionLines(sections.filter(s=>s.column===1),columns-leftWidth-2);body=Array.from({length:Math.max(left.length,right.length)},(_,i)=>({parts:[...(left[i]?.parts??[span(' '.repeat(leftWidth))]),span('  '),...(right[i]?.parts??[span(' '.repeat(columns-leftWidth-2))])],positions:[...left[i]?.positions??[],...(right[i]?.positions??[]).map(p=>({...p,column:p.column+leftWidth+2,disclosureX:p.disclosureX===undefined?undefined:p.disclosureX+leftWidth+2}))]}));}
+  if(independent){
+    body=[];const readers=state.sectionReaders??=new Map();
+    for(const [i,section]of sections.entries()){
+      const panelHeight=Math.floor(bodyHeight/sections.length)+(i<bodyHeight%sections.length?1:0),contentHeight=Math.max(0,panelHeight-(panelHeight>=3?2:1));
+      const source=sectionLines([section],columns),content=source.slice(1,-1),selected=content.findIndex(line=>line.positions.some(position=>position.index===state.cursor));
+      const reader=readers.get(sectionReaderKey(state,section.id))??{cursor:section.rows[0]?indices.get(section.rows[0])!:0,cursorId:section.rows[0]?.id,scroll:selected>=0?state.scroll:0};
+      let scroll=Math.max(0,Math.min(reader.scroll,Math.max(0,content.length-contentHeight)));
+      if(selected>=0){if(selected<scroll)scroll=selected;if(selected>=scroll+contentHeight)scroll=Math.max(0,selected-contentHeight+1);reader.cursor=state.cursor;reader.cursorId=rows[state.cursor]?.id;}
+      else if(section.id==='Retained messages'&&state.messageReaders.get(state.selectedKey??'')?.following)scroll=Math.max(0,content.length-contentHeight);
+      reader.scroll=scroll;readers.set(sectionReaderKey(state,section.id),reader);if(selected>=0)state.scroll=scroll;
+      sectionRegions.push({id:section.id,x:1,y:bodyStart+body.length+1,width:columns,height:panelHeight,scroll,total:content.length,indices:section.rows.map(row=>indices.get(row)!)});
+      if(panelHeight)body.push(source[0]!);
+      body.push(...content.slice(scroll,scroll+contentHeight));
+      for(let blank=Math.min(contentHeight,Math.max(0,content.length-scroll));blank<contentHeight;blank++)body.push({parts:[span('│'+' '.repeat(Math.max(0,columns-2))+'│','border')],positions:[]});
+      if(panelHeight>=3)body.push(source.at(-1)!);
+    }
+    while(readers.size>96)readers.delete(readers.keys().next().value!);
+  }
+  else if(two){const leftWidth=Math.floor((columns-2)/2),left=sectionLines(sections.filter(s=>s.column!==1),leftWidth),right=sectionLines(sections.filter(s=>s.column===1),columns-leftWidth-2);body=Array.from({length:Math.max(left.length,right.length)},(_,i)=>({parts:[...(left[i]?.parts??[span(' '.repeat(leftWidth))]),span('  '),...(right[i]?.parts??[span(' '.repeat(columns-leftWidth-2))])],positions:[...left[i]?.positions??[],...(right[i]?.positions??[]).map(p=>({...p,column:p.column+leftWidth+2,disclosureX:p.disclosureX===undefined?undefined:p.disclosureX+leftWidth+2}))]}));}
   else body=sectionLines(sections,columns);
-  const bodyStart=header.length,bodyHeight=Math.max(1,height-bodyStart-2);
   let selectedBody=body.findIndex(line=>line.positions.some(position=>position.index===state.cursor));
   if(document||!rows.length){
     const actions=rows.slice();const physical=body.map((line,i)=>{
@@ -63,16 +86,17 @@ export function renderLayout(data:DashboardData,state:UiState,sections:LayoutSec
     }
   }
   if(selectedBody<0)selectedBody=0;
-  if(selectedBody<state.scroll)state.scroll=selectedBody;if(selectedBody>=state.scroll+bodyHeight)state.scroll=selectedBody-bodyHeight+1;state.scroll=Math.max(0,Math.min(state.scroll,Math.max(0,body.length-bodyHeight)));
+  if(!independent){if(selectedBody<state.scroll)state.scroll=selectedBody;if(selectedBody>=state.scroll+bodyHeight)state.scroll=selectedBody-bodyHeight+1;state.scroll=Math.max(0,Math.min(state.scroll,Math.max(0,body.length-bodyHeight)));}
   const spans:TextSpan[][]=[...header],rowRegions:RowRegion[]=[];
-  for(let at=state.scroll;at<Math.min(body.length,state.scroll+bodyHeight);at++){const line=body[at]!;for(const position of line.positions){rowRegions.push({index:position.index,x:position.column,y:spans.length+1,width:position.width,display:position.display,disclosureX:position.disclosureX});if(position.disclosureX!==undefined)rows[position.index]!.disclosureColumn=position.disclosureX;}spans.push(line.parts);}
+  const viewportScroll=independent?0:state.scroll;
+  for(let at=viewportScroll;at<Math.min(body.length,viewportScroll+bodyHeight);at++){const line=body[at]!;for(const position of line.positions){rowRegions.push({index:position.index,x:position.column,y:spans.length+1,width:position.width,display:position.display,disclosureX:position.disclosureX});if(position.disclosureX!==undefined)rows[position.index]!.disclosureColumn=position.disclosureX;}spans.push(line.parts);}
   while(spans.length<height-2)spans.push([span('')]);
   const messageReader=session&&state.tab==='Messages'?state.messageReaders.get(session.key):undefined;
   const status=state.notice??`${data.stale?'STALE · ':''}${messageReader?.newCount?`${messageReader.newCount} new · `:messageReader?.following?'Following end · ':''}${document?.capturedAt!==undefined?'Snapshot '+age(document.capturedAt,now):'Evidence '+age(data.updatedAt,now)} ago`;
-  const controls=state.processConfirmation&&!state.help?'Enter choose · y confirm · Esc cancel · ? help':state.editingFilter?'Filter: '+state.filter:state.numberPrefix?'Prism agent: '+state.numberPrefix+' · Enter':state.help||state.detail!==undefined?(state.detailDocument?.processTarget&&!state.help?'Shift+K terminate · Esc back · ? help':'↑↓ scroll · Esc back · ? help'):state.tab==='Processes'?'Enter detail · Shift+K terminate · ? help':state.tab==='Agents'?'Enter inspect · f focus · ? help':state.tab==='Refs'?'Enter detail · Space sources · ? help':state.tab==='To-do'?'Enter detail · x check · ? help':state.tab==='Notes'?'Enter edit · Ctrl+S save · ? help':columns<50?'Enter · ? help · Tab · q':'Enter open · Tab views · ? help · q close';
+  const controls=state.processConfirmation&&!state.help?'Enter choose · y confirm · Esc cancel · ? help':state.editingFilter?'Filter: '+state.filter:state.numberPrefix?'Prism agent: '+state.numberPrefix+' · Enter':state.help||state.detail!==undefined?(state.detailDocument?.processTarget&&!state.help?'r output · Shift+K terminate · ? help':'↑↓ scroll · Esc back · ? help'):state.tab==='Processes'?'Enter detail · Shift+K terminate · ? help':state.tab==='Agents'?'Enter inspect · f focus · ? help':state.tab==='Messages'?'←→ panel · ↑↓ scroll · Enter · ? help':state.tab==='Refs'?'Enter detail · Space sources · ? help':state.tab==='To-do'?'Enter detail · x check · ? help':state.tab==='Notes'?'Enter edit · Ctrl+S save · ? help':columns<50?'Enter · ? help · Tab · q':'Enter open · Tab views · ? help · q close';
   spans.push([span(truncate(status,columns),data.stale?'warning':'secondary')],[span(truncate(controls,columns),'secondary')]);
   if(state.ascii)for(const line of spans)for(const part of line)part.text=asciiText(part.text);
   for(let i=0;i<spans.length;i++)spans[i]=fitSpans(spans[i]!,columns);
   const lines=spans.slice(0,height).map(line=>truncate(line.map(part=>part.text).join(''),columns,state.ascii));
-  return {lines,spans:spans.slice(0,height),rows,selectedLine:rows[state.cursor]?.selectable===false?undefined:bodyStart+selectedBody-state.scroll,bodyStart,bodyHeight,numericTargets,rowRegions,tabRegions,theme:state.monochrome?'mono':state.theme??'dark'};
+  return {lines,spans:spans.slice(0,height),rows,selectedLine:rows[state.cursor]?.selectable===false?undefined:bodyStart+selectedBody-viewportScroll,bodyStart,bodyHeight,numericTargets,rowRegions,tabRegions,sectionRegions:independent?sectionRegions:undefined,theme:state.monochrome?'mono':state.theme??'dark'};
 }

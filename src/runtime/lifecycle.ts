@@ -118,7 +118,7 @@ export async function activate(context: LifecycleContext, rpc: Rpc, options: {
     if(remembered.length){
         const response=await rpc.call('session.snapshot'),snapshot=response.snapshot??response;
         for(const record of remembered.filter(r=>r.open)){
-            const target=snapshot.panes.find((p:any)=>p.terminal_id===record.targetTerminalId)??snapshot.agents?.find((a:any)=>a.tab_id===record.tabId);
+            const target=record.targetTerminalId?snapshot.panes.find((p:any)=>p.terminal_id===record.targetTerminalId):snapshot.agents?.find((a:any)=>a.tab_id===record.tabId);
             if(target)opened=await openView(target.pane_id);
         }
         if(!opened)await ensureCollectorService(context);

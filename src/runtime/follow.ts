@@ -1,8 +1,9 @@
 import type { HerdrSnapshot } from '../model/types.ts';
 import type { DashboardData } from '../tui/types.ts';
 /** Automatic selection stays in the panel's tab. A reader can explicitly choose others. */
-export function localSelection(data:DashboardData,tabId:unknown,snapshot?:HerdrSnapshot):string|undefined {
+export function localSelection(data:DashboardData,tabId:unknown,snapshot?:HerdrSnapshot,targetTerminalId?:string):string|undefined {
  const local=data.sessions.filter(s=>(s.attachments??(s.attachment?[s.attachment]:[])).some(a=>a.tab_id===tabId));
+ if(targetTerminalId)return local.find(s=>(s.attachments??(s.attachment?[s.attachment]:[])).some(a=>a.terminal_id===targetTerminalId))?.key;
  const focused=snapshot?.agents.find(a=>a.pane_id===snapshot.focused_pane_id&&a.tab_id===tabId);
  return (focused&&local.find(s=>(s.attachments??(s.attachment?[s.attachment]:[])).some(a=>a.terminal_id===focused.terminal_id))||local[0])?.key;
 }
@@ -12,8 +13,13 @@ export class FollowSelection {
     private followedTerminal?: string;
     reset() { this.identity = undefined; this.followedTerminal=undefined; }
     /** Inspector focus must not hide a change to its last focused native occupant. */
-    observeLocal(snapshot:HerdrSnapshot,data:DashboardData,tabId:unknown,pinned=false):string|undefined {
+    observeLocal(snapshot:HerdrSnapshot,data:DashboardData,tabId:unknown,pinned=false,targetTerminalId?:string):string|undefined {
         if(pinned||snapshot.focused_tab_id&&snapshot.focused_tab_id!==tabId)return;
+        if(targetTerminalId){
+            const target=snapshot.agents.find(a=>a.terminal_id===targetTerminalId&&a.tab_id===tabId);
+            if(!target)return;
+            return this.observe({...snapshot,focused_pane_id:target.pane_id},data,pinned);
+        }
         const focused=snapshot.agents.find(a=>a.pane_id===snapshot.focused_pane_id);
         if(focused&&focused.tab_id!==tabId)return;
         if(focused)this.followedTerminal=focused.terminal_id;

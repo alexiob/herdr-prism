@@ -27,7 +27,7 @@ export class ProviderIndex {
  private scanMs:number;private lastScan?:number;private inventory=new Map<string,string>();
  private activeRefs?:ActiveSessionRef[];private detailedRefs?:ActiveSessionRef[];
  private detailGeneration=0;
- private referenceHistory?:{key:string;reader:ReferenceHistory};
+ private referenceHistories=new Map<string,ReferenceHistory>();
  private metadataIndex=new Map<string,{provider:string;builder:EvidenceBuilder}>();private scanRound=0;private metadataCache=new Map<string,{stamp:string;builder:EvidenceBuilder}>();private pathAliases=new Map<string,string>();
  diagnostics:string[]=[];
  constructor(options:ProviderIndexOptions={}) {this.maxRecord=Math.max(256,Math.min(options.maxRecordBytes??1024*1024,16*1024*1024));this.maxMessages=Math.max(1,Math.min(options.maxMessages??200,10000));this.maxSessions=Math.max(1,Math.min(options.maxSessions??2048,20000));this.scanMs=Math.max(0,options.directoryScanMs??5000);
@@ -147,9 +147,12 @@ export class ProviderIndex {
  }
  async readReferences(provider:string,ref:{kind:'id'|'path';value:string},isCurrent:()=>boolean=()=>true):Promise<ReferenceState|undefined>{
   if(this.closed||!isCurrent())return;const evidence=this.resolveSnapshotCached(provider,ref);if(!evidence?.path||evidence.availability==='unavailable')return;
-  const key=`${provider}:${evidence.id}`;if(this.referenceHistory?.key!==key){this.referenceHistory?.reader.close();this.referenceHistory={key,reader:new ReferenceHistory(provider,this.maxRecord,evidence.id)};}
+  const key=`${provider}:${evidence.id}`;let reader=this.referenceHistories.get(key);
+  if(!reader)reader=new ReferenceHistory(provider,this.maxRecord,evidence.id);
+  this.referenceHistories.delete(key);this.referenceHistories.set(key,reader);
+  while(this.referenceHistories.size>128){const first=this.referenceHistories.keys().next().value!;this.referenceHistories.get(first)!.close();this.referenceHistories.delete(first);}
   const files=[...this.entries.values()].filter(entry=>entry.provider===provider&&entry.adapter.evidence.id===evidence.id).sort((a,b)=>(a.adapter.evidence.startedAt??0)-(b.adapter.evidence.startedAt??0)||a.path.localeCompare(b.path)).map(entry=>entry.path);
-  return this.referenceHistory.reader.read(files,()=>!this.closed&&isCurrent());
+  return reader.read(files,()=>!this.closed&&isCurrent());
  }
  private referenceFiles(provider:string,ref:{kind:'id'|'path';value:string}):{id:string;files:string[]}|undefined {
   const evidence=this.resolveSnapshotCached(provider,ref);if(!evidence?.path||evidence.availability==='unavailable')return;return{id:evidence.id,files:[...this.entries.values()].filter(entry=>entry.provider===provider&&entry.adapter.evidence.id===evidence.id).sort((a,b)=>(a.adapter.evidence.startedAt??0)-(b.adapter.evidence.startedAt??0)||a.path.localeCompare(b.path)).map(entry=>entry.path)};
@@ -163,5 +166,5 @@ export class ProviderIndex {
  async readReferenceMessage(cursor:ReferenceCursor,isCurrent:()=>boolean=()=>true):Promise<Message|undefined>{
   if(this.closed||!isCurrent())return;const entry=this.entries.get(cursor.path);if(!entry||entry.provider!==cursor.provider||(entry.metadata??entry.adapter).evidence.id!==cursor.sessionId)return;return readReferenceMessage(cursor,this.maxRecord,()=>!this.closed&&isCurrent());
  }
- close():void {this.closed=true;this.referenceHistory?.reader.close();this.referenceHistory=undefined;this.entries.clear();this.sessions.clear();this.inventory.clear();this.metadataIndex.clear();this.metadataCache.clear();this.pathAliases.clear();this.snapshots=Object.freeze([]);this.assemblyKey=undefined;}
+ close():void {this.closed=true;for(const reader of this.referenceHistories.values())reader.close();this.referenceHistories.clear();this.entries.clear();this.sessions.clear();this.inventory.clear();this.metadataIndex.clear();this.metadataCache.clear();this.pathAliases.clear();this.snapshots=Object.freeze([]);this.assemblyKey=undefined;}
 }

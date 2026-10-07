@@ -70,7 +70,7 @@ for(const scenario of ['birth','boot','missing','denied','owner','sampler','hidd
 test('broker requires the registered visible panel and matching selection before requesting termination',async t=>{
  const directory=await freshPrivateDirectory(join(tmpdir(),'prism-terminate-view-'));t.after(()=>rm(directory,{recursive:true,force:true}));const store=new StateStore(directory);await store.write('views',[{tabId:'tab',paneId:'prism',terminalId:'view',open:true}]);
  let panes:any[]=[{pane_id:'prism',terminal_id:'view',tab_id:'tab'}],calls=0;
- const collector={data:{sessions:[]},setVisibleSession(){},setScope(){},setProcessesExpanded(){},async terminateProcess(_session:any,_target:any,guard:any){await guard();calls++;return{requested:true};}};
+ const collector={data:{sessions:[]},setVisibleSelections(){},dataForView(){return this.data;},async terminateProcess(_session:any,_target:any,guard:any){await guard();calls++;return{requested:true};}};
  const rpc={call:async()=>({snapshot:{panes,focused_tab_id:'tab'}})},host=new CollectorHost(collector as any,store,rpc as any);
  const p={terminalId:'view',session:'session',processTarget:{key:'key',owner:'session'}};
  await assert.rejects(host.request('terminate-process',p));assert.equal(calls,0);

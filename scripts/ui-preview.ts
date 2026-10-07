@@ -33,9 +33,9 @@ if(!args.includes('--browse')){
   if(!process.stdin.isTTY||!process.stdout.isTTY)throw new Error('--browse needs an interactive terminal');
   let view:PreviewView=requested??(initial?'Detail':'Overview'),selected=0,scroll=0,entry:NonNullable<Parameters<typeof renderPreview>[1]>['entry']=initial?.entry;
   const history:{view:PreviewView;selected:number;scroll:number}[]=[];
-  let frame=render(view),closed=false;
-  const draw=()=>{frame=render(view,{width:Math.min(width,process.stdout.columns||width),height:Math.min(height,process.stdout.rows||height),selected,scroll,entry});scroll=frame.scroll;process.stdout.write('\x1b[H\x1b[2J'+formatPreview(frame,{color}));};
-  const close=()=>{if(closed)return;closed=true;process.stdin.setRawMode(false);process.stdin.pause();process.stdin.off('data',input);process.stdout.off('resize',draw);process.stdout.write('\x1b[?25h\x1b[?1049l');};
+  let frame=render(view),closed=false,sectionScroll:Record<string,number>={};const sectionSelections=new Map<string,number>();
+  const draw=()=>{frame=render(view,{width:Math.min(width,process.stdout.columns||width),height:Math.min(height,process.stdout.rows||height),selected,scroll,sectionScroll,entry});scroll=frame.scroll;if(frame.sectionScroll)sectionScroll=frame.sectionScroll;process.stdout.write('\x1b[H\x1b[2J'+formatPreview(frame,{color}));};
+  const close=()=>{if(closed)return;closed=true;process.stdin.setRawMode(false);process.stdin.pause();process.stdin.off('data',input);process.stdout.off('resize',draw);process.stdout.write('\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l');};
   const decoder=new InputDecoder();let timer:NodeJS.Timeout|undefined;
   const key=(key:string)=>{
     if(key==='q'||key==='ctrl+c'){clearTimeout(timer);close();return;}
@@ -44,6 +44,15 @@ if(!args.includes('--browse')){
     else if(key==='?'||key==='enter'){
       const picked=frame.entries[Math.max(0,Math.min(selected,frame.entries.length-1))]??(key==='?'&&view==='Detail'?entry:undefined);
       if(picked){entry=picked;history.push({view,selected,scroll});view=key==='?'?'Help':picked.target??'Detail';selected=0;scroll=0;}
+    }else if(view==='Messages'&&frame.sectionRegions&&['down','j','up','k','left','right','home','end','pageup','pagedown'].includes(key)){
+      const current=frame.sectionRegions.find(region=>region.entries.includes(selected))??frame.sectionRegions[0]!;
+      if(key==='left'||key==='right'){
+        sectionSelections.set(current.id,selected);const at=frame.sectionRegions.indexOf(current),next=frame.sectionRegions[(at+(key==='right'?1:frame.sectionRegions.length-1))%frame.sectionRegions.length]!;
+        selected=sectionSelections.get(next.id)??next.entries[0]!;
+      }else{
+        const at=current.entries.indexOf(selected),step=key==='up'||key==='k'?-1:key==='pageup'?-Math.max(1,current.height-2):key==='pagedown'?Math.max(1,current.height-2):1;
+        selected=current.entries[Math.max(0,Math.min(key==='home'?0:key==='end'?current.entries.length-1:at+step,current.entries.length-1))]!;
+      }
     }else if(key==='down'||key==='j'){if(frame.entries.length)selected=Math.min(selected+1,frame.entries.length-1);else scroll++;}
     else if(key==='up'||key==='k'){if(frame.entries.length)selected=Math.max(0,selected-1);else scroll=Math.max(0,scroll-1);}
     else if(key==='left'||key==='right'){
@@ -56,6 +65,11 @@ if(!args.includes('--browse')){
     else if(key==='pageup'){if(frame.entries.length)selected=Math.max(0,selected-Math.max(1,frame.positions.length));else scroll=Math.max(0,scroll-frame.bodyHeight);}
     draw();
   };
-  const input=(data:Buffer)=>{clearTimeout(timer);for(const event of decoder.feed(data))if(event.type==='key')key(event.key);timer=setTimeout(()=>{for(const event of decoder.flushEscape())if(event.type==='key')key(event.key);},40);};
-  process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',input);process.stdout.on('resize',draw);process.once('SIGINT',close);process.once('SIGTERM',close);process.stdout.write('\x1b[?1049h\x1b[?25l');draw();
+  const input=(data:Buffer)=>{clearTimeout(timer);for(const event of decoder.feed(data)){
+    if(event.type==='key')key(event.key);
+    else if(view==='Messages'&&!event.release&&(event.button===64||event.button===65)){
+      const region=frame.sectionRegions?.find(region=>event.y>=region.line+1&&event.y<region.line+region.height+1);if(region){const current=frame.sectionRegions?.find(region=>region.entries.includes(selected));if(current)sectionSelections.set(current.id,selected);const saved=region.entries.includes(selected)?selected:sectionSelections.get(region.id)??region.entries[0]!,at=region.entries.indexOf(saved);selected=region.entries[Math.max(0,Math.min(at+(event.button===64?-3:3),region.entries.length-1))]!;draw();}
+    }
+  }timer=setTimeout(()=>{for(const event of decoder.flushEscape())if(event.type==='key')key(event.key);},40);};
+  process.stdin.setRawMode(true);process.stdin.resume();process.stdin.on('data',input);process.stdout.on('resize',draw);process.once('SIGINT',close);process.once('SIGTERM',close);process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h');draw();
 }

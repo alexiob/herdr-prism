@@ -825,3 +825,45 @@ removal pass on macOS and Linux. Proofs are in local ignored
 `artifacts/prism-activity-mac-panels` and `artifacts/prism-activity-linux-panels`.
 Review reproduced the transient shortcut opt-out before its persistence fix;
 final review reports no important findings.
+
+## 2026-10-07 — pane-bound inspectors and readable independent readers
+
+Prism now binds each inspector to its native terminal rather than its tab. Several
+native panes in one tab can each own a right-side inspector; repeated opening
+reuses only the requested binding. Selection, reader preferences, scope, CPU
+history and leases remain separate, while one collector hydrates the union of
+visible selections. Stable polls and closing a neighbor preserve CPU baselines.
+Reference history readers retain separate incremental caches for visible sessions.
+
+New panels aim for 60 columns using the supported `layout.export` and
+`layout.set_split_ratio` APIs. Exact sibling paths limit resizing to the new
+native/Prism split. Per-binding width preferences survive recreation; deliberate
+resize changes are flushed on close/shutdown, and window/outer-layout resizing
+does not overwrite them. The pinned request allowlist now includes the exact
+`layout.export` schema, with real-client transport and malformed-request checks.
+
+Messages and Tool activity use fixed independent viewports, local navigation,
+left/right section switching and hovered wheel routing. Metadata and body styling
+plus alternating message backgrounds identify blocks separately from selection.
+Tests verify readable band contrast in standard 16-color and xterm 256-color
+palettes. Tab backgrounds distinguish the strip and active view. CPU and RSS
+charts reserve the same numeric width so their histories share a left edge.
+
+Process details fetch bounded retained shared-terminal output automatically;
+`r` refreshes it. Captures require visible registered panels, caller-specific
+scope, exact sampled process identity, ancestor/root proof and unchanged live
+harness occupancy before and after reading. Late/hidden responses are discarded;
+refresh ordering and UTF-8 byte clipping are guarded. This stream can include
+harness UI and other jobs; it does not claim PID-isolated stdout/stderr or tap
+existing pipes. Captures are transient and excluded from diagnostic exports.
+
+Verification: TypeScript and build passed. macOS Node 26 ran 471 tests: 447 passed,
+24 platform/opt-in skips, zero failures. Linux arm64 Node 22.23.3 in Podman ran
+471 tests: 444 passed, 27 skips, zero failures. Actual isolated Herdr 0.9.3
+install/reactivate/repeated-open/independent-close/width-restoration/shortcut/
+complete-uninstall/crash-recovery/server-loss checks passed on both platforms.
+Proofs: `artifacts/prism-pane-width-mac-accepted/panels.json` and
+`artifacts/prism-pane-width-linux-final/panels.json`. Windows native modules and
+helper artifacts were not changed in this pass; Windows-only acceptance remains
+with its assigned machine/CI runner. Missing attached-client visibility remains
+an upstream Herdr dependency.

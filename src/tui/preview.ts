@@ -1,20 +1,22 @@
 import {cellWidth,sanitize,truncate,wrap} from './text.ts';
 import {styleSpans} from './theme.ts';
 import type {ColorRole,TextSpan,ThemeName} from './theme.ts';
+import {tabLabel} from './types.ts';
 
 export const inspectorPreviewTabs=['Overview','Notes','To-do','Git','Agents','Processes','Refs','Messages'] as const;
 export const previewViews=[...inspectorPreviewTabs,'Notes editor','Sidebar','Help','Detail'] as const;
 export type PreviewView=typeof previewViews[number];
 export interface PreviewEntry {
-  id:string;label:string;value?:string;help:string;detail?:string;target?:PreviewView;role?:ColorRole;display?:string;
+  id:string;label:string;value?:string;help:string;detail?:string;target?:PreviewView;role?:ColorRole;display?:string;messageBand?:0|1;
 }
 interface DetailField {label:string;value:string;role?:ColorRole;}
 interface Section {title:string;entries:PreviewEntry[];description?:string[];descriptionRole?:ColorRole;fields?:DetailField[];column?:0|1;}
-export interface PreviewOptions {width?:number;height?:number;selected?:number;scroll?:number;ascii?:boolean;theme?:ThemeName;entry?:PreviewEntry;}
+export interface PreviewOptions {width?:number;height?:number;selected?:number;scroll?:number;sectionScroll?:Record<string,number>;ascii?:boolean;theme?:ThemeName;entry?:PreviewEntry;}
 export interface PreviewFrame {
   view:PreviewView;lines:string[];spans:TextSpan[][];entries:(PreviewEntry&{display:string})[];
   selectedLine?:number;bodyStart:number;bodyHeight:number;columns:1|2;scroll:number;footer:string;theme:ThemeName;
   positions:{entry:number;line:number;column:number;width:number}[];
+  sectionScroll?:Record<string,number>;sectionRegions?:{id:string;line:number;height:number;entries:number[];}[];
 }
 const goal='Build reliable monitoring for local and remote harness sessions, with readable telemetry and safe installation.';
 const note='# Session notes\n\n## Decisions\n- Run Prism on each remote server.\n- Keep visibility API work upstream.\n\n## Follow-up\nVerify the saved draft after reconnecting.';
@@ -62,12 +64,12 @@ const sections:Record<Exclude<PreviewView,'Help'|'Detail'>,Section[]>={
     fact('p3','  4110 test','25%    274M','Process: test-worker\nPID: 4110\nPPID: 4102\nCPU: 25%\nRSS: 274 MiB','Enter opens complete process facts. CPU is normalized to one logical core, not the entire machine.'),
     fact('p4','  4112 git',' 0%      0M','Process: git\nPID: 4112\nCPU: measured zero\nRSS: measured zero','Zero is a measured value. Enter opens source and sample availability.'),
   ]},{title:'Scope',entries:[fact('process-scope','Coverage','CPU 4/4 · memory 4/4','Scope: selected agent + owned jobs\nCPU: 4/4 readable\nMemory: 4/4 readable\nAggregate CPU: 124%\nAggregate RSS: 620 MiB\n\nIf any required process is unavailable, the aggregate CPU is unavailable.','Partial process samples do not establish a complete aggregate. Press u to choose subtree scope; Enter opens ownership and coverage.')]}],
-  Messages:[{title:'Retained transcript',description:['Scrollback · 2 new · End follows'],entries:[
+  Messages:[{title:'Retained messages',entries:[
     fact('message-user','User · 3m ago','Review remote session support','User\n\nReview remote session support, preserving per-server installation and showing cached metrics honestly.','Enter opens the entire message. s opens its source when available, y copies the full text, and b loads older history.'),
     fact('message-assistant','Assistant · 2m','Collector runs on each server','Assistant\n\nThe collector runs on each remote Herdr server. The local client views its data. Background-machine visibility and the last viewer disconnect require an upstream host API.','Enter opens full text and recorded tools. Counts cover retained messages; new messages do not move a scrollback reader.'),
     fact('message-tool','Tool · 90s ago','exec_command · tests passed','Tool result\n\nexec_command\nTargeted tests passed: 51\nFailures: 0\n\nThe exact source record remains available.','Enter opens full tool summary and result. A tool result is distinct from an assistant message.','positive'),
     fact('message-agent','Agent · 1m ago','Parser → Monitor: ready','Inter-agent message\n\nAuthor: Parser\nRecipient: Monitor\nExact source cursors are ready for review.','Messages between agents retain author and recipient. Their text does not establish a request to the user.'),
-  ]}],
+  ]},{title:'Tool activity',entries:Array.from({length:8},(_,i)=>fact(`activity-tool-${i}`,'done · exec',`Tests passed · run ${i+1}`,`Tool result\n\nexec\nTests passed: ${i+1}\nEdited paths: /work/result-${i+1}.ts`,'Enter opens the complete tool result. Left/right switches panels; arrows and mouse wheels scroll only the active or hovered panel.','secondary'))}],
   Refs:[{title:'Reference targets',description:['8 targets · partial source history'],entries:[
     fact('ref-session','✎ session.ts','src/providers','Target\n\n/work/herdr-prism/src/providers/session.ts:184\nEdited: yes\nSources: 3 mentions\n\nEnter on the live target opens the file. Space opens mention history.','Enter opens this reference target; Space opens its mentions, s the exact source message, and y copies the full target path.'),
     fact('ref-doc','visibility-api.md','docs','Target\n\n/work/herdr-prism/docs/remote-visibility-api.md\nEdited: no\nSource message: assistant-18','Long paths show a meaningful filename and location. Full paths remain available in details and copy. Enter opens the target.'),
@@ -139,6 +141,7 @@ sections.Overview.push({title:'Account / limits',column:0,entries:[
  fact('account-window-secondary','7d','89.2% ▰▰▰▰▰▱ · 6d',accountDetail,'Provider-reported weekly window. Session and descendant usage is never added to this percentage. Enter opens all exact quota facts.','warning'),
  fact('account-credits','Credits','38.7K',accountDetail,'Reported credit balance, not an invoice or this session’s cost. Enter shows the exact decimal value.','quantity'),
 ]});
+for(const [i,entry]of sections.Messages[0]!.entries.entries())entry.messageBand=i%2 as 0|1;
 /** Detail presentation uses the fixture's facts, keeping metric explanations in help. */
 function structuredDetail(entry:PreviewEntry):Section[]|undefined{
   const text=entry.detail??'';
@@ -256,7 +259,9 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
       for(const text of section.description??[])for(const line of readableWrap(text,innerWidth-4))result.push({parts:[span('│ ','border'),...semanticText(pad(line,innerWidth-4),section.descriptionRole??'secondary'),span(' │','border')],entries:[]});
       for(const entry of section.entries){
         const index=allEntries.length,display=compactEntry(entry,innerWidth-4);allEntries.push({...entry,display});
-        result.push({parts:[span('│','border'),...semanticText(' '+display+' ',entry.role??'text',index===(options.selected??0)),span('│','border')],entries:[{index,column:2,width:innerWidth-2}]});
+        const interior=semanticText(' '+display+' ',entry.role??'text',index===(options.selected??0));
+        if(entry.messageBand!==undefined)for(const part of interior)part.surface=entry.messageBand?'messageOdd':'messageEven';
+        result.push({parts:[span('│','border'),...interior,span('│','border')],entries:[{index,column:2,width:innerWidth-2}]});
       }
       result.push({parts:[span('└'+'─'.repeat(innerWidth-2)+'┘','border')],entries:[]});
     }
@@ -268,7 +273,7 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
       const l=left[i],r=right[i];return {parts:[...(l?.parts??[span(' '.repeat(colWidth))]),span('  '),...(r?.parts??[span(' '.repeat(width-colWidth-2))])],entries:[...l?.entries??[],...(r?.entries??[]).map(e=>({...e,column:e.column+colWidth+2}))]};
     });
   };
-  let body:BodyLine[];
+  let body:BodyLine[],panelBodies:BodyLine[][]|undefined;
   if(view==='Help'||view==='Detail'){
     const entry=options.entry??sections.Overview[0]!.entries[0]!;
     const title=view==='Help'?`Help · ${entry.label}`:`Detail · ${entry.label}`;
@@ -276,7 +281,8 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
     const detail=view==='Detail'?structuredDetail(entry):undefined;
     two=width>=80&&Boolean(detail?.some(section=>section.column===1));
     body=two?columns(detail!.filter(section=>section.column!==1),detail!.filter(section=>section.column===1)):sectionLines(detail??[{title,description:text.split('\n'),descriptionRole:'text',entries:[]}],width);
-  }else if(two){
+  }else if(view==='Messages'){panelBodies=sections.Messages.map(section=>sectionLines([section],width));body=panelBodies.flat();}
+  else if(two){
     const items=sections.Overview;body=columns([items[1]!,items[2]!,...items.filter(s=>s.title==='Account / limits')],[items[0]!,items[3]!,items[4]!]);
   }else body=sectionLines(sections[view],width);
   const detailId=options.entry?.id??'';
@@ -284,20 +290,40 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
   const detailTitles:Record<string,string>={memory:'Memory',cpu:'CPU',context:'Recorded usage',tokens:'Recorded usage',turn:'Timing','process-scope':'Scope coverage','agent-cached':'Cached resources'};
   const detailTitle=detailTitles[detailId]??(detailContext==='Processes'?'Process details':detailContext==='Refs'?'Reference details':detailContext==='Git'?'Git checkout':options.entry?.label??'Detail');
   const active=view==='Notes editor'?'Notes':view==='Detail'||view==='Help'?detailContext:inspectorPreviewTabs.includes(view as any)?view:'Overview';
-  const tabNames=width<50?['Overview','Agents','Procs','Msgs','Refs','To-do','Git','Notes']:inspectorPreviewTabs;
-  const tabParts=tabNames.map((name,i)=>({name,active:inspectorPreviewTabs[i]===active}));
+  const tabParts=inspectorPreviewTabs.map(tab=>({name:tabLabel(tab,width<50),active:tab===active}));
   const tabLines:TextSpan[][]=[];let tabLine:TextSpan[]=[],used=0;
-  for(const item of tabParts){const label=(item.active?'['+item.name+']':item.name)+' ';if(used+cellWidth(label)>width&&tabLine.length){tabLines.push(tabLine);tabLine=[];used=0;}tabLine.push(span(label,item.active?'accent':'secondary'));used+=cellWidth(label);}
-  if(tabLine.length)tabLines.push(tabLine);
+  const finishTabLine=()=>{if(used<width)tabLine.push({...span(' '.repeat(width-used),'secondary'),surface:'tabbar'});tabLines.push(tabLine);tabLine=[];used=0;};
+  for(const item of tabParts){
+    const label=item.active?'['+item.name+']':item.name,size=cellWidth(label);
+    if(used+size>width&&tabLine.length)finishTabLine();
+    tabLine.push({...span(label,item.active?'accent':'secondary'),surface:item.active?'activeTab':'tab',bold:item.active});used+=size;
+    if(used<width){tabLine.push({...span(' ','secondary'),surface:'tabbar'});used++;}
+  }
+  if(tabLine.length)finishTabLine();
   const chrome:TextSpan[][]=[
     [span(truncate(`PRISM · DESIGN · ${view==='Detail'?detailTitle:view}`,width),'accent')],
     [span(width<50?'Monitor · codex · working':'Monitor · codex / demo-model · working','text')],
     [span(truncate('local/main · Self + jobs · Follow',width),'secondary')],...tabLines,
   ];
+  if(view==='Messages'&&chrome.length>height-8)chrome.splice(1,Math.min(2,chrome.length-(height-8)));
   const bodyStart=chrome.length,bodyHeight=Math.max(1,height-bodyStart-2);
   const selected=Math.max(0,Math.min(options.selected??0,allEntries.length-1));
+  const sectionScroll:Record<string,number>={},sectionRegions:NonNullable<PreviewFrame['sectionRegions']>=[];
+  if(panelBodies){
+    body=[];
+    for(const [i,source]of panelBodies.entries()){
+      const id=sections.Messages[i]!.title,panelHeight=Math.floor(bodyHeight/panelBodies.length)+(i<bodyHeight%panelBodies.length?1:0),contentHeight=Math.max(0,panelHeight-(panelHeight>=3?2:1)),content=source.slice(1,-1);
+      const selectedAt=content.findIndex(line=>line.entries.some(entry=>entry.index===selected));
+      let scroll=Math.max(0,Math.min(options.sectionScroll?.[id]??(selectedAt>=0?options.scroll??0:0),Math.max(0,content.length-contentHeight)));
+      if(selectedAt>=0){if(selectedAt<scroll)scroll=selectedAt;if(selectedAt>=scroll+contentHeight)scroll=Math.max(0,selectedAt-contentHeight+1);}
+      sectionScroll[id]=scroll;sectionRegions.push({id,line:bodyStart+body.length,height:panelHeight,entries:content.flatMap(line=>line.entries.map(entry=>entry.index))});
+      if(panelHeight)body.push(source[0]!);body.push(...content.slice(scroll,scroll+contentHeight));
+      for(let blank=Math.min(contentHeight,Math.max(0,content.length-scroll));blank<contentHeight;blank++)body.push({parts:[span('│'+' '.repeat(Math.max(0,width-2))+'│','border')],entries:[]});
+      if(panelHeight>=3)body.push(source.at(-1)!);
+    }
+  }
   const selectedBodyLine=body.findIndex(line=>line.entries.some(e=>e.index===selected));
-  let scroll=Math.max(0,Math.min(options.scroll??0,Math.max(0,body.length-bodyHeight)));
+  let scroll=panelBodies?0:Math.max(0,Math.min(options.scroll??0,Math.max(0,body.length-bodyHeight)));
   if(selectedBodyLine>=0&&(selectedBodyLine<scroll||selectedBodyLine>=scroll+bodyHeight))scroll=Math.max(0,selectedBodyLine-bodyHeight+1);
   const spans=[...chrome];
   for(let i=scroll;i<Math.min(body.length,scroll+bodyHeight);i++){
@@ -309,10 +335,10 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
     spans.push(parts);
   }
   while(spans.length<height-2)spans.push([span('')]);
-  const footer=view==='Help'||view==='Detail'?'↑↓ scroll · Esc back · ? help':view==='Agents'?'Enter inspect · f focus · ? help':view==='Notes editor'?'Ctrl+S save · Esc read · text inserts':view==='Sidebar'?'Ctrl+B i opens Prism · ? help in Prism':view==='Notes'?'Enter edit · Ctrl+S save · ? help':'Enter open · Tab views · ? help';
+  const footer=view==='Help'||view==='Detail'?'↑↓ scroll · Esc back · ? help':view==='Agents'?'Enter inspect · f focus · ? help':view==='Messages'?'←→ panel · ↑↓ scroll · Enter · ? help':view==='Notes editor'?'Ctrl+S save · Esc read · text inserts':view==='Sidebar'?'Ctrl+B i opens Prism · ? help in Prism':view==='Notes'?'Enter edit · Ctrl+S save · ? help':'Enter open · Tab views · ? help';
   spans.push([span(truncate(`DESIGN ONLY · synthetic data${body.length>bodyHeight?` · ${scroll+1}/${body.length}`:''}`,width),'warning')],[span(truncate(footer,width),'secondary')]);
   if(options.ascii)for(const line of spans)for(const part of line)part.text=asciiText(part.text).replace(/›/g,'>');
-  return {view,lines:spans.map(parts=>parts.map(p=>p.text).join('').trimEnd()),spans,entries:allEntries,selectedLine:selectedBodyLine<0?undefined:bodyStart+selectedBodyLine-scroll,bodyStart,bodyHeight,columns:two?2:1,scroll,footer,theme,positions};
+  return {view,lines:spans.map(parts=>parts.map(p=>p.text).join('').trimEnd()),spans,entries:allEntries,selectedLine:selectedBodyLine<0?undefined:bodyStart+selectedBodyLine-scroll,bodyStart,bodyHeight,columns:two?2:1,scroll,footer,theme,positions,sectionScroll:panelBodies?sectionScroll:undefined,sectionRegions:panelBodies?sectionRegions:undefined};
 }
 export function formatPreview(frame:PreviewFrame,options:{color?:boolean;depth?:4|8|24}={}):string{
   return frame.spans.map(line=>styleSpans(line,{theme:frame.theme,...options})).join('\n')+'\n';

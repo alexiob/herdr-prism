@@ -60,3 +60,16 @@ test('local follow remembers native focus even before the new binding reaches co
  snapshot.focused_pane_id='panel';data.sessions[1]={key:'new-b',attachment:structuredClone(b)};
  assert.equal(tracker.observeLocal(snapshot,data,'tab'),'new-b');assert.equal(tracker.observeLocal(snapshot,data,'tab'),undefined);
 });
+
+test('same-tab panels follow their bound terminals independently of neighboring keyboard focus',async()=>{
+ const {localSelection}=await import('../src/runtime/follow.ts');
+ const a:any={pane_id:'a',terminal_id:'ta',tab_id:'tab',agent:'codex',agent_session:{kind:'id',value:'a'}},b:any={pane_id:'b',terminal_id:'tb',tab_id:'tab',agent:'claude',agent_session:{kind:'id',value:'b'}};
+ const snapshot:any={agents:[a,b],focused_pane_id:'b',focused_tab_id:'tab'},data:any={sessions:[{key:'codex:a',attachment:structuredClone(a)},{key:'claude:b',attachment:structuredClone(b)}]};
+ const first=new FollowSelection(),second=new FollowSelection();
+ assert.equal(localSelection(data,'tab',snapshot,'ta'),'codex:a');assert.equal(first.observeLocal(snapshot,data,'tab',false,'ta'),'codex:a');assert.equal(second.observeLocal(snapshot,data,'tab',false,'tb'),'claude:b');
+ snapshot.focused_pane_id='a';assert.equal(first.observeLocal(snapshot,data,'tab',false,'ta'),undefined);assert.equal(second.observeLocal(snapshot,data,'tab',false,'tb'),undefined);
+ b.agent_session.value='replacement';data.sessions[1]={key:'claude:replacement',attachment:structuredClone(b)};
+ assert.equal(first.observeLocal(snapshot,data,'tab',false,'ta'),undefined);assert.equal(second.observeLocal(snapshot,data,'tab',false,'tb'),'claude:replacement');
+ b.agent_session.value='pinned-replacement';data.sessions[1]={key:'claude:pinned-replacement',attachment:structuredClone(b)};assert.equal(second.observeLocal(snapshot,data,'tab',true,'tb'),undefined);
+ snapshot.agents=[a];data.sessions.pop();assert.equal(second.observeLocal(snapshot,data,'tab',false,'tb'),undefined);assert.equal(localSelection(data,'tab',snapshot,'tb'),undefined,'a vanished binding never adopts a neighboring native pane');
+});

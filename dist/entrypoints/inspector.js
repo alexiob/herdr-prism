@@ -15,8 +15,10 @@ import { HerdrClient } from "../herdr/client.js";
 import { SnapshotCache } from "../herdr/subscription.js";
 import { StateStore } from "../state/store.js";
 import { TerminalUi } from "../tui/terminal.js";
-import { createUiState, renderScreen, handleKey, handleRowClick, showDetail, addMessagePage, addReferencePage, showReferenceSources } from "../tui/screen.js";
+import { createUiState, renderScreen, handleKey, handleRowClick, handleRowWheel, showDetail, addMessagePage, addReferencePage, showReferenceSources } from "../tui/screen.js";
+import { withProcessOutput } from "../process/output.js";
 import { messageDocument } from "../tui/facts.js";
+import { documentText } from "../tui/widgets.js";
 import { visibleReferences } from "../tui/reference-readers.js";
 import { diagnosticExport } from "../tui/export.js";
 import { copyText, openTarget } from "../tui/platform.js";
@@ -129,7 +131,11 @@ export async function main(argv = process.argv.slice(2)) {
             if (!paneId || !terminalId || typeof ownPane?.tab_id !== 'string')
                 throw new Error('Inspector requires its registered Herdr pane identity');
             const tabId = ownPane.tab_id;
-            const store = panelViewStore(context.serverStateDir, tabId);
+            const record = (await serverStore.read('views'))?.find(row => row.terminalId === terminalId && row.open);
+            if (!record?.targetTerminalId)
+                throw new Error('Inspector requires its registered native target terminal');
+            const targetTerminalId = record.targetTerminalId;
+            const store = panelViewStore(context.serverStateDir, tabId, targetTerminalId);
             await store.init();
             lease = await store.acquire();
             const preferences = await store.read('preferences');
@@ -172,7 +178,7 @@ export async function main(argv = process.argv.slice(2)) {
             // The service owns its own admission check; do not hold a UI's gate
             // while waiting for its detached owner to start.
             await admission.release();
-            const localSelection = () => selectLocal(data, tabId, cache.snapshot);
+            const localSelection = () => selectLocal(data, tabId, cache.snapshot, targetTerminalId);
             try {
                 await collector.start();
                 data = collector.data;
@@ -197,7 +203,7 @@ export async function main(argv = process.argv.slice(2)) {
                     const snapshot = cache.snapshot;
                     if (!snapshot || state.pin || state.processConfirmation || state.notes?.editing || !context.settings.follow)
                         return;
-                    const selectedKey = followSelection.observeLocal(snapshot, data, tabId, state.pin);
+                    const selectedKey = followSelection.observeLocal(snapshot, data, tabId, state.pin, targetTerminalId);
                     if (selectedKey) {
                         await notes?.end();
                         state.selectedKey = selectedKey;
@@ -225,6 +231,27 @@ export async function main(argv = process.argv.slice(2)) {
                 ui.on('resize', paint);
                 let referenceRequest = false;
                 let contentRequest = 0;
+                let outputRequest = 0;
+                const refreshProcessOutput = async (sessionKey, target, document = state.detailDocument) => {
+                    if (!document || state.help || !panelVisible() || state.selectedKey !== sessionKey)
+                        return;
+                    const request = ++outputRequest;
+                    try {
+                        const output = await collector.processOutput(sessionKey, target);
+                        if (closing || request !== outputRequest || state.help || !panelVisible() || state.selectedKey !== sessionKey || state.detailDocument !== document)
+                            return;
+                        state.detailDocument = withProcessOutput(document, output);
+                        state.detail = documentText(state.detailDocument);
+                        paint();
+                    }
+                    catch (error) {
+                        if (!closing && request === outputRequest && !state.help && panelVisible() && state.selectedKey === sessionKey && state.detailDocument === document) {
+                            state.detailDocument = withProcessOutput(document, { availability: 'unavailable', scope: 'shared-terminal', pid: target.pid, owner: target.owner, processKey: target.key, capturedAt: Date.now(), reason: error.message });
+                            state.detail = documentText(state.detailDocument);
+                            paint();
+                        }
+                    }
+                };
                 const perform = async (action) => {
                     if (action.type === 'quit') {
                         contentRequest++;
@@ -236,6 +263,11 @@ export async function main(argv = process.argv.slice(2)) {
                             followSelection.reset();
                             await follow();
                         }
+                        return;
+                    }
+                    if (action.type === 'process-output') {
+                        if (action.sessionKey && action.processTarget)
+                            void refreshProcessOutput(action.sessionKey, action.processTarget);
                         return;
                     }
                     if (action.type === 'terminate-process') {
@@ -367,7 +399,10 @@ export async function main(argv = process.argv.slice(2)) {
                         if (closing || key !== state.selectedKey || tab !== state.tab || request !== contentRequest)
                             return;
                         const text = message ? `${message.role}\n${message.text}\n${(message.tools ?? []).map(t => `${t.status} ${t.name}: ${t.summary ?? ''}`).join('\n')}` : action.text ?? 'No detail';
-                        showDetail(state, text, action.document ?? (message ? messageDocument(message) : undefined));
+                        const document = action.document ?? (message ? messageDocument(message) : undefined);
+                        showDetail(state, text, document);
+                        if (document?.processTarget && key)
+                            void refreshProcessOutput(key, document.processTarget, document);
                         return;
                     }
                 };
@@ -383,8 +418,10 @@ export async function main(argv = process.argv.slice(2)) {
                             if (event.release)
                                 return;
                             if (event.button === 64 || event.button === 65) {
-                                state.cursor += event.button === 64 ? -3 : 3;
-                                state.cursorId = undefined;
+                                if (!handleRowWheel(state, event.x, event.y, event.button === 64 ? -3 : 3, frame)) {
+                                    state.cursor += event.button === 64 ? -3 : 3;
+                                    state.cursorId = undefined;
+                                }
                             }
                             else if (event.button === 0) {
                                 const action = handleRowClick(state, event.x, event.y, data, frame);
@@ -436,6 +473,14 @@ export async function main(argv = process.argv.slice(2)) {
                     paint();
                     return;
                 }
+                if (event.type === 'mouse' && !event.release && (event.button === 64 || event.button === 65)) {
+                    if (!handleRowWheel(state, event.x, event.y, event.button === 64 ? -3 : 3, frame)) {
+                        state.cursor += event.button === 64 ? -3 : 3;
+                        state.cursorId = undefined;
+                    }
+                    paint();
+                    return;
+                }
                 if (event.type !== 'key')
                     return;
                 const action = handleKey(state, event.key, data, frame);
@@ -455,8 +500,13 @@ export async function main(argv = process.argv.slice(2)) {
                     if (notes && notes.value?.sessionKey === state.selectedKey)
                         notes.begin({ columns: ui.columns, height: ui.rows, tabOrder: state.tabOrder });
                 }
-                else if (action?.type === 'message')
-                    showDetail(state, action.text ?? '', action.document);
+                else if (action?.type === 'message') {
+                    const target = action.document?.processTarget;
+                    const document = target ? withProcessOutput(action.document, { availability: 'known', scope: 'shared-terminal', pid: target.pid, owner: target.owner, processKey: target.key, capturedAt: Date.now(), text: '[DEMO] Shared harness terminal\n$ build\nCompiling project…\nBuild completed.\nThis fixture does not capture a real process.' }) : action.document;
+                    showDetail(state, document ? documentText(document) : action.text ?? '', document);
+                }
+                else if (action?.type === 'process-output')
+                    state.notice = 'Demo: retained output is a fixture; no terminal capture requested';
                 else if (action?.type === 'ref-sources') {
                     const session = data.sessions.find(session => session.key === action.sessionKey), reference = session?.refs?.find(ref => ref.id === action.id);
                     if (reference)

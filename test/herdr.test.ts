@@ -83,3 +83,16 @@ test('Windows Herdr filesystem socket names map to its exact namespaced pipe con
  assert.equal(mod.herdrTransportPath('\\\\.\\pipe\\existing-日本語','win32'),'\\\\.\\pipe\\existing-日本語');
  assert.equal(mod.herdrTransportPath('/tmp/herdr.sock','darwin'),'/tmp/herdr.sock');
 });
+
+test('the real RPC client sends width export and ratio requests while refusing malformed or unsupported layout methods before I/O',async()=>{
+ const requests:any[]=[];
+ const client=new mod.HerdrClient('width-fixture',{timeoutMs:500,transportFactory:transport((entries,socket)=>{const request=entries[0];requests.push(request);socket.push(JSON.stringify({id:request.id,result:{layout:{root:{type:'pane',pane_id:'native'}}}})+'\n');})});
+ try{
+  await client.call('layout.export',{pane_id:'panel'});await client.call('layout.set_split_ratio',{pane_id:'panel',path:[false],ratio:0.7});
+  assert.deepEqual(requests.map(r=>[r.method,r.params]),[['layout.export',{pane_id:'panel'}],['layout.set_split_ratio',{pane_id:'panel',path:[false],ratio:0.7}]]);
+  await assert.rejects(client.call('layout.export',{pane_id:3}),/expected/);
+  await assert.rejects(client.call('layout.set_split_ratio',{pane_id:'panel',path:['left'],ratio:0.7}),/boolean/);
+  await assert.rejects(client.call('layout.apply',{}),/Unsupported/);
+  assert.equal(requests.length,2,'validation failures must not connect to the host');
+ }finally{client.close();}
+});
