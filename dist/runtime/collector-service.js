@@ -74,6 +74,8 @@ export class CollectorHost {
         }
         if (op === 'reload-settings')
             return this.collector.setTabOrder(p.tabOrder, p.nativeGrouping);
+        if (op === 'account-report')
+            return this.collector.reportAccountLimits(p);
         if (op === 'set-goal') {
             await this.collector.setGoal(p.session, p.objective, p.status);
             return { saved: true };

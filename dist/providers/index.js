@@ -372,6 +372,11 @@ export class ProviderIndex {
                 const newer = (evidence.lastActivity ?? 0) > (old.lastActivity ?? 0) ? evidence : old;
                 const older = newer === old ? evidence : old;
                 const merge = (a, b) => [...new Map([...a, ...b].map(item => [item.id, item])).values()].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0)).slice(-this.maxMessages);
+                const account = [older, newer].filter(e => e.accountObservedAt !== undefined).sort((a, b) => b.accountObservedAt - a.accountObservedAt)[0];
+                if (account) {
+                    newer.accountObservedAt = account.accountObservedAt;
+                    newer.accountLimits = account.accountLimits;
+                }
                 newer.initialRequest = [older.initialRequest, newer.initialRequest].filter((message) => message !== undefined).sort((a, b) => (a.timestamp ?? Infinity) - (b.timestamp ?? Infinity))[0];
                 newer.messages = merge(older.messages, newer.messages);
                 newer.tools = merge(older.tools, newer.tools);

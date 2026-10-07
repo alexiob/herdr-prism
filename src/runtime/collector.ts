@@ -1,3 +1,5 @@
+import {parseAccountLimits,visibleAccountLimits} from '../metrics/account-limits.ts';
+import type {AccountLimits} from '../metrics/account-limits.ts';
 import {ActivityMonitor,activityState} from './activity.ts';
 import {SidebarInventory} from './sidebar.ts';
 import type {SidebarProcessSampler} from './sidebar.ts';
@@ -95,6 +97,7 @@ export class Collector extends EventEmitter {
     private activity:ActivityMonitor;
     private sidebar:SidebarInventory;
     private sidebarSupported:boolean;
+    private accountReports=new Map<string,AccountLimits>();
     private todoHydrated = new Set<string>();
     private derived = new Map<string, {revision?:string; messages:SessionEvidence['messages']; cwd?:string; refs:SessionView['refs']; refAttemptAt:number}>();
     constructor(options: CollectorOptions) { super(); this.activity=new ActivityMonitor(options.rpc); this.data.tabOrder=normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess=options.signalProcess??((pid,signal)=>{process.kill(pid,signal);}); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); this.sidebarSupported=process.platform!=='win32'||!!options.sidebarSampler; this.sidebar=new SidebarInventory(options.rpc,this.git,matchesHarness,options.sidebarSampler,this.sidebarSupported); }
@@ -285,6 +288,7 @@ export class Collector extends EventEmitter {
                     this.data={...this.data,sessions:forest.order.map(node=>{
                         const old=previousSessions.find(s=>s.key===node.key),attached=attachments.get(node.key)??[],historical=!attached.length&&previouslyPaneBacked.has(node.key);
                         const evidence={...node.evidence,goals:[...node.evidence.goals,...this.localGoals.get(node.key)??[]]};
+                        if(evidence.provider==='claude')evidence.accountLimits=visibleAccountLimits(this.accountReports.get(node.key),'claude',evidence.id,Date.now());
                         if(historical)evidence.state='historical';
                         if(node.key!==this.visibleSession&&evidence.messages.length){evidence.availability='stale';evidence.reason='Cached details; live updates resume when this session is shown';}
                         return {...node,evidence,historical,attachments:attached,attachment:attached.find(a=>a.focused)??attached[0],resource:old?.resource,git:old?.git,refs:old?.refs??[],refCoverage:old?.refCoverage??'unavailable',refUpdatedAt:old?.refUpdatedAt,todos:old?.todos??[],todoStatus:old?.todoStatus??'source_unavailable',todoSourceMessageId:old?.todoSourceMessageId,todoReportedAt:old?.todoReportedAt};
@@ -296,6 +300,7 @@ export class Collector extends EventEmitter {
                     node.attachments = attachments.get(node.key) ?? [];
                     node.attachment = node.attachments.find(a => a.focused) ?? node.attachments[0];
                     node.historical = !node.attachment && previouslyPaneBacked.has(node.key);
+                    if(node.evidence.provider==='claude')node.evidence.accountLimits=visibleAccountLimits(this.accountReports.get(node.key),'claude',node.evidence.id,Date.now());
                     if (node.historical)
                         node.evidence.state = 'historical';
                     this.historical.delete(node.key);
@@ -380,6 +385,15 @@ export class Collector extends EventEmitter {
             }
         })().finally(() => { this.refreshing = undefined; });
         return this.refreshing;
+    }
+    reportAccountLimits(payload:{sessionId?:unknown;rateLimits?:unknown}):{accepted:boolean}{
+        if(this.stopped||typeof payload.sessionId!=='string')return{accepted:false};
+        const key=sessionKey('claude',payload.sessionId),session=this.data.sessions.find(s=>s.key===key&&s.attachments?.some(a=>a.agent==='claude'&&a.agent_session?.kind==='id'&&a.agent_session.value===payload.sessionId));
+        if(!session)return{accepted:false};
+        const account=parseAccountLimits('claude',payload.sessionId,payload.rateLimits,Date.now(),'Claude status line');
+        this.accountReports.delete(key);if(account)this.accountReports.set(key,account);
+        while(this.accountReports.size>256)this.accountReports.delete(this.accountReports.keys().next().value!);
+        session.evidence={...session.evidence,accountLimits:account};this.emit('data',this.data);return{accepted:true};
     }
     private diagnostic(message: string) { this.data.diagnostics.push(message); this.data.diagnostics = this.data.diagnostics.slice(-64); this.emit('diagnostic', message); }
     private async saveTodo(key: string, list: TodoList) { const value = list.toJSON(), text = JSON.stringify(value); if (this.todoHashes.get(key) !== text) {

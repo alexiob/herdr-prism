@@ -1,3 +1,4 @@
+import { accountRows } from "./account.js";
 import { age, number, bytes, spark } from "./text.js";
 import { documentText, meter } from "./widgets.js";
 export const unavailable = '—';
@@ -15,8 +16,8 @@ const percent = (value) => value === undefined ? '—' : number(value) + '%';
 const iso = (timestamp) => timestamp === undefined || !Number.isFinite(timestamp) || Math.abs(timestamp) > 8640000000000000 ? '—' : new Date(timestamp).toISOString();
 const statusRole = (value) => value === 'known' || value === 'active' || value === 'done' ? 'positive' : value === 'unavailable' || value === 'partial' || value === 'stale' ? 'warning' : 'text';
 export const rowHelp = {
-    cpu: 'Sampled user + kernel CPU delta over monotonic elapsed. 100% = one logical core; the aggregate can exceed 100%. The first sample needs warmup. Only verified owned processes count. History blanks are unavailable gaps, never interpolated.',
-    memory: 'RSS sum on Unix; working-set sum on Windows. Each process counts once, but shared pages can occur in several processes. Peak is the highest observed aggregate sample, not lifetime allocation. Enter opens measurements and scope.',
+    cpu: 'Sampled user + kernel CPU delta over monotonic elapsed. 100% = one logical core; the aggregate can exceed 100%. The first sample needs warmup. Only verified owned processes count. History spans the observed period, up to 15 minutes, newest at right. CPU chart full scale is at least one core and grows in whole cores. Blanks are unobserved/unavailable gaps, never interpolated; measured zero uses a baseline mark. Enter opens the exact period and scale.',
+    memory: 'RSS sum on Unix; working-set sum on Windows. Each process counts once, but shared pages can occur in several processes. Peak is the highest observed aggregate sample, not lifetime allocation. The chart uses bytes from zero to its observed chart peak, not host memory percentage. History spans the observed period, up to 15 minutes, newest at right. Blanks are unobserved/unavailable gaps; measured zero uses a baseline mark. Enter opens measurements, period, scale and scope.',
     coverage: 'Readable/total verified process coverage. Unreadable processes remain in the denominator. A missing required CPU sample makes the aggregate unavailable. Enter opens Processes; u changes scope.',
     tokens: 'Recorded provider observations. Repeated cumulative counters are not added twice. Cache can be a subset of input or a separate category. Retained observations do not establish lifetime completeness. Enter opens all usage facts.',
     context: 'Measured current-context occupancy, separate from lifetime consumption. Percent requires a compatible actual capacity and current measurement. Enter opens exact counters and available provenance.',
@@ -50,35 +51,53 @@ ACTION parsing is enabled by default. Prism's settings.json has a top-level todo
     git: 'Git facts belong to this exact checkout and repository family. Added/deleted lines differ from untracked file counts. Missing counters are unavailable. Enter opens Git.',
     notes: 'Private per-agent Markdown on the collecting server. Enter opens Notes, then Enter edits. Autosave after 500 ms; Ctrl+S flushes. Follow is held while editing. Complete Prism state removal deletes notes.',
 };
+function historyPeriod(session, now) {
+    const points = session.history?.points, windowMs = session.history?.windowMs;
+    if (!points?.length || windowMs === undefined || !Number.isFinite(windowMs) || windowMs <= 0)
+        return;
+    const from = Math.max(now - windowMs, points.find(point => Number.isFinite(point.at) && point.at >= now - windowMs && point.at <= now)?.at ?? now);
+    return { from, to: now };
+}
 export function historyValues(session, kind, width, now) {
+    width = Math.max(0, Math.floor(width));
+    if (!width)
+        return [];
     const values = (session.history?.[kind] ?? []).map(value => { if (value === undefined)
         return; try {
         const n = typeof value === 'number' ? value : Number(BigInt(value));
-        return Number.isFinite(n) ? n : undefined;
+        return Number.isFinite(n) && n >= 0 ? n : undefined;
     }
     catch {
         return;
     } });
-    const points = session.history?.points, windowMs = session.history?.windowMs;
-    if (points?.length && windowMs) {
-        const buckets = Array(width).fill(undefined), gaps = new Set();
-        const from = now - windowMs;
+    const points = session.history?.points, period = historyPeriod(session, now);
+    if (points?.length && period) {
+        const buckets = Array(width).fill(undefined), elapsed = period.to - period.from;
         for (let i = 0; i < points.length; i++) {
-            const index = Math.floor((points[i].at - from) * width / windowMs);
-            if (index < 0 || index >= width)
+            const point = points[i];
+            if (!Number.isFinite(point.at) || point.at < period.from || point.at > period.to)
                 continue;
-            if (points[i].gap || values[i] === undefined)
-                gaps.add(index);
-            else
-                buckets[index] = Math.max(buckets[index] ?? 0, values[i]);
+            // The right endpoint is inclusive. Newer observations supersede warmup or
+            // unavailable samples in the same time column, rather than poisoning it.
+            const index = elapsed === 0 ? width - 1 : Math.min(width - 1, Math.floor((point.at - period.from) * width / elapsed));
+            buckets[index] = point.gap ? undefined : values[i];
         }
-        for (const index of gaps)
-            buckets[index] = undefined;
         return buckets;
     }
-    if (values.length <= width)
-        return values;
-    return Array.from({ length: width }, (_, i) => { const bucket = values.slice(Math.floor(i * values.length / width), Math.floor((i + 1) * values.length / width)); return bucket.some(value => value === undefined) ? undefined : Math.max(...bucket); });
+    return values.slice(-width);
+}
+function resourceHistory(session, kind, width, ascii, now) {
+    const values = historyValues(session, kind, width, now), valid = values.filter((value) => value !== undefined);
+    const peak = valid.length ? Math.max(...valid) : undefined;
+    // CPU uses one logical core as the minimum full scale. Memory is a byte
+    // trend against the observed chart peak, never a percentage of host RAM.
+    const ceiling = peak === undefined ? undefined : kind === 'cpu' ? Math.max(100, Math.ceil(peak / 100) * 100) : Math.max(1, peak);
+    const period = historyPeriod(session, now);
+    return { chart: spark(values, width, ascii, ceiling), fields: [
+            field('History', spark(values, width, ascii, ceiling), 'quantity'),
+            field('Period', period ? `${duration(period.to - period.from)} observed · ending ${iso(period.to)}` : values.length ? `Recent ${values.length} samples · timestamps unavailable` : 'No recorded samples', 'duration'),
+            field('Scale', ceiling === undefined ? 'Unavailable until measured' : kind === 'cpu' ? `0–${percent(ceiling)}` : `0–${resident(BigInt(Math.floor(ceiling)).toString())} · observed chart peak, not host %`, 'quantity'),
+        ] };
 }
 export function descendants(data, session) { const graph = new Map(data.sessions.map(s => [s.key, s])), seen = new Set([session.key]), queue = [...session.children], result = []; for (let i = 0; i < queue.length; i++) {
     const key = queue[i];
@@ -105,9 +124,9 @@ export function resourceDocument(session, id, state, now) {
     const r = session.resource, history = session.history;
     const doc = { title: id === 'cpu' ? 'CPU' : id === 'coverage' || id === 'scope' ? 'Process coverage' : 'Memory', capturedAt: now, sections: [] };
     if (id === 'cpu')
-        doc.sections.push(section('cpu', 'CPU', [field('Current', percent(r?.cpuPercent), 'quantity'), field('History', spark(historyValues(session, 'cpu', 22, now), 22, state.ascii), 'quantity')]));
+        doc.sections.push(section('cpu', 'CPU', [field('Current', percent(r?.cpuPercent), 'quantity'), ...resourceHistory(session, 'cpu', 22, state.ascii, now).fields]));
     else if (id !== 'coverage' && id !== 'scope')
-        doc.sections.push(section('memory', 'Memory', [field('Metric', r?.memoryLabel, 'identity'), field('Current', resident(r?.memoryBytes), 'quantity'), field('Peak', resident(history?.peakMemoryBytes), 'quantity'), field('History', spark(historyValues(session, 'memory', 22, now), 22, state.ascii), 'quantity')]));
+        doc.sections.push(section('memory', 'Memory', [field('Metric', r?.memoryLabel, 'identity'), field('Current', resident(r?.memoryBytes), 'quantity'), field('Peak', resident(history?.peakMemoryBytes), 'quantity'), ...resourceHistory(session, 'memory', 22, state.ascii, now).fields]));
     doc.sections.push(section('scope', 'Sample scope', [field('Includes', state.subtree ? 'Selected agent + descendants + owned jobs' : 'Selected agent + owned jobs'), field('Status', r?.availability, statusRole(r?.availability)), field('Shared with', r?.sharedWith, 'identity'), field('Sample', iso(r?.sampledAt), 'duration'), field('Reason', r?.reason)], 1));
     doc.sections.push(section('coverage', 'Readable samples', [field('Processes', r?.coverage ? `${r.coverage.readable}/${r.coverage.total} readable` : '—', r?.availability === 'known' ? 'positive' : 'warning'), field('CPU', r?.cpuCoverage ? `${r.cpuCoverage.readable}/${r.cpuCoverage.total} readable` : '—', 'quantity'), field('Unreadable', r?.unreadablePids?.length ? r.unreadablePids.join(', ') : r ? 'None reported' : '—', 'identity')], 1));
     return doc;
@@ -143,7 +162,7 @@ export function workDocument(session, id, data, now) {
 }
 export function processDocument(session, process, now) {
     const denied = process.availability === 'unavailable';
-    return { processTarget: denied ? undefined : { key: process.key, owner: process.owner, pid: process.pid, name: process.name, isHarness: process.isHarness }, help: 'K asks to terminate this exact process. Cancel is selected initially. Only this PID is signaled; killing a harness can end its agent session. Escape returns.', title: 'Process details', capturedAt: now, sections: [section('identity', 'Identity', [field('Name', process.name, 'identity'), field('PID', process.pid, 'identity'), field('PPID', process.ppid, 'identity'), field('Birth', process.startTime, 'identity'), field('Identity', process.key, 'identity')]), section('resources', 'Resources', [field('CPU', percent(denied ? undefined : process.cpuPercent), 'quantity'), field(session.resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS', resident(denied ? undefined : process.rssBytes), 'quantity'), field('Threads', number(denied ? undefined : process.threads), 'quantity'), field('Uptime', duration(denied ? undefined : process.uptimeMs), 'duration'), field('Read bytes', denied ? '—' : process.readBytes, 'quantity'), field('Write bytes', denied ? '—' : process.writeBytes, 'quantity'), field('Status', process.availability ?? 'known', statusRole(process.availability ?? 'known'))], 1), section('ownership', 'Ownership', [field('Agent', process.owner, 'identity'), field('Harness', process.isHarness ? 'Verified root' : 'Owned process')])] };
+    return { processTarget: denied ? undefined : { key: process.key, owner: process.owner, pid: process.pid, name: process.name, isHarness: process.isHarness }, help: 'Shift+K asks to terminate this exact process. Cancel is selected initially. Only this PID is signaled; killing a harness can end its agent session. Escape returns.', title: 'Process details', capturedAt: now, sections: [section('identity', 'Identity', [field('Name', process.name, 'identity'), field('PID', process.pid, 'identity'), field('PPID', process.ppid, 'identity'), field('Birth', process.startTime, 'identity'), field('Identity', process.key, 'identity')]), section('resources', 'Resources', [field('CPU', percent(denied ? undefined : process.cpuPercent), 'quantity'), field(session.resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS', resident(denied ? undefined : process.rssBytes), 'quantity'), field('Threads', number(denied ? undefined : process.threads), 'quantity'), field('Uptime', duration(denied ? undefined : process.uptimeMs), 'duration'), field('Read bytes', denied ? '—' : process.readBytes, 'quantity'), field('Write bytes', denied ? '—' : process.writeBytes, 'quantity'), field('Status', process.availability ?? 'known', statusRole(process.availability ?? 'known'))], 1), section('ownership', 'Ownership', [field('Agent', process.owner, 'identity'), field('Harness', process.isHarness ? 'Verified root' : 'Owned process')])] };
 }
 export function referenceDocument(session, ref, now) {
     const open = { id: 'ref-open:' + ref.id, text: 'Open target', help: 'Open this target with the configured file/browser opener. Nothing executes as a shell command.', action: { type: 'open-ref', sessionKey: session.key, id: ref.id, target: ref.target, line: ref.line } };
@@ -162,14 +181,15 @@ export function overviewRows(session, state, now, data) {
         add('task', 'Task', e.task, workDocument(session, 'task', data, now), 'Work', 1);
     add('process-uptime', 'Timing', `Harness uptime ${duration(t.uptime)} · current turn ${duration(t.elapsed)}`, timingDocument(session, now), 'Work', 1, 'duration');
     rows.at(-1).value = `${age(e.startedAt, now)} session · ${duration(t.elapsed)} turn`;
-    add('cpu', 'CPU', `${percent(r?.cpuPercent)} ${spark(historyValues(session, 'cpu', 8, now), 8, state.ascii)}`, resourceDocument(session, 'cpu', state, now), 'Resources', 0, 'quantity');
-    add('memory', r?.memoryLabel === 'working-set sum' ? 'WS sum' : 'RSS sum', `${resident(r?.memoryBytes)} ${spark(historyValues(session, 'memory', 8, now), 8, state.ascii)}`, resourceDocument(session, 'memory', state, now), 'Resources', 0, 'quantity');
+    add('cpu', 'CPU', `${percent(r?.cpuPercent)} ${resourceHistory(session, 'cpu', 8, state.ascii, now).chart}`, resourceDocument(session, 'cpu', state, now), 'Resources', 0, 'quantity');
+    add('memory', r?.memoryLabel === 'working-set sum' ? 'WS sum' : 'RSS sum', `${resident(r?.memoryBytes)} ${resourceHistory(session, 'memory', 8, state.ascii, now).chart}`, resourceDocument(session, 'memory', state, now), 'Resources', 0, 'quantity');
     link('coverage', 'Processes', r?.coverage ? `${r.coverage.readable}/${r.coverage.total} readable` : '—', 'Processes', 'Resources', 0);
     add('context', 'Context', u?.contextPercent === undefined ? '—' : percent(u.contextPercent) + ' ' + meter(u.contextPercent, 8, state.ascii), usageDocument(session, now), 'Usage', 0, 'quantity');
     add('tokens', 'Tokens', `in ${number(u?.input)} · out ${number(u?.output)}`, usageDocument(session, now), 'Usage', 0, 'quantity');
     const turn = u?.turnUsage;
     if (turn)
         add('turn-tokens', e.activeTurn?.id === turn.turnId ? 'Current turn' : 'Last recorded turn', `in ${number(turn.input)} · out ${number(turn.output)}`, usageDocument(session, now), 'Usage', 0, 'quantity');
+    rows.push(...accountRows(session, state, now));
     link('git', 'Git', `${session.git?.branch ?? session.git?.branchState ?? '—'} +${number(session.git?.added)} -${number(session.git?.deleted)}`, 'Git', 'Checkout');
     rows.at(-1).value = session.git ? `+${number(session.git.added)} -${number(session.git.deleted)} · ${number(session.git.conflicts)} conflicts` : 'Unavailable';
     const statuses = [...new Set(desc.map(s => s.evidence.state ?? 'unknown'))].map(status => `${status} ${desc.filter(s => (s.evidence.state ?? 'unknown') === status).length}`).join(' · ');

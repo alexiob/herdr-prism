@@ -99,6 +99,7 @@ export class ProviderIndex {
  // replaces merge arrays; sharing those immutable bodies avoids copying the hot window twice.
  for(const entry of valid){const evidence={...entry.snapshot!};const key=`${entry.provider}:${evidence.id}`;const sources=revisions.get(key)??[];sources.push([entry.path,entry.snapshotVersion]);revisions.set(key,sources);const old=sessions.get(key);if(old){const newer=(evidence.lastActivity??0)>(old.lastActivity??0)?evidence:old;const older=newer===old?evidence:old;
  const merge=<T extends {id:string;timestamp?:number}>(a:T[],b:T[])=>[...new Map([...a,...b].map(item=>[item.id,item])).values()].sort((a,b)=>(a.timestamp??0)-(b.timestamp??0)).slice(-this.maxMessages);
+ const account=[older,newer].filter(e=>e.accountObservedAt!==undefined).sort((a,b)=>b.accountObservedAt!-a.accountObservedAt!)[0];if(account){newer.accountObservedAt=account.accountObservedAt;newer.accountLimits=account.accountLimits;}
  newer.initialRequest=[older.initialRequest,newer.initialRequest].filter((message):message is Message=>message!==undefined).sort((a,b)=>(a.timestamp??Infinity)-(b.timestamp??Infinity))[0];newer.messages=merge(older.messages,newer.messages);newer.tools=merge(older.tools,newer.tools);
  const usage=[...older.usage,...newer.usage];
  // An older legacy-only archive must not reintroduce the mirror stream removed

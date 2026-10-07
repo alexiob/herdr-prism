@@ -262,7 +262,7 @@ shortcuts; it does not reload Prism's `settings.json`.**
 | Arrows or `j` / `k` | Move selection |
 | `Home` / `End`, `PageUp` / `PageDown` | Navigate the current reader |
 | `Enter` | Open the selected detail or corresponding tab; inspect an agent inside Prism |
-| `K` in Processes or process details | Ask to terminate the selected process; Cancel is selected initially |
+| `Shift+K` in Processes or process details | Ask to terminate the selected process; Cancel is selected initially |
 | `f` in Agents | Explicitly focus the selected live Herdr pane |
 | `Space` | Fold/expand; open a reference's source history |
 | `Escape` | Return from details or close help/filter |
@@ -295,7 +295,7 @@ is preserved; Prism saves the stale draft separately and reports its recovery
 path through `?` after leaving edit mode. Complete Prism removal deletes notes
 and recovery drafts along with owned state. Demo Notes use disposable files.
 
-`K` opens a confirmation for the captured process name, PID, owner and collecting
+`Shift+K` opens a confirmation for the captured process name, PID, owner and collecting
 server. Press `Enter` on Cancel or `Escape` to return; select Terminate and press
 `Enter`, or press `y`, to confirm. Follow and tab/scope changes pause while this
 dialog is open. A tiny pane must be enlarged before confirmation. macOS/Linux
@@ -340,6 +340,56 @@ RSS on Unix and working set on Windows. Git line counts measure **working tree
 vs HEAD**; untracked and binary files have separate counts, and unborn branches
 have no invented line totals. Provider counters retain their documented cache
 and cumulative semantics; absent cost rates produce unavailable/partial costs.
+
+## Account / limits in Overview
+
+Overview shows a separate **Account / limits** block only when the selected
+session has supported, recent provider data. It includes reported quota usage
+bars, window/reset times, plan and credits, or gateway spend limits when supplied.
+It never adds quotas across agents or converts token totals into a bill. Enter
+opens exact values and provenance; `?` explains the selected row. Missing fields
+are omitted, expired quota windows disappear, and the entire block hides after
+15 minutes without a new observation. Self/subtree mode does not change account scope.
+
+**Codex works automatically:** Prism reads `token_count.rate_limits` from the
+selected session's own transcript during its existing visible-pane refresh.
+There is no separate account API polling, credential lookup, or background history scan.
+Unsupported providers and API-key sessions with no quota data show no block.
+
+**Claude Code uses its optional status-line reporter.** Supported versions supply
+`rate_limits` to the configured status-line command. Prism does not replace your
+existing Claude status line automatically. On macOS/Linux, generate the exact
+configuration for your installed plugin:
+
+```sh
+prism_root="$(herdr plugin list --plugin iob.herdr-prism --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).result.plugins[0].plugin_root))')"
+node "$prism_root/dist/entrypoints/claude-account.js" --print-config --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/herdr/plugins/iob.herdr-prism"
+```
+
+Merge the printed `statusLine` object into `~/.claude/settings.json`, preserving
+other settings. It is a silent reporter: if you already have a status-line command,
+append ` --passthrough | ` and your original command to the generated `command`.
+The original command receives the same JSON input and keeps producing its display.
+Save the settings, then resume Claude activity; if the running Claude version does
+not reload status-line settings, start the next session with those settings.
+No Herdr config reload is needed for this Claude setting.
+
+Claude must run inside the collecting Herdr server and inherit `HERDR_SOCKET_PATH`.
+For a custom state directory, pass its actual plugin state path instead; an explicit
+`--socket ENDPOINT` is also preserved by `--print-config`. On Windows, get `plugin_root`
+from the same `herdr plugin list --json` command, then run the installed reporter with
+`--print-config --state-dir` and your actual Prism state directory.
+
+The reporter forwards only normalized quota fields and the session ID through
+Prism's authenticated local mailbox. It does not retain the complete status-line
+input or credentials. It cannot start a collector or recreate an uninstalled
+plugin's state. Reports are accepted only for an exact live Claude attachment on
+that server. No valid report means the account block stays hidden. When removing
+this manual integration, restore your original Claude `statusLine` command (or
+remove that key if there was none) from `~/.claude/settings.json`.
+
+Provider interfaces: [Codex app server quota fields](https://learn.chatgpt.com/docs/app-server)
+and [Claude status-line fields](https://code.claude.com/docs/en/statusline).
 
 ## Codex session identity
 

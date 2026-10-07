@@ -163,7 +163,7 @@ function contentRows(session, state, columns, now, data) {
                 const nameWidth = Math.max(1, available - fixed - indent);
                 if (match(process.name, state)) {
                     const document = processDocument(session, process, now);
-                    rows.push({ id: process.key, section: 'Owned processes', text: `${' '.repeat(indent)}${descendants.length ? (state.collapsed.has(fold) ? '▸' : '▾') : '·'} ${process.pid} ${summary(process.name, nameWidth)} ${cpuLabel} ${shortMemory}`, help: 'Enter opens complete identity, measurements, ownership and availability. K asks to terminate this exact process, with Cancel selected initially. Space folds owned process children. CPU 100% means one logical core. K/M/G use binary resident-memory units.', document, action: { type: 'message', text: documentText(document), document }, disclosureColumn: descendants.length ? indent + 1 : undefined });
+                    rows.push({ id: process.key, section: 'Owned processes', text: `${' '.repeat(indent)}${descendants.length ? (state.collapsed.has(fold) ? '▸' : '▾') : '·'} ${process.pid} ${summary(process.name, nameWidth)} ${cpuLabel} ${shortMemory}`, help: 'Enter opens complete identity, measurements, ownership and availability. Shift+K asks to terminate this exact process, with Cancel selected initially. Space folds owned process children. CPU 100% means one logical core. K/M/G use binary resident-memory units.', document, action: { type: 'message', text: documentText(document), document }, disclosureColumn: descendants.length ? indent + 1 : undefined });
                 }
                 if (!state.collapsed.has(fold))
                     for (const child of [...descendants].reverse())

@@ -132,6 +132,13 @@ function readableWrap(value:string,width:number):string[]{
   }
   return lines;
 }
+const accountDetail='Account / limits\n\nPlan: Pro\nScope: Account-wide, shared by sessions and devices\nFive-hour used: 12.5%\nWeekly used: 89.2%\nNext reset: 1h 0m\nCredits: 38672.413016\nReported: 10s ago\nSource: Selected session provider observation';
+sections.Overview.push({title:'Account / limits',column:0,entries:[
+ fact('account-plan','Plan','Pro · codex',accountDetail,'Provider-reported plan for the selected session. Account quotas are shared by sessions and devices; they are separate from conversation token totals. Enter opens exact values.' ,'identity'),
+ fact('account-window-primary','5h','12.5% ▰▱▱▱▱▱ · 1h',accountDetail,'Recorded account-wide quota usage and next reset. Data older than 15 minutes and expired quota windows are hidden. ? explains limits; Enter opens recorded provenance.','quantity'),
+ fact('account-window-secondary','7d','89.2% ▰▰▰▰▰▱ · 6d',accountDetail,'Provider-reported weekly window. Session and descendant usage is never added to this percentage. Enter opens all exact quota facts.','warning'),
+ fact('account-credits','Credits','38.7K',accountDetail,'Reported credit balance, not an invoice or this session’s cost. Enter shows the exact decimal value.','quantity'),
+]});
 /** Detail presentation uses the fixture's facts, keeping metric explanations in help. */
 function structuredDetail(entry:PreviewEntry):Section[]|undefined{
   const text=entry.detail??'';
@@ -139,6 +146,7 @@ function structuredDetail(entry:PreviewEntry):Section[]|undefined{
   for(const line of text.split('\n')){const field=/^([A-Za-z][A-Za-z -]*):\s+(.+)$/.exec(line);if(field)values.set(field[1]!,field[2]!);}
   const section=(title:string,fields:DetailField[],column:0|1=0):Section=>({title,entries:[],fields,column});
   const known=(keys:[string,string,ColorRole?][]):DetailField[]=>keys.flatMap(([key,label,role])=>values.has(key)?[{label,value:values.get(key)!,role}]:[]);
+  if(entry.id.startsWith('account-'))return[section('Account scope',known([['Plan','Plan','identity'],['Scope','Scope'],['Source','Source','identity']])),section('Quota and credits',known([['Five-hour used','5h used','quantity'],['Weekly used','7d used','warning'],['Next reset','Reset in','duration'],['Credits','Credits','quantity'],['Reported','Reported','duration']]),1)];
   if(entry.id==='memory')return[
     section('Memory',[
       ...known([['RSS sum','Current','quantity'],['Observed peak','Peak','quantity']]),
@@ -269,7 +277,7 @@ export function renderPreview(view:PreviewView,options:PreviewOptions={}):Previe
     two=width>=80&&Boolean(detail?.some(section=>section.column===1));
     body=two?columns(detail!.filter(section=>section.column!==1),detail!.filter(section=>section.column===1)):sectionLines(detail??[{title,description:text.split('\n'),descriptionRole:'text',entries:[]}],width);
   }else if(two){
-    const items=sections.Overview;body=columns([items[1]!,items[2]!],[items[0]!,items[3]!,items[4]!]);
+    const items=sections.Overview;body=columns([items[1]!,items[2]!,...items.filter(s=>s.title==='Account / limits')],[items[0]!,items[3]!,items[4]!]);
   }else body=sectionLines(sections[view],width);
   const detailId=options.entry?.id??'';
   const detailContext=detailId.startsWith('ref-')?'Refs':detailId==='process-scope'||/^p\d+$/.test(detailId)?'Processes':detailId.startsWith('git-')?'Git':detailId.startsWith('agent-')?'Agents':detailId.startsWith('message-')?'Messages':detailId.startsWith('todo-')?'To-do':'Overview';

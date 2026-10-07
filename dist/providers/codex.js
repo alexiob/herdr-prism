@@ -1,4 +1,5 @@
 import { EvidenceBuilder, clean, codexTokens, filePath, hash, identity, json, number, object, time, visible } from "./common.js";
+import { parseAccountLimits } from "../metrics/account-limits.js";
 export class CodexAdapter extends EvidenceBuilder {
     exactThreadUsage = false;
     lastExactUsageId;
@@ -159,6 +160,10 @@ export class CodexAdapter extends EvidenceBuilder {
                 }
             }
             return;
+        }
+        if (p.type === 'token_count' && Object.hasOwn(p, 'rate_limits') && timestamp !== undefined && (e.accountObservedAt === undefined || timestamp >= e.accountObservedAt)) {
+            e.accountObservedAt = timestamp;
+            e.accountLimits = parseAccountLimits('codex', e.id, p.rate_limits, timestamp, source);
         }
         if (p.type === 'token_count' && p.info) {
             const info = object(p.info);

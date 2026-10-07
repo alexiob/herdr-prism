@@ -1,4 +1,5 @@
 import {EvidenceBuilder,clean,codexTokens,filePath,hash,identity,json,number,object,time,visible} from './common.ts';
+import {parseAccountLimits} from '../metrics/account-limits.ts';
 import type {TailRecord} from './tail.ts';
 
 export class CodexAdapter extends EvidenceBuilder {
@@ -58,6 +59,9 @@ export class CodexAdapter extends EvidenceBuilder {
  if(['task_complete','turn_complete','turn_aborted'].includes(p.type)){
  const completedId=identity(p.turn_id);const matched=this.turnOpen&&this.startedTurnId===completedId;const duration=number(p.duration_ms)??(matched&&timestamp!==undefined&&this.turnStart!==undefined&&timestamp>=this.turnStart?timestamp-this.turnStart:undefined);
  this.usageRecord({id:`turn:${completedId||offset}`,turnId:completedId,sessionId:e.id,model:e.model,timestamp,kind:'delta',turnMs:duration,source});if(matched||!this.turnOpen){if(this.turnId===completedId)this.turnId=undefined;e.state=p.error?'error':p.type==='turn_aborted'?'interrupted':'done';if(matched){e.activeTurn=undefined;this.turnStart=undefined;this.startedTurnId=undefined;this.turnOpen=false;}}return;
+ }
+ if(p.type==='token_count'&&Object.hasOwn(p,'rate_limits')&&timestamp!==undefined&&(e.accountObservedAt===undefined||timestamp>=e.accountObservedAt)){
+  e.accountObservedAt=timestamp;e.accountLimits=parseAccountLimits('codex',e.id,p.rate_limits,timestamp,source);
  }
  if(p.type==='token_count'&&p.info){const info=object(p.info);
  const context=Object.fromEntries(Object.entries({contextUsed:number(object(info.last_token_usage).total_tokens),contextLimit:number(info.model_context_window)}).filter(([,value])=>value!==undefined));

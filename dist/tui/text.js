@@ -72,5 +72,11 @@ catch {
 export function number(value) { return value === undefined || !Number.isFinite(value) ? '—' : numberFormatter.format(value); }
 export function age(timestamp, now = Date.now()) { if (timestamp === undefined)
     return '—'; const seconds = Math.max(0, Math.floor((now - timestamp) / 1000)); return seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds / 60) % 60}m`; }
-export function spark(values, width, ascii = false) { if (!values.length)
-    return '—'; const chars = ascii ? ' .:-=+*#@' : '▁▂▃▄▅▆▇█'; const slice = values.slice(-Math.max(1, width)); const max = Math.max(1, ...slice.filter((x) => x !== undefined)); return slice.map(v => v === undefined ? ' ' : chars[Math.min(chars.length - 1, Math.floor(Math.max(0, v) / max * (chars.length - 1)))]).join(''); }
+export function spark(values, width, ascii = false, ceiling) {
+    const slice = values.slice(-Math.max(1, width)).map(value => value !== undefined && Number.isFinite(value) && value >= 0 ? value : undefined);
+    const measured = slice.filter((value) => value !== undefined);
+    if (!measured.length)
+        return 'no history';
+    const chars = ascii ? '.:-=+*#@' : '▁▂▃▄▅▆▇█', max = ceiling !== undefined && Number.isFinite(ceiling) && ceiling > 0 ? ceiling : Math.max(1, ...measured);
+    return slice.map(value => value === undefined ? ' ' : chars[Math.min(chars.length - 1, Math.floor(value / max * (chars.length - 1)))]).join('');
+}

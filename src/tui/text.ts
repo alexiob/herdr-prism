@@ -27,4 +27,10 @@ export function wrap(input:string,width:number,maxLines=Infinity):string[]{
 export function bytes(value?:string):string {if(value===undefined)return '—';try{const amount=BigInt(value);return amount>=1073741824n?`${(Number(amount)/1073741824).toFixed(1)}GiB`:`${(Number(amount)/1048576).toFixed(0)}MiB`;}catch{return '—';}}
 export function number(value?:number):string{return value===undefined||!Number.isFinite(value)?'—':numberFormatter.format(value);}
 export function age(timestamp?:number,now=Date.now()):string {if(timestamp===undefined)return '—';const seconds=Math.max(0,Math.floor((now-timestamp)/1000));return seconds<60?`${seconds}s`:seconds<3600?`${Math.floor(seconds/60)}m ${seconds%60}s`:`${Math.floor(seconds/3600)}h ${Math.floor(seconds/60)%60}m`;}
-export function spark(values:(number|undefined)[],width:number,ascii=false):string {if(!values.length)return '—';const chars=ascii?' .:-=+*#@':'▁▂▃▄▅▆▇█';const slice=values.slice(-Math.max(1,width));const max=Math.max(1,...slice.filter((x):x is number=>x!==undefined));return slice.map(v=>v===undefined?' ':chars[Math.min(chars.length-1,Math.floor(Math.max(0,v)/max*(chars.length-1)))]).join('');}
+export function spark(values:(number|undefined)[],width:number,ascii=false,ceiling?:number):string {
+ const slice=values.slice(-Math.max(1,width)).map(value=>value!==undefined&&Number.isFinite(value)&&value>=0?value:undefined);
+ const measured=slice.filter((value):value is number=>value!==undefined);
+ if(!measured.length)return 'no history';
+ const chars=ascii?'.:-=+*#@':'▁▂▃▄▅▆▇█',max=ceiling!==undefined&&Number.isFinite(ceiling)&&ceiling>0?ceiling:Math.max(1,...measured);
+ return slice.map(value=>value===undefined?' ':chars[Math.min(chars.length-1,Math.floor(value/max*(chars.length-1)))]).join('');
+}

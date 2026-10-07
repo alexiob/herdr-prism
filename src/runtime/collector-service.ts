@@ -49,6 +49,7 @@ export class CollectorHost {
   }
   if(op==='refresh'){await this.views.reconcile();await this.collector.refresh();return{sessions:this.collector.data.sessions.length,stale:this.collector.data.stale,diagnostics:this.collector.data.diagnostics};}
   if(op==='reload-settings')return this.collector.setTabOrder(p.tabOrder,p.nativeGrouping);
+  if(op==='account-report')return this.collector.reportAccountLimits(p);
   if(op==='set-goal'){await this.collector.setGoal(p.session,p.objective,p.status);return{saved:true};}
   if(op==='toggle-todo'){await this.collector.toggleTodo(p.session,p.id);return{saved:true};}
   if(op==='terminate-process'){
