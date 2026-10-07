@@ -92,9 +92,11 @@ export async function livePanelsTest({release,herdr=process.env.HERDR_BIN_PATH??
   background=await ensureCollectorService(context);assert.notEqual(background.marker.pid,crashedPid);result.abruptCollectorDeathRecovered=true;
   await cli(['server','stop']);
   await until('detached owner stops after server loss',async()=>!(await detachedStore.read('controller')),20000);
-  await assert.rejects(lstat(path.join(context.serverStateDir,'collector.lock')),{code:'ENOENT'});
   // The controller receipt is removed during cleanup, before the process finishes exiting.
-  await until('detached collector process exits',async()=>{try{process.kill(background.marker.pid,0);return false;}catch(error){if(error.code==='ESRCH')return true;throw error;}},20000);result.serverLossStoppedCollector=true;
+  await until('detached collector process exits',async()=>{try{process.kill(background.marker.pid,0);return false;}catch(error){if(error.code==='ESRCH')return true;throw error;}},20000);
+  // Assert complete lock cleanup only after the owner has actually exited,
+  // rather than racing its earlier controller-receipt removal.
+  await assert.rejects(lstat(path.join(context.serverStateDir,'collector.lock')),{code:'ENOENT'});result.serverLossStoppedCollector=true;
   result.ok=true;await writeFile(path.join(proof,'panels.json'),JSON.stringify(result,null,2));success=true;return result;
  }catch(error){result.error=String(error);try{result.logs=(await cli(['plugin','log','list','--plugin','iob.herdr-prism','--limit','32'])).logs;result.snapshot=await snapshot();result.prismText=[];for(const pane of result.snapshot.panes.filter(p=>p.label==='Prism'))result.prismText.push((await exec(herdr,['--session',session,'pane','read',pane.pane_id,'--source','visible','--lines','60'],{env,windowsHide:true})).stdout);}catch{}await writeFile(path.join(proof,'failure.json'),JSON.stringify(result,null,2));throw error;}
  finally{
