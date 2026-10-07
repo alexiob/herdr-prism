@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseNumstat, parseStatus } from './status.ts';
-export interface GitSummary { availability:'known'|'stale'|'unavailable'|'not_applicable';reason?:string;sampledAt:number;ageMs:number;cwd:string;root?:string;gitDir?:string;commonDir?:string;checkoutKey?:string;familyKey?:string;branch?:string;head?:string;branchState:'named'|'detached'|'unborn'|'non-git'|'unknown';added?:number;deleted?:number;binaryFiles?:number;changedFiles?:number;untrackedFiles?:number;conflicts?:number;stagedFiles?:number;unstagedFiles?:number;ahead?:number;behind?:number;upstream?:string; }
+export interface GitSummary { availability:'known'|'stale'|'unavailable'|'not_applicable';identityOnly?:boolean;reason?:string;sampledAt:number;ageMs:number;cwd:string;root?:string;gitDir?:string;commonDir?:string;checkoutKey?:string;familyKey?:string;branch?:string;head?:string;branchState:'named'|'detached'|'unborn'|'non-git'|'unknown';added?:number;deleted?:number;binaryFiles?:number;changedFiles?:number;untrackedFiles?:number;conflicts?:number;stagedFiles?:number;unstagedFiles?:number;ahead?:number;behind?:number;upstream?:string; }
 export type GitRunner=(cwd:string,args:string[],options:{timeoutMs:number;signal:AbortSignal})=>Promise<string>;
 interface Identity {root:string;gitDir:string;commonDir:string;checkoutKey:string;familyKey:string;}
 // One host queue for all cache instances, with at most two Git processes.
@@ -15,6 +15,10 @@ export class GitCache {
  private samples=new Map<string,GitSummary>();
  private pending=new Map<string,Promise<GitSummary>>();
  private refreshing=new Map<string,Promise<GitSummary>>();
+ private identitySamples=new Map<string,GitSummary>();
+ private identityInputs=new Map<string,{sample:GitSummary;cachedAt:number}>();
+ private identityPending=new Map<string,Promise<GitSummary>>();
+ private identityRefreshing=new Map<string,Promise<GitSummary>>();
  private invalidated=new Set<string>();
  private controllers=new Set<AbortController>();
  private closed=false;
@@ -30,6 +34,50 @@ export class GitCache {
   const gitDir=await realpath(line(await this.run(root,['rev-parse','--absolute-git-dir'])));
   const commonDir=await realpath(line(await this.run(root,['rev-parse','--path-format=absolute','--git-common-dir'])));
   return {root,gitDir,commonDir,checkoutKey:JSON.stringify([root,gitDir]),familyKey:commonDir};
+ }
+ private cacheIdentity(input:string,sample:GitSummary){
+  if(this.closed)return;
+  this.identityInputs.delete(input);this.identityInputs.set(input,{sample,cachedAt:this.now()});
+  while(this.identityInputs.size>this.max*8)this.identityInputs.delete(this.identityInputs.keys().next().value!);
+ }
+ private refreshIdentity(identity:Identity):Promise<GitSummary>{
+  const pending=this.identityRefreshing.get(identity.checkoutKey);if(pending)return pending;
+  const job=(async():Promise<GitSummary>=>{
+   const optional=async(args:string[])=>{try{return line(await this.run(identity.root,args));}catch(error){if((error as {code?:unknown}).code===1)return undefined;throw error;}};
+   const branch=await optional(['symbolic-ref','--quiet','--short','HEAD']);
+   const head=await optional(['rev-parse','--verify','--quiet','HEAD']);
+   const sample:GitSummary={availability:'known',identityOnly:true,sampledAt:this.now(),ageMs:0,cwd:identity.root,...identity,branch,head,branchState:head?(branch?'named':'detached'):'unborn'};
+   const full=this.samples.get(identity.checkoutKey);
+   // Previously measured counts belong to one HEAD/branch, not merely a directory.
+   if(full&&(full.head!==sample.head||full.branch!==sample.branch||full.branchState!==sample.branchState))this.samples.delete(identity.checkoutKey);
+   this.identitySamples.delete(identity.checkoutKey);this.identitySamples.set(identity.checkoutKey,sample);
+   while(this.identitySamples.size>this.max)this.identitySamples.delete(this.identitySamples.keys().next().value!);
+   return sample;
+  })();this.identityRefreshing.set(identity.checkoutKey,job);void job.finally(()=>this.identityRefreshing.delete(identity.checkoutKey)).catch(()=>{});return job;
+ }
+ /** Cheap checkout metadata for background cards. Never reads status, diff or untracked files. */
+ async getIdentity(cwd:string,options:{ttlMs?:number}={}):Promise<GitSummary>{
+  const ttlMs=options.ttlMs??30000;if(!Number.isFinite(ttlMs)||ttlMs<0)throw new Error('Invalid ttlMs');
+  const input=resolve(cwd),record=this.identityInputs.get(input),cached=record?.sample;
+  if(record&&this.now()-(record.sample.availability==='stale'?record.cachedAt:record.sample.sampledAt)<ttlMs)return {...record.sample,ageMs:Math.max(0,this.now()-record.sample.sampledAt)};
+  const running=this.identityPending.get(input);if(running)return running;
+  const job=(async():Promise<GitSummary>=>{try{
+   // Resolve aliases again after expiry so retargeted symlinks cannot retain old checkout data.
+   const identity=await this.identity(input),previous=this.aliases.get(input);
+   if(previous&&previous.checkoutKey!==identity.checkoutKey)this.samples.delete(previous.checkoutKey);
+   this.aliases.set(input,identity);this.aliases.set(identity.root,identity);
+   while(this.aliases.size>this.max*8)this.aliases.delete(this.aliases.keys().next().value!);
+   const prior=this.identitySamples.get(identity.checkoutKey);
+   const sample=prior&&this.now()-prior.sampledAt<ttlMs?prior:await this.refreshIdentity(identity);
+   this.cacheIdentity(input,sample);return {...sample,ageMs:Math.max(0,this.now()-sample.sampledAt)};
+  }catch(error){
+   const err=error as Error&{stderr?:string;code?:string;killed?:boolean};
+   const reason=err.code==='ETIMEDOUT'||err.killed?'Git timed out':err.code==='EACCES'||err.code==='EPERM'?'Git access denied':err.message;
+   const nonGit=!!err.stderr?.includes('not a git repository');
+   if(nonGit){const previous=this.aliases.get(input);if(previous)this.samples.delete(previous.checkoutKey);this.aliases.delete(input);}
+   const sample:GitSummary=cached&&!nonGit?{...cached,availability:'stale',reason}:{availability:nonGit?'not_applicable':'unavailable',identityOnly:true,branchState:nonGit?'non-git':'unknown',reason,sampledAt:this.now(),ageMs:0,cwd:input};
+   this.cacheIdentity(input,sample);return {...sample,ageMs:Math.max(0,this.now()-sample.sampledAt)};
+  }})();this.identityPending.set(input,job);try{return await job;}finally{this.identityPending.delete(input);}
  }
  private fresh(identity:Identity,ttlMs=this.ttl){const prior=this.samples.get(identity.checkoutKey);return prior&&!this.invalidated.has(identity.checkoutKey)&&this.now()-prior.sampledAt<ttlMs?{...prior,ageMs:Math.max(0,this.now()-prior.sampledAt)}:undefined;}
  private refresh(identity:Identity):Promise<GitSummary>{
@@ -59,6 +107,6 @@ export class GitCache {
    return {availability:nonGit?'not_applicable':'unavailable',branchState:nonGit?'non-git':'unknown',reason,sampledAt:this.now(),ageMs:0,cwd:input};
   }})();this.pending.set(input,job);try{return await job;}finally{this.pending.delete(input);}
  }
- invalidate(cwd?:string){if(cwd===undefined){for(const key of this.samples.keys())this.invalidated.add(key);return;}const path=resolve(cwd);const identity=this.aliases.get(path);if(identity)this.invalidated.add(identity.checkoutKey);}
- close(){this.closed=true;for(const controller of this.controllers)controller.abort();this.controllers.clear();this.aliases.clear();this.samples.clear();this.invalidated.clear();}
+ invalidate(cwd?:string){if(cwd===undefined){for(const key of this.samples.keys())this.invalidated.add(key);this.identitySamples.clear();this.identityInputs.clear();return;}const path=resolve(cwd);const identity=this.aliases.get(path);if(identity){this.invalidated.add(identity.checkoutKey);this.identitySamples.delete(identity.checkoutKey);for(const [input,record]of this.identityInputs)if(record.sample.checkoutKey===identity.checkoutKey)this.identityInputs.delete(input);}this.identityInputs.delete(path);}
+ close(){this.closed=true;for(const controller of this.controllers)controller.abort();this.controllers.clear();this.aliases.clear();this.samples.clear();this.identitySamples.clear();this.identityInputs.clear();this.invalidated.clear();}
 }

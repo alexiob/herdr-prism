@@ -323,7 +323,9 @@ or binding changes. Pinning and Notes editing hold the selected conversation.
 Full transcript, refs, To-do, Git and frequent resource updates follow only the
 selected inspector session. Closing the pane or changing its server's active
 workspace/tab pauses that work; other agents retain lightweight inventory and
-explicitly stale cached summaries. Reopening warms up CPU measurements and catches
+explicitly stale cached detail summaries. Native cards refresh checkout identity
+without status/diff scans (30-second cache), and on macOS/Linux sample only the
+verified harness PIDs every five seconds, including after plugin restarts. Reopening warms up CPU measurements and catches
 up selected content. Herdr 0.9.3 exposes no attached-client visibility query, so
 last-client disconnect and background-machine pause remain an outstanding gate.
 Verified roots of other agents remain process attribution boundaries.
@@ -377,7 +379,10 @@ conflicting identities.
 The native card starts with status, a compact session name, the tab label and
 the harness (`codex`, `claude`, `pi`, etc.) in muted text.
 The next rows show CPU and RSS (Windows: WS), then machine, branch and colored
-Git changes. Memory uses human sizes such as `3.2kB` or `1.2GB`; values have at
+Git changes. On macOS/Linux, `H CPU` means the harness process alone; the right
+panel measures the harness and its owned jobs. The first harness sample gives
+RSS; CPU needs two samples. Windows retains cached inspector resource summaries
+until a target-only Windows sampler is implemented. Memory uses human sizes such as `3.2kB` or `1.2GB`; values have at
 most one decimal. `~` marks a cached resource sample. Full names, branches,
 Goals and descendant counts remain in the right panel.
 
@@ -394,15 +399,18 @@ at most four current-screen reads of 24 lines per inventory tick, with a short
 cache and an exact occupant recheck. Recognized Claude/Codex UI controls and
 working indicators update the display; narrative questions and old transcript
 text do not establish attention. Unsupported or unreadable UI falls back to
-native state. This leaves background transcript, Git and resource updates paused.
+native state. This leaves background transcript, detailed Git and process-tree updates paused.
 Empty attention and group rows are hidden.
 
 To group native cards, add `"nativeGrouping": "project"` or `"tab"` inside the
 same `ui` object in `settings.json`, then invoke `reload-settings` as above.
 `"none"` is the default and sorts all cards by attention. When grouping is
 enabled, groups stay together and attention sorting applies within each group. Project grouping uses
-cached Git repository identity or the agent's working directory; it performs no
-background Git scans. Group labels belong to the first real card in each group;
+lightweight Git repository identity or the agent's working directory; it performs no
+background status, diff or untracked-file scans. Branches come from the current
+harness working directory, including linked worktrees. Shell commands that
+temporarily use another directory do not change that identity. Change counts
+remain cached from the inspector and are discarded if checkout or HEAD changes. Group labels belong to the first real card in each group;
 Herdr cannot insert independent expandable group headers. Tab names follow
 Herdr's labels (Herdr omits an unnamed single tab).
 

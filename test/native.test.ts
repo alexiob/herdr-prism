@@ -42,3 +42,8 @@ test('compact native resources leave descendant counts in the count token and om
  const root:any={key:'x',depth:0,children:['child'],evidence:{id:'x',provider:'pi',messages:[],tools:[],usage:[],goals:[]},attachment:{pane_id:'p',terminal_id:'t'},resource:{availability:'stale',processes:[],memoryBytes:'1048576',cpuPercent:12,memoryLabel:'RSS sum'}};
  await publisher.publish([root],1000,[root,{...root,key:'child',children:[],attachment:undefined}]);assert.equal(tokens.hat_goal,'');assert.match(tokens.hat_counts,/a1/);assert.equal(tokens.hat_load,'~ CPU 12%  RSS 1MB');assert.match(tokens.hat_fresh,/cached/);root.evidence.task='Review sampler';await publisher.publish([root],7000);assert.match(tokens.hat_goal,/Task: Review sampler/);
 });
+test('stale harness-only native sample shows both its scope and cache marker',async()=>{
+ let tokens:any;const pane={pane_id:'p',terminal_id:'t'};const publisher=new native.NativePublisher({call:async(method:string,params:any)=>{if(method==='pane.get')return{pane};if(method==='pane.report_metadata')tokens=params.tokens;return{};}});
+ const session:any={key:'x',depth:0,children:[],attachment:pane,evidence:{id:'x',provider:'codex',messages:[],tools:[],usage:[],goals:[]},resource:{availability:'stale',cpuPercent:5,memoryBytes:'3200000',memoryLabel:'RSS sum',processes:[]}};
+ await publisher.publish([session],10000,[session],{harnessOnly:true});assert.equal(tokens.hat_load,'~ H CPU 5%  RSS 3.2MB');
+});

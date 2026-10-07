@@ -1,4 +1,5 @@
 import { ActivityMonitor, activityState } from "./activity.js";
+import { SidebarInventory } from "./sidebar.js";
 import { normalizeTabOrder } from "../config/tab-order.js";
 import { normalizeNativeGrouping } from "../config/native-grouping.js";
 import { realpath } from 'node:fs/promises';
@@ -78,9 +79,11 @@ export class Collector extends EventEmitter {
     lastProcessAttemptAt = 0;
     rootProofs = new Map();
     activity;
+    sidebar;
+    sidebarSupported;
     todoHydrated = new Set();
     derived = new Map();
-    constructor(options) { super(); this.activity = new ActivityMonitor(options.rpc); this.data.tabOrder = normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
+    constructor(options) { super(); this.activity = new ActivityMonitor(options.rpc); this.data.tabOrder = normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); this.sidebarSupported = process.platform !== 'win32' || !!options.sidebarSampler; this.sidebar = new SidebarInventory(options.rpc, this.git, matchesHarness, options.sidebarSampler, this.sidebarSupported); }
     async init() {
         await this.store.init();
         this.data.server = await loadServerIdentity(this.store, { session: serverSession(this.endpoint) });
@@ -226,6 +229,8 @@ export class Collector extends EventEmitter {
                 if (this.settings.nativeMode !== 'inspector-only' || this.paneOpen)
                     await this.activity.update(snapshot.agents);
                 this.snapshot = snapshot;
+                if (this.settings.nativeMode !== 'inspector-only')
+                    await this.sidebar.update(snapshot.agents);
                 this.index.setActiveRefs(snapshot.agents.flatMap(agent => agent.agent_session ? [{ provider: agent.agent ?? 'unknown', kind: agent.agent_session.kind, value: agent.agent_session.value }] : []));
                 const rejected = new Set();
                 if (typeof this.index.resolveMetadataCached === 'function') {
@@ -470,7 +475,7 @@ export class Collector extends EventEmitter {
                 this.updateResources();
                 this.scheduleProcessSample();
                 if (this.settings.nativeMode !== 'inspector-only') {
-                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource: !this.paneOpen || this.sampledGeneration !== this.visibilityGeneration || s.key !== this.visibleSession ? { ...this.tracker.view(s.key), availability: 'stale', reason: 'Updates paused while this session is not shown' } : this.sampleError ? { ...this.tracker.view(s.key), availability: this.lastSample ? 'stale' : 'unavailable', reason: this.sampleError } : this.tracker.view(s.key) }))), Date.now(), views, { grouping: this.settings.ui?.nativeGrouping, tabs: snapshot.tabs });
+                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource: this.sidebarSupported ? this.sidebar.resource(a) : !this.paneOpen || this.sampledGeneration !== this.visibilityGeneration || s.key !== this.visibleSession ? { ...this.tracker.view(s.key), availability: 'stale', reason: 'Updates paused while this session is not shown' } : this.sampleError ? { ...this.tracker.view(s.key), availability: this.lastSample ? 'stale' : 'unavailable', reason: this.sampleError } : this.tracker.view(s.key), git: this.sidebar.gitIdentity(a, s.git) }))), Date.now(), views, { grouping: this.settings.ui?.nativeGrouping, tabs: snapshot.tabs, harnessOnly: this.sidebarSupported });
                     if (!this.viewInstalled && !this.publisher.diagnostics.length && views.some(s => s.attachment)) {
                         await this.publisher.installView();
                         this.viewInstalled = true;
@@ -733,13 +738,14 @@ export class Collector extends EventEmitter {
         this.stopped = true;
         clearInterval(this.timer);
         clearInterval(this.sampleTimer);
+        await this.sidebar.close();
+        this.git.close();
         await this.starting?.catch(() => { });
         await this.refreshing;
         await this.sampling;
         if (options.clearNative !== false)
             await this.publisher.clear(this.data.sessions);
         this.index.close();
-        this.git.close();
         await this.sampler.close();
     }
 }

@@ -76,6 +76,10 @@ detail popups stay on their owning server.
 
 ## Visibility boundary in Herdr 0.9.3
 
+Native cards on each macOS/Linux server retain lightweight checkout metadata
+(no status/diff scans) and five-second samples of verified harness PIDs. These
+are independent of the inspector and do not enumerate child processes.
+
 The current selected-session gate pauses heavy transcript, refs, To-do, Git and
 process work when the inspector closes or its server's active workspace/tab
 changes or another pane is zoomed. It does **not** establish that a client is currently viewing that
