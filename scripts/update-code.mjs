@@ -1,5 +1,5 @@
 import {execFile} from 'node:child_process';
-import {promisify} from 'node:util';
+import {promisify,isDeepStrictEqual} from 'node:util';
 import net from 'node:net';
 import {lstat,realpath,readFile,writeFile,mkdir,readdir,copyFile,chmod,rename,rm,open,unlink} from 'node:fs/promises';
 import {resolve,join,dirname,relative,isAbsolute,basename,sep} from 'node:path';
@@ -58,7 +58,7 @@ async function transport(options){
  return {call:(method,params)=>socketCall(endpoint,method,params,options.timeoutMs??30000)};
 }
 async function registration(rpc){const response=await rpc.call('plugin.list',{plugin_id:pluginId});if(response.type!=='plugin_list'||!Array.isArray(response.plugins)||response.plugins.length!==1||response.plugins[0]?.plugin_id!==pluginId)throw Error('Plugin registration changed or is ambiguous');return response.plugins[0];}
-function sameRegistration(expected,current){return current.plugin_id===expected.plugin_id&&resolve(current.plugin_root??'')===resolve(expected.plugin_root)&&JSON.stringify(current.source??{kind:'local'})===JSON.stringify(expected.source??{kind:'local'});}
+function sameRegistration(expected,current){return current.plugin_id===expected.plugin_id&&resolve(current.plugin_root??'')===resolve(expected.plugin_root)&&isDeepStrictEqual(current.source??{kind:'local'},expected.source??{kind:'local'});}
 async function link(rpc,root,source){const response=await rpc.call('plugin.link',{path:root,enabled:false,...(source?{source}:{})});if(response.type!=='plugin_linked'||response.plugin?.plugin_id!==pluginId||resolve(response.plugin.plugin_root??'')!==root||response.plugin.enabled!==false)throw Error('Herdr did not acknowledge the exact prepared plugin registration');if(source?.kind==='github'&&(response.plugin.source?.kind!=='github'||response.plugin.source.resolved_commit!==source.resolved_commit||response.plugin.source.owner!==source.owner||response.plugin.source.repo!==source.repo))throw Error('Herdr did not preserve the reviewed GitHub source');}
 async function bindNode(root,index,nodeBin){
  if(nodeBin===undefined)return;

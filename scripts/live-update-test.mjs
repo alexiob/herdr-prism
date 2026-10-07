@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {mkdtemp,mkdir,readFile,writeFile,readdir,rm,open,lstat} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,readdir,rm,open,lstat,copyFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import os from 'node:os';
@@ -17,6 +17,31 @@ async function until(label,probe,timeoutMs=30000){
  const deadline=Date.now()+timeoutMs;let last;
  while(Date.now()<deadline){try{const value=await probe();if(value)return value;}catch(error){last=error;}await delay(100);}
  throw Error(`${label} timed out${last?': '+last.message:''}`);
+}
+
+/** Reader caches can gain an untouched entry while shutdown flushes a newly
+ * hydrated evidence-path identity. Preserve every previous choice by its key;
+ * insertion order is a cache detail, and new entries must still be defaults. */
+export function assertPreferencesPreserved(actual,expected){
+ assert.ok(actual&&typeof actual==='object'&&!Array.isArray(actual),'current preferences exist');
+ assert.ok(expected&&typeof expected==='object'&&!Array.isArray(expected),'captured preferences exist');
+ const {readers:after=[],...actualFields}=actual,{readers:before=[],...expectedFields}=expected;
+ assert.deepEqual(actualFields,expectedFields,'exact target UI preferences retained');
+ const readerMap=(entries,label)=>{
+  assert.ok(Array.isArray(entries),label+' readers are an array');const map=new Map();
+  for(const tuple of entries){
+   assert.ok(Array.isArray(tuple)&&tuple.length===2&&typeof tuple[0]==='string'&&tuple[0]&&tuple[1]&&typeof tuple[1]==='object'&&!Array.isArray(tuple[1]),label+' reader tuple is valid');
+   assert.ok(!map.has(tuple[0]),label+' reader keys are unique');map.set(tuple[0],tuple[1]);
+  }
+  return map;
+ };
+ const previous=readerMap(before,'captured'),current=readerMap(after,'current');
+ for(const [key,position]of previous){assert.ok(current.has(key),'previous reader retained: '+key);assert.deepEqual(current.get(key),position,'previous reader position retained: '+key);}
+ for(const [key,position]of current)if(!previous.has(key)){
+  assert.equal(position.cursor,0,'new reader starts at cursor 0: '+key);assert.equal(position.scroll,0,'new reader starts at scroll 0: '+key);
+  assert.ok(position.cursorId===undefined||typeof position.cursorId==='string','new reader cursor identity is a string or absent');
+  assert.ok(Object.keys(position).every(key=>['cursor','cursorId','scroll'].includes(key)),'new reader contains only default position fields');
+ }
 }
 
 /** Real update engines, two named servers, private synthetic records only.
@@ -46,7 +71,7 @@ export async function liveUpdateTest({release,herdr=process.env.HERDR_BIN_PATH??
  const env={...process.env};for(const key of Object.keys(env))if(key.startsWith('HERDR_'))delete env[key];
  Object.assign(env,{XDG_CONFIG_HOME:configHome,XDG_STATE_HOME:path.join(directory,'s'),XDG_DATA_HOME:path.join(directory,'d'),HERDR_CONFIG_PATH:configPath,TERM:'xterm-256color',CODEX_HOME:providerHomes.codex,CLAUDE_CONFIG_DIR:providerHomes.claude,PI_CODING_AGENT_DIR:providerHomes.pi});
  if(process.platform==='win32'){env.APPDATA=configHome;env.LOCALAPPDATA=path.join(directory,'local');}else env.SHELL='/bin/sh';
- const servers=[];let installed,installOptions,success=false;
+ const servers=[];let installed,installOptions,success=false,githubMetadata=false;
  const variant=async(label,failActivation=false)=>{
   const output=path.join(directory,'release-'+label);
   await stageRelease({root:release,output,platforms:[process.platform+'-'+process.arch],helperSource:'bin',nodeBin:process.execPath});
@@ -101,7 +126,10 @@ export async function liveUpdateTest({release,herdr=process.env.HERDR_BIN_PATH??
    }
    console.log(JSON.stringify({stage:'isolatedServerSetup',session:name,status:'passed'}));
   }
-  installOptions={root:oldRelease,managedDir:path.join(directory,'managed'),herdrBin:herdr,session:servers[0].name,env:servers[0].env,inspectorOnly:true,shortcut:false,timeoutMs:30000};
+  // Herdr0.9.3 admits GitHub source metadata only for its exact legacy managed
+  // checkout namespace. Use that owned fixture path from the initial install.
+  const managedDir=path.join(configHome,'herdr','plugins','github',pluginId+'-'+digest(pluginId).slice(0,12));
+  installOptions={root:oldRelease,managedDir,herdrBin:herdr,session:servers[0].name,env:servers[0].env,inspectorOnly:true,shortcut:false,timeoutMs:30000};
   installed=await liveInstall(installOptions);
   const config=new StateStore(installed.configDir);
   for(const own of servers){
@@ -154,7 +182,7 @@ export async function liveUpdateTest({release,herdr=process.env.HERDR_BIN_PATH??
     if(active){assert.ok(controller);if(restarted)assert.notEqual(controller.pid,saved.controller.pid);}else assert.equal(controller,undefined);
     assert.equal(own.server.exitCode,null,'native named server stays running');
     for(const target of saved.targets){
-     assert.deepEqual(await own.preferences(target.native).read('preferences'),target.preferences,'exact target UI preferences retained');
+     assertPreferencesPreserved(await own.preferences(target.native).read('preferences'),target.preferences);
      assert.deepEqual(await own.preferences(target.native).read('panel-size'),target.size,'exact target width preference retained');
      const panel=await own.view(target.native);if(active&&target.width!==null){
       assert.ok(panel);assert.equal(snapshot.layouts.find(layout=>layout.tab_id===target.native.tab_id).panes.find(row=>row.pane_id===panel.pane_id).rect.width,target.width,'exact target layout width restored');
@@ -175,9 +203,9 @@ export async function liveUpdateTest({release,herdr=process.env.HERDR_BIN_PATH??
     for(const [key,text] of own.notes)assert.equal((await own.noteStore.load(key)).text,text,'private synthetic Notes retained');
    }
   };
-  const update=async(source,{moveShellFocusAfterReplace=false}={})=>{
+  const update=async(source,{moveShellFocusAfterReplace=false,revision,ref}={})=>{
    const info=(await servers[0].cli(['plugin','list','--plugin',pluginId,'--json'])).plugins[0];assert.ok(info);
-   let transaction=await prepareCodeReplacement({release:source,info,herdrBin:herdr,session:servers[0].name,env:servers[0].env,nodeBin:process.execPath});
+   let transaction=await prepareCodeReplacement({release:source,info,herdrBin:herdr,session:servers[0].name,env:servers[0].env,nodeBin:process.execPath,revision,ref});
    if(moveShellFocusAfterReplace){
     const prepared=transaction;
     transaction={...prepared,replace:async(...args)=>{
@@ -241,9 +269,17 @@ export async function liveUpdateTest({release,herdr=process.env.HERDR_BIN_PATH??
   await stage('platformInstallerRerunPreservesBothServers',async()=>{
    const before=await capture(),installerEnv={...servers[0].env};
    assert.equal(before.servers[0].focus.terminalId,servers[0].shell.terminal_id,'installer rerun starts with an ordinary shell focused');
+   let herdrDirectory=path.dirname(herdr);
+   if(process.platform==='win32'&&path.basename(herdr).toLowerCase()!=='herdr.exe'){
+    // CI's pinned asset has a release-specific filename. Give PowerShell the
+    // ordinary installation name without changing or replacing that asset.
+    herdrDirectory=path.join(directory,'prerequisites');await mkdir(herdrDirectory,{mode:0o700});
+    const executable=path.join(herdrDirectory,'herdr.exe');await copyFile(herdr,executable);
+    assert.equal(digest(await readFile(executable)),digest(await readFile(herdr)),'owned herdr.exe is the exact verified prerequisite');
+   }
    const originalPath=Object.entries(installerEnv).find(([key])=>key.toUpperCase()==='PATH')?.[1]??'';
    for(const key of Object.keys(installerEnv))if(key.toUpperCase()==='PATH')delete installerEnv[key];
-   installerEnv.PATH=[path.dirname(herdr),path.dirname(process.execPath),originalPath].join(path.delimiter);
+   installerEnv.PATH=[herdrDirectory,path.dirname(process.execPath),originalPath].join(path.delimiter);
    const binary=process.platform==='win32'?'powershell.exe':'/bin/sh';
    const args=process.platform==='win32'
     ?['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(newRelease,'scripts/install-windows.ps1'),'-SourceDir',newRelease,'-Session',servers[0].name]
@@ -252,6 +288,39 @@ export async function liveUpdateTest({release,herdr=process.env.HERDR_BIN_PATH??
    assert.match(output.stdout,/updated to/i,'the actual installer took its update branch');await verify(before);
    assert.equal(digest(await readFile(servers[0].recovery.path)),servers[0].recovery.sha256);
    return{entrypoint:process.platform==='win32'?'scripts/install-windows.ps1':'install.sh',actualInstallerUpdateBranch:true,noDownloadsOrSourceBuild:true,bothNamedServersRestored:true,ordinaryShellFocusRetained:true,exactNotesPreferencesWidthsAndFocusRetained:true};
+  });
+  await stage('githubSourceMetadataCliAndRpcUpdate',async()=>{
+   const original=await capture(),firstRevision='a'.repeat(40),nextRevision='b'.repeat(40);
+   const source={kind:'github',owner:'alexiob',repo:'herdr-prism',managed_path:installed.managedDir,requested_ref:'synthetic',resolved_commit:firstRevision,installed_unix_ms:1};
+   githubMetadata=true;
+   try{
+    for(const own of servers){
+     await own.rpc.call('plugin.link',{path:installed.managedDir,enabled:true,source});
+     const cliInfo=(await own.cli(['plugin','list','--plugin',pluginId,'--json'])).plugins[0];
+     const rawInfo=(await own.rpc.call('plugin.list',{plugin_id:pluginId})).plugins[0];
+     assert.deepEqual(cliInfo.source,rawInfo.source,'CLI and raw RPC return the same GitHub source facts');
+     assert.notEqual(JSON.stringify(cliInfo.source),JSON.stringify(rawInfo.source),'the fixture exercises actual CLI/RPC source property-order differences');
+     assert.equal(cliInfo.source.kind,'github');assert.equal(cliInfo.source.resolved_commit,firstRevision);
+     assert.equal((await own.store.read('controller')).pid,original.servers.find(saved=>saved.own===own).controller.pid,'metadata linking preserves the current collector');
+    }
+    await verify(original,{restarted:false});
+    const before=await capture();await update(newRelease,{revision:nextRevision,ref:'synthetic'});await verify(before);
+    for(const own of servers){
+     const info=(await own.cli(['plugin','list','--plugin',pluginId,'--json'])).plugins[0];
+     assert.equal(info.source.kind,'github');assert.equal(info.source.resolved_commit,nextRevision);assert.equal(info.source.requested_ref,'synthetic');assert.equal(info.source.managed_path,installed.managedDir);
+    }
+   }finally{
+    // GitHub source here is fixture metadata only. Restore local ownership
+    // before any native uninstall can interpret managed_path as removable code.
+    const restored=await capture();
+    for(const own of servers){
+     await own.rpc.call('plugin.link',{path:installed.managedDir,enabled:true,source:{kind:'local'}});
+     assert.equal((await own.cli(['plugin','list','--plugin',pluginId,'--json'])).plugins[0].source.kind,'local');
+     assert.equal((await own.store.read('controller')).pid,restored.servers.find(saved=>saved.own===own).controller.pid,'restoring local metadata does not restart the collector');
+    }
+    githubMetadata=false;await verify(restored,{restarted:false});
+   }
+   return{actualCliAndRawRpc:true,equalSourceWithDifferentSerializedKeyOrder:true,githubRevisionReplaced:true,twoServerRevisionPropagation:true,localMetadataRestoredWithoutRestart:true,noNetworkOrClone:true,notesWidthsPreferencesAndFocusRetained:true};
   });
   await stage('disabledUpdateStaysDisabled',async()=>{
    await servers[0].action('deactivate');await servers[0].cli(['plugin','disable',pluginId]);
@@ -274,7 +343,7 @@ export async function liveUpdateTest({release,herdr=process.env.HERDR_BIN_PATH??
   result.ok=true;success=true;await save();return result;
  }catch(error){result.error=error.stack??String(error);result.failure=[];for(const own of servers){try{result.failure.push({session:own.name,snapshot:await own.snapshot(),logs:(await own.cli(['plugin','log','list','--plugin',pluginId,'--limit','32'])).logs});}catch{}}await save();throw error;}
  finally{
-  if(installed){try{await servers[0].cli(['plugin','enable',pluginId]);const {liveUninstall}=await import(pathToFileURL(path.join(installed.managedDir,'scripts/live-install.mjs')).href);await liveUninstall(installOptions);}catch(error){result.cleanupError=String(error);await save();}}
+  if(installed){try{if(githubMetadata){for(const own of servers)await own.rpc.call('plugin.link',{path:installed.managedDir,enabled:true,source:{kind:'local'}});githubMetadata=false;}await servers[0].cli(['plugin','enable',pluginId]);const {liveUninstall}=await import(pathToFileURL(path.join(installed.managedDir,'scripts/live-install.mjs')).href);await liveUninstall(installOptions);}catch(error){result.cleanupError=String(error);await save();}}
   for(const own of servers){try{if(own.server.exitCode===null)await own.cli(['server','stop']);}catch{if(own.server.exitCode===null)own.server.kill();}
    if(own.server.exitCode===null)await new Promise(resolve=>{const timer=setTimeout(()=>{own.server.kill();resolve();},5000);own.server.once('exit',()=>{clearTimeout(timer);resolve();});});
    own.rpc.close();await own.log.close();

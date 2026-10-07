@@ -35,4 +35,4 @@
 - [x] Actual isolated acceptance: `scripts/live-update-test.mjs` and platform CI. Exercise managed update, independent views, synthetic Notes, focus and recovery on all CI platforms.
 - [x] Verify typecheck, full tests, build, macOS isolated installer/update and independent review.
 
-Local verification: 624 tests, 597 passed, 27 platform skips, no failures. Actual macOS two-server acceptance and the Node-absent-from-server-PATH installer rerun both pass. Integration and platform CI are tracked by the resulting Git commit and Verify platform release workflow.
+Local verification: 630 tests, 603 passed, 27 platform skips, no failures. Actual eight-stage macOS two-server acceptance, including GitHub source metadata, and the Node-absent-from-server-PATH installer rerun both pass. Integration and platform CI are tracked by the resulting Git commit and Verify platform release workflow.
