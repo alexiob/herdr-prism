@@ -62,7 +62,7 @@ export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH
   // Herdr0.9.3 uses Linux comm before unwrapping generic runtimes. Node24 names its
   // main thread MainThread, so a script basename alone is not a portable identity.
   // Name only this explicitly synthetic child; detection still observes the real process.
-  const fixtureCli=path.join(directory,'fixtures','pi');await mkdir(path.dirname(fixtureCli),{recursive:true});await writeFile(fixtureCli,"process.title='pi';console.log('SYNTHETIC FIXTURE ONLY; no model');process.stdin.resume();process.stdin.on('data',bytes=>{if(String(bytes).includes('FIXTURE_CPU_BURST')){const deadline=Date.now()+6000;const burn=setInterval(()=>{if(Date.now()>=deadline){clearInterval(burn);return;}const until=Date.now()+20;while(Date.now()<until){}},50);}});process.stdin.on('end',()=>process.exit(0));setInterval(()=>{},1000);\n");
+  const fixtureCli=path.join(directory,'fixtures','pi');await mkdir(path.dirname(fixtureCli),{recursive:true});await writeFile(fixtureCli,"process.title='pi';console.log('SYNTHETIC FIXTURE ONLY; no model');process.stdin.resume();process.stdin.on('data',bytes=>{if(String(bytes).includes('FIXTURE_CPU_BURST')){console.log('SYNTHETIC CPU BURST STARTED');const deadline=Date.now()+6000;const burn=setInterval(()=>{if(Date.now()>=deadline){clearInterval(burn);return;}const until=Date.now()+20;while(Date.now()<until){}},50);}});process.stdin.on('end',()=>process.exit(0));setInterval(()=>{},1000);\n");
   const fixtureDirectory=path.join(providerHomes.pi,'sessions','fixture-project');await mkdir(fixtureDirectory,{recursive:true});
   const fixture=async id=>{const file=path.join(fixtureDirectory,id+'.jsonl');await writeFile(file,[{type:'session',version:3,id,cwd:directory,timestamp:new Date().toISOString()},{type:'session_info',id:'info',name:id},{type:'message',id:id+'-first',timestamp:new Date().toISOString(),message:{role:'assistant',content:[{type:'text',text:'SYNTHETIC '+id+' FIRST MESSAGE'}],stopReason:'stop'}}].map(row=>JSON.stringify(row)+'\n').join(''));return file;};
   const alphaFile=await fixture('fixture-alpha'),betaFile=await fixture('fixture-beta');
@@ -103,7 +103,8 @@ export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH
    let hidden;
    // The hidden transcript remains paused while one shared host batch keeps
    // native Self+jobs CPU and cumulative RSS/WS current on every platform.
-   await cli(['pane','send-text',beta.pane_id,'FIXTURE_CPU_BURST\n']);
+   await cli(['pane','send-text',beta.pane_id,'FIXTURE_CPU_BURST'+(process.platform==='win32'?'\r':'\n')]);
+   await until('synthetic CPU burst input delivered',async()=>(await text(beta.pane_id)).includes('SYNTHETIC CPU BURST STARTED'));
    hidden=await until('hidden native Self+jobs CPU remains live',async()=>{
     const value=await pane(beta.pane_id);assert.equal(value.tokens?.[token('last')],before.tokens[token('last')],'hidden body must remain paused throughout the resource probe');
     const cpu=/^CPU ≥?([\d.,]+)%/.exec(value.tokens?.[token('load')]??'');
