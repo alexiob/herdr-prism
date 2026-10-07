@@ -376,7 +376,9 @@ The native card starts with status, a compact session name and the tab label.
 The next rows show CPU and RSS (Windows: WS), then machine, branch and colored
 Git changes. Memory uses human sizes such as `3.2kB` or `1.2GB`; values have at
 most one decimal. `~` marks a cached resource sample. Full names, branches,
-Goals and descendant counts remain in the right panel.
+Goals and descendant counts remain in the right panel. The final field on the
+machine/branch/Git row shows the harness (`codex`, `claude`, `pi`, etc.) in muted
+text.
 
 Blocked agents have a bold amber **INPUT REQUIRED** row. Idle agents show
 **WAITING FOR YOU** and completed agents **READY TO REVIEW**. These labels use

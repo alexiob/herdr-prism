@@ -4,7 +4,7 @@ import { serverIdPattern } from "../runtime/server.js";
 import { sanitize, truncate, number } from "../tui/text.js";
 export const pluginId = 'iob.herdr-prism';
 export const source = `plugin:${pluginId}`;
-const keys = ['hat_line', 'hat_goal', 'hat_load', 'hat_counts', 'hat_branch', 'hat_add', 'hat_del', 'hat_div', 'hat_conflict', 'hat_last', 'hat_rank', 'hat_index', 'hat_fresh', 'hat_group', 'hat_attention'];
+const keys = ['hat_line', 'hat_goal', 'hat_load', 'hat_counts', 'hat_branch', 'hat_add', 'hat_del', 'hat_div', 'hat_conflict', 'hat_last', 'hat_rank', 'hat_index', 'hat_fresh', 'hat_group', 'hat_attention', 'hat_harness'];
 export function compactBytes(value) { if (value === undefined)
     return '—'; try {
     let amount = Number(BigInt(value));
@@ -88,6 +88,7 @@ export class NativePublisher {
             previousGroup = groupKey;
             const state = typeof pane.agent_status === 'string' ? pane.agent_status : pane.agent_status?.state ?? pane.agent_status?.status ?? session.evidence.state;
             const tokens = {
+                hat_harness: truncate(pane.agent ?? session.evidence.provider, 16),
                 hat_line: truncate(String(pane.name ?? pane.terminal_title_stripped ?? pane.title_stripped ?? session.evidence.title ?? session.evidence.provider).split('|')[0].trim(), 16),
                 hat_goal: truncate(session.evidence.goals.at(-1)?.objective ? `Goal: ${session.evidence.goals.at(-1).objective}` : session.evidence.task ? `Task: ${session.evidence.task}` : '', 100),
                 hat_load: `${resource?.availability === 'stale' ? '~ ' : ''}CPU ${number(resource?.cpuPercent)}%  ${resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS'} ${compactBytes(resource?.memoryBytes)}`,

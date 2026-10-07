@@ -6,7 +6,7 @@ import { serverIdPattern } from '../runtime/server.ts';
 import { sanitize, truncate, number } from '../tui/text.ts';
 export const pluginId = 'iob.herdr-prism';
 export const source = `plugin:${pluginId}`;
-const keys = ['hat_line', 'hat_goal', 'hat_load', 'hat_counts', 'hat_branch', 'hat_add', 'hat_del', 'hat_div', 'hat_conflict', 'hat_last', 'hat_rank', 'hat_index', 'hat_fresh', 'hat_group','hat_attention'];
+const keys = ['hat_line', 'hat_goal', 'hat_load', 'hat_counts', 'hat_branch', 'hat_add', 'hat_del', 'hat_div', 'hat_conflict', 'hat_last', 'hat_rank', 'hat_index', 'hat_fresh', 'hat_group','hat_attention','hat_harness'];
 import type {NativeGrouping} from '../config/native-grouping.ts';
 export function compactBytes(value?:string):string {if(value===undefined)return '—';try{let amount=Number(BigInt(value));if(!Number.isFinite(amount)||amount<0)return '—';const units=['B','kB','MB','GB','TB','PB','EB'];let unit=0;while(amount>=1000&&unit<units.length-1){amount/=1000;unit++;}return `${Number(amount.toFixed(1))}${units[unit]}`;}catch{return '—';}}
 export interface Publication {
@@ -81,6 +81,7 @@ export class NativePublisher {
             const groupKey=group(session),groupLabel=groupKey&&groupKey!==previousGroup?(options.grouping==='tab'?`Tab: ${tabName(session)}`:`Project: ${path.basename(groupKey.replace(/\\/g,'/'))}`):'';previousGroup=groupKey;
             const state=typeof pane.agent_status==='string'?pane.agent_status:pane.agent_status?.state??pane.agent_status?.status??session.evidence.state;
             const tokens: Record<string, string> = {
+                hat_harness: truncate(pane.agent??session.evidence.provider,16),
                 hat_line: truncate(String(pane.name??pane.terminal_title_stripped??pane.title_stripped??session.evidence.title??session.evidence.provider).split('|')[0].trim(),16),
                 hat_goal: truncate(session.evidence.goals.at(-1)?.objective?`Goal: ${session.evidence.goals.at(-1)!.objective}`:session.evidence.task?`Task: ${session.evidence.task}`:'',100),
                 hat_load: `${resource?.availability==='stale'?'~ ':''}CPU ${number(resource?.cpuPercent)}%  ${resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS'} ${compactBytes(resource?.memoryBytes)}`,

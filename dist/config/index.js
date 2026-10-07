@@ -40,7 +40,7 @@ export function nativeRows(theme = 'dark') {
         [style('$hat_group', light ? '#155E75' : '#64D9E9', true, true)],
         [style('$hat_attention', light ? '#854D0E' : '#F2C66D', true, true)],
         [style('$hat_load', light ? '#202938' : '#D6DFE8')],
-        ['machine', style('$hat_branch', light ? '#5B317B' : '#C6AFE2'), style('$hat_add', light ? '#166534' : '#61C28A', true, true), style('$hat_del', light ? '#9F1239' : '#F18B96', true, true), style('$hat_conflict', light ? '#854D0E' : '#F2C66D', true, true)]];
+        ['machine', style('$hat_branch', light ? '#5B317B' : '#C6AFE2'), style('$hat_add', light ? '#166534' : '#61C28A', true, true), style('$hat_del', light ? '#9F1239' : '#F18B96', true, true), style('$hat_conflict', light ? '#854D0E' : '#F2C66D', true, true), style('$hat_harness', light ? '#5D6875' : '#92A0AF')]];
 }
 function inlineToml(value) { if (Array.isArray(value))
     return '[' + value.map(inlineToml).join(', ') + ']'; if (value && typeof value === 'object')
