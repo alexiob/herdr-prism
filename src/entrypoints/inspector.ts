@@ -13,7 +13,7 @@ import {ViewFailureReporter} from '../runtime/view-failure.ts';
 import {panelViewStore,waitForPanelRecord} from '../runtime/panel-views.ts';
 import { demoData } from '../runtime/demo.ts';
 import { HerdrClient } from '../herdr/client.ts';
-import { SnapshotCache } from '../herdr/subscription.ts';
+import type { HerdrSnapshot } from '../model/types.ts';
 import { StateStore } from '../state/store.ts';
 import { TerminalUi } from '../tui/terminal.ts';
 import { createUiState, renderScreen, handleKey, handleRowClick, handleRowWheel, showDetail, addMessagePage, addReferencePage, showReferenceSources } from '../tui/screen.ts';
@@ -55,7 +55,7 @@ export async function main(argv = process.argv.slice(2)) {
         if(['tab','shift+tab','ctrl+c'].includes(event.key)){await notes.end();return false;}
         state.notesFreeScroll=false;return notes.key(event.key,{columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});
     };
-    const paint = () => { syncBoundSelection();syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
+    const paint = () => { syncBoundSelection();syncVisibility();ui.requestPaint(() => { frame = renderScreen(data, state, ui.columns, ui.rows); return frame; }); };
     if (args.options.demo) {
         data = demoData();
         state.selectedKey = data.sessions[0]?.key;
@@ -92,9 +92,10 @@ export async function main(argv = process.argv.slice(2)) {
             const serverStore = new StateStore(context.serverStateDir);
             await serverStore.init();
             await serverStore.read<any>('preferences');
-            const cache = new SnapshotCache(rpc);
-            cleanup = async () => { ui.close(); cache.close(); rpc.close(); await lease?.release(); await admission.release(); };
-            startupPhase='snapshot-start';await cache.start();
+            startupPhase='snapshot-start';const initial=await rpc.call('session.snapshot');
+            const cache:{snapshot:HerdrSnapshot;stale:boolean}={snapshot:initial.snapshot??initial,stale:false};
+            if(!Array.isArray(cache.snapshot?.panes)||!Array.isArray(cache.snapshot?.agents))throw new Error('Invalid initial native snapshot');
+            cleanup = async () => { ui.close(); rpc.close(); await lease?.release(); await admission.release(); };
             startupPhase='pane-identity';
             let paneId = process.env.HERDR_PANE_ID;
             const current = paneId ? await rpc.call('pane.current', {caller_pane_id:paneId}) : undefined;
@@ -113,7 +114,7 @@ export async function main(argv = process.argv.slice(2)) {
             panelVisible=()=>!closing&&!cache.stale&&inspectorVisible(cache.snapshot,terminalId,paneId);
             syncVisibility = () => {
                 syncBoundSelection();
-                const visible=panelVisible();
+                const visible=panelVisible();ui.setVisible(!closing&&inspectorVisible(cache.snapshot,terminalId,paneId));
                 collector!.setVisibleSession(state.tab==='Notes'?resolveNotesSessionKey(state):state.selectedKey,visible);
                 collector!.setProcessesExpanded(visible&&state.tab==='Processes');
             };
@@ -128,15 +129,15 @@ export async function main(argv = process.argv.slice(2)) {
                 if(tabs.includes(preferences.tab))state.tab=preferences.tab;
             }
             const save=async()=>{await store.write('preferences',{selectedKey:state.selectedKey,pin:state.pin,tab:state.tab,collapsed:[...state.collapsed].slice(0,512),expanded:[...state.expanded].slice(0,512),readers:[...state.readers].slice(-64)});};
-            cleanup=async()=>{await notes?.close();ui.close();cache.close();try{await collector!.close();await save();}finally{rpc.close();await lease!.release();await admission.release();}};
+            cleanup=async()=>{await notes?.close();ui.close();try{await collector!.close();await save();}finally{rpc.close();await lease!.release();await admission.release();}};
             // The service owns its own admission check; do not hold a UI's gate
             // while waiting for its detached owner to start.
             await admission.release();
             syncBoundSelection=()=>{const binding=resolveInspectorBinding(data,tabId,targetTerminalId,state.boundSessionKey,{restoredSelection:typeof preferences?.selectedKey==='string'?preferences.selectedKey:undefined});state.boundSessionKey=binding.key;state.boundSessionPending=binding.pending;};
             try {
-                startupPhase='remote-start';await collector.start();data=collector.data;
+                startupPhase='remote-start';await collector.start();data=collector.data;cache.snapshot=collector.snapshot!;cache.stale=data.stale;
                 syncBoundSelection();reconcileInspectorSelection(data,state,state.boundSessionKey,true);
-                startupPhase='selected-poll';syncVisibility();await collector.refresh();data=collector.data;
+                startupPhase='selected-poll';syncVisibility();await collector.refresh();data=collector.data;cache.snapshot=collector.snapshot!;cache.stale=data.stale;
                 if(closing){await stop();return;}
                 if(args.options.once||!process.stdin.isTTY){if(!args.options.once)await recordFailure(new Error('Inspector standard input is not a TTY'),'interactive-tty');paint();await cleanup();return;}
                 startupPhase='notes-open';connectNotes(context.serverStateDir);await ensureNotes();startupPhase='ui-start';ui.start();
@@ -146,10 +147,10 @@ export async function main(argv = process.argv.slice(2)) {
                     const selectedKey=followSelection.observeLocal(snapshot,data,tabId,state.pin,targetTerminalId);
                     if(selectedKey){await notes?.end();if(selectedKey!==state.selectedKey)clearInspectionOverlays(state);state.selectedKey=selectedKey;await ensureNotes();paint();}
                 };
-                const queueFollow=()=>{inputQueue=inputQueue.then(async()=>{if(!closing){await ensureNotes();await follow();paint();}}).catch(error=>{state.notice=(error as Error).message;if(!closing)paint();});};
-                cache.on('snapshot', () => { syncVisibility(); collector!.invalidate(); queueFollow(); });
-                cache.on('stale', () => { collector!.setVisibleSession(state.selectedKey,false); data.stale = true; paint(); });
-                collector.on('data', (next: DashboardData) => { data = next;syncBoundSelection();if(!state.processConfirmation&&!state.notes?.editing)reconcileInspectorSelection(data,state,state.boundSessionKey);paint();queueFollow(); });
+                const queueFollow=()=>{inputQueue=inputQueue.then(async()=>{if(!closing){await ensureNotes();await follow();}}).catch(error=>{state.notice=(error as Error).message;if(!closing)paint();});};
+                collector.on('snapshot', (snapshot:HerdrSnapshot) => { const wasVisible=inspectorVisible(cache.snapshot,terminalId,paneId);cache.snapshot=snapshot;cache.stale=collector!.data.stale;syncVisibility();queueFollow();if(!wasVisible&&inspectorVisible(snapshot,terminalId,paneId))paint(); });
+                collector.on('stale', () => { cache.stale=true; collector!.setVisibleSession(state.selectedKey,false); data.stale = true; paint(); });
+                collector.on('data', (next: DashboardData) => { data = next;cache.stale=next.stale;syncBoundSelection();if(!state.processConfirmation&&!state.notes?.editing)reconcileInspectorSelection(data,state,state.boundSessionKey);paint();queueFollow(); });
                 collector.on('diagnostic', (message: string) => { state.notice = message; paint(); });
                 collector.once('disconnected',(error:Error)=>{inputQueue=inputQueue.then(async()=>{await recordFailure(error,'poll-disconnect');await stop();});});
                 ui.on('resize',paint);

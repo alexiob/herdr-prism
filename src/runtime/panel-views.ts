@@ -46,8 +46,8 @@ export class PanelViews {
  }
  /** Only a changed split ratio at the same region width is a user pane resize.
   * Client/window and outer-layout resizes must not overwrite the saved desired width. */
- async observeWidths(snapshot:any){
-  const records=await this.records(),live=new Set(records.filter(r=>r.open).map(r=>r.terminalId));
+ async observeWidths(snapshot:any,providedRecords?:PanelRecord[]){
+  const records=providedRecords??await this.records(),live=new Set(records.filter(r=>r.open).map(r=>r.terminalId));
   for(const terminal of this.widths.keys())if(!live.has(terminal))this.widths.delete(terminal);
   for(const record of records.filter(r=>r.open&&r.targetTerminalId)){
    const geometry=this.geometry(snapshot,record);if(!geometry)continue;
@@ -121,5 +121,5 @@ export class PanelViews {
  }
  async captureWidths(){const response=await this.rpc.call('session.snapshot');await this.observeWidths(response.snapshot??response);}
  async closed(terminalId:string){await this.captureWidths();const rows=await this.records();const row=rows.find(r=>r.terminalId===terminalId);if(row){row.open=false;row.ready=false;await this.store.write('views',rows);}}
- async reconcile(){const rows=await this.records(),response=await this.rpc.call('session.snapshot'),panes=(response.snapshot??response).panes;let changed=false;for(const row of rows)if(row.open&&!panes.some((p:any)=>p.terminal_id===row.terminalId)){row.open=false;row.ready=false;changed=true;}if(changed)await this.store.write('views',rows);}
+ async reconcile(snapshot?:any,providedRecords?:PanelRecord[]){const rows=providedRecords??await this.records(),response=snapshot??await this.rpc.call('session.snapshot'),panes=(response.snapshot??response).panes;let changed=false;for(const row of rows)if(row.open&&!panes.some((p:any)=>p.terminal_id===row.terminalId)){row.open=false;row.ready=false;changed=true;}if(changed)await this.store.write('views',rows);}
 }

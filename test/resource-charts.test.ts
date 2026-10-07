@@ -133,3 +133,21 @@ test('partial CPU retains an explicit measured lower bound in current values and
  assert.match(row.value!,/≥124.5%/);assert.ok(/[▁▂▃▄▅▆▇█]/.test(row.value!));assert.match(row.help!,/lower bound/);
  const doc=row.document!,fields=doc.sections.flatMap(section=>section.fields??[]);assert.equal(fields.find(field=>field.label==='Current')!.value,'≥124.5%');assert.ok(fields.some(field=>field.label==='Partial samples'&&field.value==='2'));
 });
+test('overview charts fill their allocated panel width and adapt across single- and two-column resizing',()=>{
+ const root=sampled(300),state=createUiState();state.selectedKey=root.key;const data={sessions:[root],updatedAt:300000,stale:false,diagnostics:[]};
+ for(const width of [60,110,140,60]){
+  const frame=renderScreen(data,state,width,42,300000),panel=frame.sectionRegions!.find(p=>p.id==='Resources')!;
+  const lines=['CPU','RSS sum'].map(label=>frame.lines.find(line=>line.includes(label)&&/[▁▂▃▄▅▆▇█]/.test(line))!.slice(panel.x-1,panel.x-1+panel.width));
+  const starts=lines.map(line=>line.search(/[▁▂▃▄▅▆▇█]/));assert.equal(starts[0],starts[1]);
+  for(const line of lines){const last=[...line].map((c,i)=>/[▁▂▃▄▅▆▇█]/.test(c)?i:-1).filter(i=>i>=0).at(-1)!;assert.equal(last,panel.width-5,`chart must reach the right action gutter at width ${width}`);assert.equal(line.length,panel.width);}
+ }
+});
+
+test('resource detail history fills its field width when the panel is resized',()=>{
+ const root=sampled(300),state=createUiState();state.selectedKey=root.key;state.detail='Resource facts';state.detailDocument=resourceDocument(root,'cpu',state,300000);const data={sessions:[root],updatedAt:300000,stale:false,diagnostics:[]};
+ for(const width of [60,110,140]){const frame=renderScreen(data,state,width,60,300000),panel=frame.sectionRegions!.find(p=>p.id==='cpu')!;const line=frame.lines.find(l=>l.includes('History')&&/[▁▂▃▄▅▆▇█]/.test(l))!.slice(panel.x-1,panel.x-1+panel.width);const bars=[...line].map((c,i)=>/[▁▂▃▄▅▆▇█]/.test(c)?i:-1).filter(i=>i>=0);assert.equal(bars.at(-1),panel.width-3);}
+});
+test('chart scale retains the observed peak even when narrow columns coalesce its spike',()=>{
+ const root=session();root.history={windowMs:60000,points:[{at:0},{at:1},{at:2},{at:30000}],cpu:[0,500,1,1],memory:['0','5000','1','1']};
+ const fields=resourceDocument(root,'cpu',createUiState(),30000).sections[0]!.fields!;assert.equal(fields.find(f=>f.label==='Scale')!.value,'0–500%');
+});

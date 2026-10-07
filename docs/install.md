@@ -222,6 +222,54 @@ explicit actions; it never claims that vanilla Herdr uninstall performs cleanup.
 These boundaries come from the [official pinned plugin documentation](https://github.com/herdrdev/herdr/blob/3d9d2b18dab139ba226ebc5a1c9a9f2c9c3ee4df/docs/next/website/src/content/docs/plugins.mdx)
 and [the tested 0.9.3 CLI implementation](https://github.com/herdrdev/herdr/blob/v0.9.3/src/cli/plugin.rs).
 
+## Installer option reference
+
+The bootstrap commands install or update; the low-level live wrapper creates a
+first managed copy or completely removes it. Updates preserve the existing
+mode and shortcut choice, so inspector-only flags apply to a first installation.
+
+| Unix `install.sh` option | Effect |
+| --- | --- |
+| `--ref REF` | Install the requested tag, branch or commit; default `main`. Downloads resolve to an immutable commit. |
+| `--session NAME` | Select a named local Herdr server. |
+| `--inspector-only` | First install: coexist without native sidebar ownership. |
+| `--prepare-only` | Set up dependencies without installing/starting Prism. |
+| `--no-start` | Require the selected Herdr server already to be running. |
+| `--node-bin PATH` | Use the specified compatible Node executable. |
+| `--herdr-bin PATH` | Use the specified Herdr executable. |
+| `--source-dir PATH` | Stage reviewed local compiled source instead of downloading source. |
+| `--help`, `-h` | Print bootstrap help. |
+
+| Windows PowerShell option | Effect |
+| --- | --- |
+| `-Ref REF` | Select the source revision; default `main`. |
+| `-Session NAME` | Select a named local running Herdr server. |
+| `-InspectorOnly` | First install: retain native sidebar ownership elsewhere. |
+| `-SourceDir PATH` | Use reviewed local compiled source. |
+| `-PrepareOnly` | Set up prerequisites without installing/updating Prism. |
+| `-Uninstall` | Deactivate and unregister using the Windows removal workflow. Retains plugin preferences/state; use managed complete removal to purge private data. |
+| `-Yes` | Accepted compatibility switch; invocation authorizes the requested install/update. |
+
+PowerShell resolves `herdr.exe` and a compatible Node from PATH; it installs Node
+when needed but does not install Herdr or start its server. Save the script to
+pass these options. Standard PowerShell common parameters, such as `-Verbose`,
+are supplied by PowerShell rather than Prism.
+
+| `node scripts/live-install.mjs` option | Effect |
+| --- | --- |
+| `install --root DIR` | Verify the source release and create/activate a new managed copy. |
+| `uninstall` | Complete owned removal using the managed copy's receipt. |
+| `--managed-dir DIR` | Install destination or explicit removal target; an install destination must not exist. |
+| `--own-native` | Explicit alias for default reversible native ownership. |
+| `--inspector-only` | Coexist without native takeover; mutually exclusive with `--own-native`. |
+| `--herdr-bin PATH` | Select the Herdr executable. |
+| `--session NAME` | Select a named server. |
+| `--timeout-ms N` | Bound lifecycle readiness/action waits; default 30000 ms. |
+
+For settings defaults, live reload, every action and advanced compiled entrypoint,
+see [configuration](configuration.md). For interaction and provider-specific
+limitations, see [dashboard controls](controls.md).
+
 ## Prerequisites
 
 - Node.js **22.13.0 or newer** and a running Herdr session with the protocol-22
@@ -343,6 +391,10 @@ installation and removal.
 
 ## Preferences and optional companion
 
+The complete [settings and action reference](configuration.md) lists all defaults,
+accepted values, reload behavior and direct-entrypoint options. The
+[controls guide](controls.md) lists keyboard/mouse behavior and every view.
+
 `settings.json` in `HERDR_PLUGIN_CONFIG_DIR` holds validated preferences. Defaults
 include a 2000 ms sample interval, follow enabled, Unicode/color enabled, and
 ACTION To-do parsing enabled on Windows, macOS and Linux. `nativeMode` accepts `overview`, `inspector-only`
@@ -427,6 +479,17 @@ requires both macOS architectures and Windows x64 artifacts with matching checks
 and Rust notices. Staging does not compile/download or overwrite existing output.
 A GitHub source installation must already contain reviewed compiled release files;
 Herdr's build hook only checks prerequisites. Linking does not build source.
+
+Development/distribution option reference:
+
+| Command | Options |
+| --- | --- |
+| `node scripts/release.mjs` | `--output DIR` is required and must not exist; `--root DIR` selects the source (default repository root); repeat `--platform TARGET` to choose targets, or use `all` (default host platform/architecture); `--node-bin ABSOLUTE_PATH` binds manifest commands to that reviewed runtime. |
+| `node scripts/check-install.mjs` | `--root DIR` selects the installation (default plugin root); `--platform darwin\|linux\|win32` and `--arch arm64\|x64` select the target to inspect (default current process). Cross-platform inspection verifies files/checksums, not execution on that host. |
+
+The Unix/Windows bootstrap helper modules and update recovery modules are called
+by their platform installers; use the installer option reference rather than
+invoking internal update transactions directly.
 
 For an update that retains private data and panel state, use the platform installer
 with the new reviewed source/revision. Its lifecycle stops the old code before

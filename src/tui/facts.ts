@@ -57,15 +57,19 @@ ACTION parsing is enabled by default. Prism's settings.json has a top-level todo
 export function historyValues(session:SessionView,kind:'cpu'|'memory',width:number,now:number):(number|undefined)[]{
  return resourceChart(session.history,kind,width,now).values;
 }
-function resourceHistory(session:SessionView,kind:'cpu'|'memory',width:number,ascii:boolean,now:number){
+function resourcePlot(session:SessionView,kind:'cpu'|'memory',width:number,ascii:boolean,now:number){
  const data=resourceChart(session.history,kind,width,now),values=data.values,valid=values.filter((value):value is number=>value!==undefined);
- const peak=valid.length?Math.max(...valid):undefined;
+ const peak=data.peak;
  // CPU uses one logical core as the minimum full scale. Memory is a byte
  // trend against the observed chart peak, never a percentage of host RAM.
  const ceiling=peak===undefined?undefined:kind==='cpu'?Math.max(100,Math.ceil(peak/100)*100):Math.max(1,peak);
- const period=data.period,chart=!valid.length&&data.measuredCount?'sampling gaps':spark(values,width,ascii,ceiling);
+ const chart=!valid.length&&data.measuredCount?'sampling gaps':spark(values,width,ascii,ceiling);
+ return {data,chart,ceiling};
+}
+function resourceHistory(session:SessionView,kind:'cpu'|'memory',width:number,ascii:boolean,now:number):{chart:string;fields:DetailField[]}{
+ const {data,chart,ceiling}=resourcePlot(session,kind,width,ascii,now),period=data.period,values=data.values;
  return {chart,fields:[
-  field('History',chart,'quantity'),
+  {...field('History',chart,'quantity'),valueForWidth:(width:number)=>resourcePlot(session,kind,width,ascii,now).chart},
   field('Period',period?`${duration(period.to-period.from)} observed · ending ${iso(period.to)}`:values.length?`Recent ${values.length} samples · timestamps unavailable`:'No recorded samples','duration'),
   field('Last measured',iso(data.latestMeasuredAt),'duration'),
   field('Measured samples',data.measuredCount,'quantity'),
@@ -135,7 +139,9 @@ export function overviewRows(session:SessionView,state:UiState,now:number,data:D
  }else{
  const cpuValue=aggregateCpu(session),memoryValue=resident(r?.memoryBytes),metricWidth=Math.max(8,cellWidth(cpuValue),cellWidth(memoryValue));
  add('cpu','CPU',`${pad(cpuValue,metricWidth)} ${resourceHistory(session,'cpu',8,state.ascii,now).chart}`,resourceDocument(session,'cpu',state,now),'Resources',0,'quantity');
+ rows.at(-1)!.valueForWidth=width=>pad(cpuValue,metricWidth)+(width>metricWidth+1?' '+resourcePlot(session,'cpu',Math.max(0,width-metricWidth-1),state.ascii,now).chart:'');
  add('memory',r?.memoryLabel==='working-set sum'?'WS sum':'RSS sum',`${pad(memoryValue,metricWidth)} ${resourceHistory(session,'memory',8,state.ascii,now).chart}`,resourceDocument(session,'memory',state,now),'Resources',0,'quantity');
+ rows.at(-1)!.valueForWidth=width=>pad(memoryValue,metricWidth)+(width>metricWidth+1?' '+resourcePlot(session,'memory',Math.max(0,width-metricWidth-1),state.ascii,now).chart:'');
  link('coverage','Processes',r?.coverage?`${r.coverage.readable}/${r.coverage.total} readable`:'—','Processes','Resources',0);
  }
  add('context','Context',u?.contextPercent===undefined?'—':percent(u.contextPercent)+' '+meter(u.contextPercent,8,state.ascii),usageDocument(session,now),'Usage',0,'quantity');

@@ -181,25 +181,33 @@ export async function liveUpdateTest({release,herdr=process.env.HERDR_BIN_PATH??
     const snapshot=await own.snapshot(),controller=await own.store.read('controller');
     if(active){assert.ok(controller);if(restarted)assert.notEqual(controller.pid,saved.controller.pid);}else assert.equal(controller,undefined);
     assert.equal(own.server.exitCode,null,'native named server stays running');
+    const assertFocus=async()=>{
+     const current=await own.snapshot(),focused=current.panes.find(pane=>pane.pane_id===current.focused_pane_id);assert.ok(focused);
+     assert.equal(focused.tab_id,saved.focus.tabId,'exact captured tab focus retained');
+     if(saved.focus.type==='native'){assert.equal(focused.pane_id,saved.focus.paneId);assert.equal(focused.terminal_id,saved.focus.terminalId);}else{const rows=await own.store.read('views'),view=rows.find(row=>row.terminalId===focused.terminal_id);assert.equal(view?.targetTerminalId,saved.focus.targetTerminalId);}
+    };
+    // Prove the updater's restoration before visiting any fixture reader.
+    await assertFocus();
     for(const target of saved.targets){
      assertPreferencesPreserved(await own.preferences(target.native).read('preferences'),target.preferences);
      assert.deepEqual(await own.preferences(target.native).read('panel-size'),target.size,'exact target width preference retained');
      const panel=await own.view(target.native);if(active&&target.width!==null){
       assert.ok(panel);assert.equal(snapshot.layouts.find(layout=>layout.tab_id===target.native.tab_id).panes.find(row=>row.pane_id===panel.pane_id).rect.width,target.width,'exact target layout width restored');
-      // When an ordinary shell tab is focused, every Prism view on that server
-      // is hidden and deliberately pauses provider hydration and body reads.
-      // Certify visible readers without disturbing the focus being tested.
-      if(target.native.tab_id===snapshot.focused_tab_id){
-       await until('visible restored panel displays its exact owner',async()=>(await own.text(panel.pane_id)).includes(target.native.key.slice(3)));
-       if(target.preferences?.tab==='Notes'){
-        const marker=own.notes.get(target.native.key).startsWith('SYNTHETIC external')?'SYNTHETIC external authoritative':'Synthetic update notebook';
-        await until('visible restored Notes show their owner notebook',async()=>(await own.text(panel.pane_id)).includes(marker));
-       }
+      // Hidden readers deliberately suspend painting. Visit this fixture's
+      // own panel to certify fresh owner and notebook output, then restore
+      // the exact captured focus after all reader checks.
+      await own.rpc.call('pane.focus',{pane_id:panel.pane_id});
+      assert.equal((await own.snapshot()).focused_tab_id,target.native.tab_id);
+      await until('visible restored panel displays its exact owner',async()=>(await own.text(panel.pane_id)).includes(target.native.key.slice(3)));
+      if(target.preferences?.tab==='Notes'){
+       const marker=own.notes.get(target.native.key).startsWith('SYNTHETIC external')?'SYNTHETIC external authoritative':'Synthetic update notebook';
+       await until('visible restored Notes show their owner notebook',async()=>(await own.text(panel.pane_id)).includes(marker));
       }
      }else assert.equal(panel,undefined);
     }
-    const focused=snapshot.panes.find(pane=>pane.pane_id===snapshot.focused_pane_id);assert.ok(focused);
-    if(saved.focus.type==='native'){assert.equal(focused.pane_id,saved.focus.paneId);assert.equal(focused.terminal_id,saved.focus.terminalId);}else{const rows=await own.store.read('views'),view=rows.find(row=>row.terminalId===focused.terminal_id);assert.equal(view?.targetTerminalId,saved.focus.targetTerminalId);assert.equal(focused.tab_id,saved.focus.tabId);}
+    const restoredView=(await own.store.read('views')).find(row=>row.open&&row.tabId===saved.focus.tabId&&row.targetTerminalId===saved.focus.targetTerminalId);
+    const restorePane=saved.focus.type==='native'?saved.focus.paneId:(await own.snapshot()).panes.find(pane=>pane.terminal_id===restoredView?.terminalId)?.pane_id;
+    assert.ok(restorePane);await own.rpc.call('pane.focus',{pane_id:restorePane});await assertFocus();
     for(const [key,text] of own.notes)assert.equal((await own.noteStore.load(key)).text,text,'private synthetic Notes retained');
    }
   };
@@ -227,15 +235,19 @@ export async function liveUpdateTest({release,herdr=process.env.HERDR_BIN_PATH??
   });
   await stage('updateFlushesEditorDraftAndRetainsState',async()=>{
    const own=servers[0],native=own.natives[0],panel=await own.view(native);
+   await own.rpc.call('pane.focus',{pane_id:panel.pane_id});
+   await until('actual Notes reader visible before editing',async()=>{const text=await own.text(panel.pane_id);return(await own.snapshot()).focused_pane_id===panel.pane_id&&text.includes(native.key.slice(3))&&text.includes('Notes');});
    await own.cli(['pane','send-text',panel.pane_id,'\r']);await until('actual Notes editor active',async()=>(await own.text(panel.pane_id)).includes('Editing'));
    const note=(await own.noteStore.load(native.key)),external='SYNTHETIC external authoritative notebook\n';await writeFile(note.path,external,{mode:0o600});own.notes.set(native.key,external);
    await own.cli(['pane','send-text',panel.pane_id,'\x1b[200~SYNTHETIC unsaved update draft\x1b[201~']);
+   await own.rpc.call('pane.focus',{pane_id:own.natives[2].pane_id});
+   assert.equal((await own.snapshot()).focused_pane_id,own.natives[2].pane_id);assert.notEqual((await own.snapshot()).focused_tab_id,native.tab_id,'edited Notes panel is hidden before update');
    const before=await capture();await update(newRelease);await verify(before);
    assert.equal(JSON.parse(await readFile(path.join(installed.managedDir,'dist/update-fixture.json'),'utf8')).revision,'new');
    const files=(await readdir(path.dirname(note.path))).filter(name=>/^recovery-.*\.md$/.test(name));assert.equal(files.length,1);
    const draft=await readFile(path.join(path.dirname(note.path),files[0]),'utf8');assert.ok(draft.includes('SYNTHETIC unsaved update draft'));
    own.recovery={path:path.join(path.dirname(note.path),files[0]),bytes:Buffer.byteLength(draft),sha256:digest(draft)};
-   return{realCodeReplacement:true,editorDraftRecovered:true,externalNotePreserved:true,draft:{bytes:own.recovery.bytes,sha256:own.recovery.sha256},privateNotesRetained:true,restoredOwnerHeaders:true,visibleNotesReadback:true,exactPreferencesAndWidths:true,openAndClosedViewsRetained:true,nativeAndPluginFocusRestored:true,serversNotRestarted:true};
+   return{realCodeReplacement:true,editorDraftRecovered:true,hiddenEditorDraftFlushed:true,externalNotePreserved:true,draft:{bytes:own.recovery.bytes,sha256:own.recovery.sha256},privateNotesRetained:true,restoredOwnerHeaders:true,visibleNotesReadback:true,exactPreferencesAndWidths:true,openAndClosedViewsRetained:true,nativeAndPluginFocusRestored:true,serversNotRestarted:true};
   });
   await stage('repeatedUpdatePreservesNativeMode',async()=>{
    for(const own of servers)await own.action('activate-overview');

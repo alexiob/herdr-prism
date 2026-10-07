@@ -38,7 +38,7 @@ test('output broker requires its registered visible view and forwards the caller
  await store.write('views',[{tabId:'tab',paneId:'prism-a',terminalId:'view-a',open:true},{tabId:'tab',paneId:'prism-b',terminalId:'view-b',open:true}]);
  let panes:any[]=[{pane_id:'prism-a',terminal_id:'view-a',tab_id:'tab'},{pane_id:'prism-b',terminal_id:'view-b',tab_id:'tab'}],scopes:boolean[]=[];
  const collector={data:{sessions:[]},setVisibleSelections(){},dataForView(){return this.data;},async processOutput(_session:any,_target:any,guard:any,subtree:boolean){await guard();scopes.push(subtree);return{availability:'known'};}};
- const rpc={call:async()=>({snapshot:{panes,focused_tab_id:'tab'}})},host=new CollectorHost(collector as any,store,rpc as any),params={session:'session',processTarget:{key:'key',owner:'session'}};
+ const rpc={call:async()=>({snapshot:{agents:[],panes,focused_tab_id:'tab'}})},host=new CollectorHost(collector as any,store,rpc as any),params={session:'session',processTarget:{key:'key',owner:'session'}};
  await assert.rejects(host.request('process-output',{...params,terminalId:'view-a'}));
  for(const [terminalId,subtree]of [['view-a',false],['view-b',true]] as const)await host.request('view.poll',{terminalId,key:'session',visible:true,subtree,expanded:true});
  await host.request('process-output',{...params,terminalId:'view-a'});await host.request('process-output',{...params,terminalId:'view-b'});assert.deepEqual(scopes,[false,true]);

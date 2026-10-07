@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { open } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { StateStore, processIsAbsent } from "../state/store.js";
 import { MailboxClient, MailboxServer } from "../state/mailbox.js";
 import { restrict, securePluginNamespace } from "../config/safe-file.js";
@@ -13,7 +13,16 @@ import { Collector } from "./collector.js";
 import { PanelViews } from "./panel-views.js";
 import { inspectorVisible, localSelection } from "./follow.js";
 import { HerdrClient } from "../herdr/client.js";
+import { SnapshotCache } from "../herdr/subscription.js";
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+/** An accent belongs to the focused, registered panel's live native owner. */
+export function focusedPanelOwner(records, snapshot) {
+    const record = records.find(r => r.open && r.ready === true && Number.isSafeInteger(r.pid) && r.pid > 0 && !processIsAbsent(r.pid) && snapshot.focused_tab_id === r.tabId && snapshot.focused_pane_id === r.paneId && snapshot.panes.some(p => p.pane_id === r.paneId && p.terminal_id === r.terminalId && p.tab_id === r.tabId));
+    if (!record)
+        return;
+    const target = snapshot.agents.find(a => a.terminal_id === record.targetTerminalId && a.tab_id === record.tabId);
+    return target && snapshot.panes.some(p => p.pane_id === target.pane_id && p.terminal_id === target.terminal_id && p.tab_id === record.tabId) ? target.terminal_id : undefined;
+}
 /** A single lease owns sampling; views only supply bounded visibility and input. */
 export class CollectorHost {
     views;
@@ -21,27 +30,73 @@ export class CollectorHost {
     rpc;
     visibility = new Map();
     queue = Promise.resolve();
+    snapshot;
+    snapshotAt = -Infinity;
+    snapshotHash = '';
+    snapshotRevision = 0;
+    records;
+    ownerTerminalId;
     constructor(collector, store, rpc) { this.collector = collector; this.rpc = rpc; this.views = new PanelViews(store, rpc); }
-    async updateVisibility() {
-        const response = await this.rpc.call('session.snapshot'), snapshot = response.snapshot ?? response;
-        await this.views.observeWidths(snapshot);
-        const records = await this.views.records();
+    async inventory(force = false) {
+        if (force || !this.snapshot || Date.now() - this.snapshotAt >= 1000) {
+            const response = await this.rpc.call('session.snapshot'), snapshot = response.snapshot ?? response;
+            if (!snapshot || !Array.isArray(snapshot.panes) || !Array.isArray(snapshot.agents))
+                throw new Error('Invalid authoritative visibility snapshot');
+            this.snapshot = snapshot;
+            this.snapshotAt = Date.now();
+            const hash = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+            if (hash !== this.snapshotHash) {
+                this.snapshotHash = hash;
+                this.snapshotRevision++;
+            }
+            this.records = await this.views.records();
+            this.ownerTerminalId = focusedPanelOwner(this.records, snapshot);
+        }
+        return { snapshot: this.snapshot, records: this.records };
+    }
+    async updateVisibility(force = false) {
+        const { snapshot, records } = await this.inventory(force);
+        await this.views.observeWidths(snapshot, records);
         const live = new Set(records.filter(r => r.open).map(r => r.terminalId));
         for (const terminal of this.visibility.keys())
             if (!live.has(terminal))
                 this.visibility.delete(terminal);
         const visible = records.filter(r => r.open).flatMap(record => { const state = this.visibility.get(record.terminalId); return state?.visible && inspectorVisible(snapshot, record.terminalId, record.paneId) ? [{ key: state.key, subtree: state.subtree, expanded: state.expanded }] : []; });
         this.collector.setVisibleSelections(visible);
+        this.collector.setFocusedOwnerTerminalId?.(this.ownerTerminalId);
     }
     request(op, p = {}) { const result = this.queue.then(() => this.dispatch(op, p)); this.queue = result.catch(() => { }); return result; }
     async dispatch(op, p = {}) {
+        if (op === 'native-snapshot') {
+            const snapshot = p.snapshot;
+            if (!snapshot || !Array.isArray(snapshot.panes) || !Array.isArray(snapshot.agents))
+                throw new Error('Invalid authoritative visibility snapshot');
+            this.snapshot = snapshot;
+            this.snapshotAt = Date.now();
+            const hash = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+            if (hash !== this.snapshotHash) {
+                this.snapshotHash = hash;
+                this.snapshotRevision++;
+            }
+            this.records = await this.views.records();
+            this.ownerTerminalId = focusedPanelOwner(this.records, snapshot);
+            await this.updateVisibility();
+            return { observed: true };
+        }
         if (op === 'maintenance') {
-            await this.views.reconcile();
+            const { snapshot, records } = await this.inventory(true);
+            await this.views.reconcile(snapshot, records);
             await this.updateVisibility();
             return { alive: true };
         }
-        if (op === 'open-view')
-            return this.views.open(p.targetPaneId);
+        if (op === 'open-view') {
+            try {
+                return await this.views.open(p.targetPaneId);
+            }
+            finally {
+                this.snapshotAt = -Infinity;
+            }
+        }
         if (op === 'views')
             return this.views.records();
         if (op === 'view.inspect') {
@@ -52,25 +107,32 @@ export class CollectorHost {
             const session = state?.key ? this.collector.dataForView(state.key, state.subtree).sessions.find(value => value.key === state.key) : undefined, resource = session?.resource, history = session?.history;
             return { record: { tabId: record.tabId, paneId: record.paneId, terminalId: record.terminalId, targetTerminalId: record.targetTerminalId, open: record.open }, key: state?.key, boundSessionKey: localSelection(this.collector.data, record.tabId, snapshot, record.targetTerminalId), subtree: state?.subtree ?? false, reportedVisible: state?.visible === true, actualVisible: record.open && inspectorVisible(snapshot, record.terminalId, record.paneId), selected: session ? { provider: session.evidence.provider, state: session.evidence.state, attachmentCount: (session.attachments ?? (session.attachment ? [session.attachment] : [])).length, resource: resource ? { availability: resource.availability, reason: resource.reason, cpuPercent: resource.cpuPercent, memoryBytes: resource.memoryBytes, processCount: resource.processes.length, readable: resource.coverage.readable, total: resource.coverage.total, cpuReadable: resource.cpuCoverage.readable, sampledAt: resource.sampledAt } : undefined, history: history ? { pointCount: history.points?.length ?? Math.max(history.cpu.length, history.memory.length), knownCpuPoints: history.cpu.filter(value => value !== undefined).length, knownMemoryPoints: history.memory.filter(value => value !== undefined).length, peakMemoryBytes: history.peakMemoryBytes, observedFrom: history.observedFrom, observedTo: history.observedTo, windowMs: history.windowMs } : undefined } : undefined };
         }
-        if (op === 'view.register')
-            return this.views.register(p.paneId, p.terminalId, p.pid);
-        if (op === 'view.ready')
-            return this.views.ready(p.paneId, p.terminalId, p.pid);
+        if (op === 'view.register' || op === 'view.ready') {
+            try {
+                return op === 'view.register' ? await this.views.register(p.paneId, p.terminalId, p.pid) : await this.views.ready(p.paneId, p.terminalId, p.pid);
+            }
+            finally {
+                this.snapshotAt = -Infinity;
+            }
+        }
         if (op === 'view.closed') {
             await this.views.closed(p.terminalId);
             this.visibility.delete(p.terminalId);
-            await this.updateVisibility();
+            await this.updateVisibility(true);
             return { closed: true };
         }
         if (op === 'view.poll') {
-            const record = (await this.views.records()).find(r => r.terminalId === p.terminalId && r.open);
+            const { records } = await this.inventory(p.forceSnapshot === true);
+            const record = records.find(r => r.terminalId === p.terminalId && r.open);
             if (!record)
                 throw new Error('Unowned or closed view');
             if (p.key !== undefined && typeof p.key !== 'string' || typeof p.visible !== 'boolean' || typeof p.subtree !== 'boolean' || typeof p.expanded !== 'boolean')
                 throw new Error('Invalid view visibility');
             this.visibility.set(record.terminalId, { key: p.key, visible: p.visible, subtree: p.subtree, expanded: p.expanded });
             await this.updateVisibility();
-            return { data: this.collector.dataForView(p.key, p.subtree), displayedSessionKey: p.key };
+            const revision = JSON.stringify([this.collector.revision, p.key, p.subtree, p.expanded, p.visible]);
+            const unchanged = p.revision === revision || p.visible === false && typeof p.revision === 'string';
+            return { revision, stale: this.collector.data.stale === true, snapshotRevision: this.snapshotRevision, ...p.snapshotRevision !== this.snapshotRevision ? { snapshot: this.snapshot } : {}, ...unchanged ? { unchanged: true } : { data: this.collector.dataForView(p.key, p.subtree) }, displayedSessionKey: p.key };
         }
         if (op === 'refresh') {
             await this.views.reconcile();
@@ -140,15 +202,16 @@ export class CollectorHost {
 export async function runCollectorService(options = {}) {
     const context = await serviceContext(options), admission = await acquireAdmission(context.stateDir), store = new StateStore(context.serverStateDir);
     const rpc = new HerdrClient(context.endpoint);
-    let lease, mailbox, collector, stopping;
+    let lease, mailbox, collector, stopping, sharedSnapshots;
     let captureWidths;
     let ready = false;
     let finish = () => { };
     const done = new Promise(resolve => { finish = resolve; });
-    let maintenance, maintaining, missed = 0;
+    let maintenance, maintaining, missed = 0, pollLifecycleAt = -Infinity, pollDisabled = false;
     const stop = () => stopping ??= (async () => {
         try {
             clearInterval(maintenance);
+            sharedSnapshots?.close();
             await maintaining?.catch(() => { });
             await mailbox?.close();
             await captureWidths?.().catch(() => { });
@@ -175,6 +238,9 @@ export async function runCollectorService(options = {}) {
         collector = new Collector({ rpc, endpoint: context.endpoint, settings: context.settings, stateDir: context.serverStateDir });
         const host = new CollectorHost(collector, store, rpc), global = new StateStore(context.stateDir);
         captureWidths = () => host.views.captureWidths();
+        sharedSnapshots = new SnapshotCache(rpc);
+        sharedSnapshots.on('snapshot', snapshot => { if (!stopping)
+            void host.request('native-snapshot', { snapshot }).catch(() => { }); });
         mailbox = new MailboxServer(context.serverStateDir, lease.token, async (op, p) => {
             if (op === 'ping')
                 return { alive: true, ready, stale: collector.data.stale, diagnostics: collector.data.diagnostics, kind: 'collector-service' };
@@ -182,7 +248,13 @@ export async function runCollectorService(options = {}) {
                 setTimeout(() => void stop(), 50);
                 return { stopping: true };
             }
-            if ((await global.read('lifecycle'))?.disabled) {
+            if (op === 'native-snapshot' || op === 'maintenance')
+                throw new Error('Internal collector operation');
+            if (op !== 'view.poll' || Date.now() - pollLifecycleAt >= 1000) {
+                pollDisabled = (await global.read('lifecycle'))?.disabled === true;
+                pollLifecycleAt = Date.now();
+            }
+            if (pollDisabled) {
                 if (op === 'view.closed')
                     return { closed: true };
                 throw new Error('Plugin is deactivated');
@@ -191,6 +263,7 @@ export async function runCollectorService(options = {}) {
         });
         await store.write('server', { endpoint: context.endpoint });
         await store.write('controller', { token: lease.token, pid: process.pid, endpoint: context.endpoint, kind: 'collector-service', startedAt: Date.now() });
+        await sharedSnapshots.start();
         await mailbox.start();
         await collector.start();
         ready = !collector.data.stale;

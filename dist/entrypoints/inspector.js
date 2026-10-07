@@ -13,7 +13,6 @@ import { ViewFailureReporter } from "../runtime/view-failure.js";
 import { panelViewStore, waitForPanelRecord } from "../runtime/panel-views.js";
 import { demoData } from "../runtime/demo.js";
 import { HerdrClient } from "../herdr/client.js";
-import { SnapshotCache } from "../herdr/subscription.js";
 import { StateStore } from "../state/store.js";
 import { TerminalUi } from "../tui/terminal.js";
 import { createUiState, renderScreen, handleKey, handleRowClick, handleRowWheel, showDetail, addMessagePage, addReferencePage, showReferenceSources } from "../tui/screen.js";
@@ -102,7 +101,7 @@ export async function main(argv = process.argv.slice(2)) {
         state.notesFreeScroll = false;
         return notes.key(event.key, { columns: ui.columns, height: ui.rows, tabOrder: state.tabOrder });
     };
-    const paint = () => { syncBoundSelection(); syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
+    const paint = () => { syncBoundSelection(); syncVisibility(); ui.requestPaint(() => { frame = renderScreen(data, state, ui.columns, ui.rows); return frame; }); };
     if (args.options.demo) {
         data = demoData();
         state.selectedKey = data.sessions[0]?.key;
@@ -141,10 +140,12 @@ export async function main(argv = process.argv.slice(2)) {
             const serverStore = new StateStore(context.serverStateDir);
             await serverStore.init();
             await serverStore.read('preferences');
-            const cache = new SnapshotCache(rpc);
-            cleanup = async () => { ui.close(); cache.close(); rpc.close(); await lease?.release(); await admission.release(); };
             startupPhase = 'snapshot-start';
-            await cache.start();
+            const initial = await rpc.call('session.snapshot');
+            const cache = { snapshot: initial.snapshot ?? initial, stale: false };
+            if (!Array.isArray(cache.snapshot?.panes) || !Array.isArray(cache.snapshot?.agents))
+                throw new Error('Invalid initial native snapshot');
+            cleanup = async () => { ui.close(); rpc.close(); await lease?.release(); await admission.release(); };
             startupPhase = 'pane-identity';
             let paneId = process.env.HERDR_PANE_ID;
             const current = paneId ? await rpc.call('pane.current', { caller_pane_id: paneId }) : undefined;
@@ -169,6 +170,7 @@ export async function main(argv = process.argv.slice(2)) {
             syncVisibility = () => {
                 syncBoundSelection();
                 const visible = panelVisible();
+                ui.setVisible(!closing && inspectorVisible(cache.snapshot, terminalId, paneId));
                 collector.setVisibleSession(state.tab === 'Notes' ? resolveNotesSessionKey(state) : state.selectedKey, visible);
                 collector.setProcessesExpanded(visible && state.tab === 'Processes');
             };
@@ -191,7 +193,7 @@ export async function main(argv = process.argv.slice(2)) {
                     state.tab = preferences.tab;
             }
             const save = async () => { await store.write('preferences', { selectedKey: state.selectedKey, pin: state.pin, tab: state.tab, collapsed: [...state.collapsed].slice(0, 512), expanded: [...state.expanded].slice(0, 512), readers: [...state.readers].slice(-64) }); };
-            cleanup = async () => { await notes?.close(); ui.close(); cache.close(); try {
+            cleanup = async () => { await notes?.close(); ui.close(); try {
                 await collector.close();
                 await save();
             }
@@ -208,12 +210,16 @@ export async function main(argv = process.argv.slice(2)) {
                 startupPhase = 'remote-start';
                 await collector.start();
                 data = collector.data;
+                cache.snapshot = collector.snapshot;
+                cache.stale = data.stale;
                 syncBoundSelection();
                 reconcileInspectorSelection(data, state, state.boundSessionKey, true);
                 startupPhase = 'selected-poll';
                 syncVisibility();
                 await collector.refresh();
                 data = collector.data;
+                cache.snapshot = collector.snapshot;
+                cache.stale = data.stale;
                 if (closing) {
                     await stop();
                     return;
@@ -247,12 +253,12 @@ export async function main(argv = process.argv.slice(2)) {
                 const queueFollow = () => { inputQueue = inputQueue.then(async () => { if (!closing) {
                     await ensureNotes();
                     await follow();
-                    paint();
                 } }).catch(error => { state.notice = error.message; if (!closing)
                     paint(); }); };
-                cache.on('snapshot', () => { syncVisibility(); collector.invalidate(); queueFollow(); });
-                cache.on('stale', () => { collector.setVisibleSession(state.selectedKey, false); data.stale = true; paint(); });
-                collector.on('data', (next) => { data = next; syncBoundSelection(); if (!state.processConfirmation && !state.notes?.editing)
+                collector.on('snapshot', (snapshot) => { const wasVisible = inspectorVisible(cache.snapshot, terminalId, paneId); cache.snapshot = snapshot; cache.stale = collector.data.stale; syncVisibility(); queueFollow(); if (!wasVisible && inspectorVisible(snapshot, terminalId, paneId))
+                    paint(); });
+                collector.on('stale', () => { cache.stale = true; collector.setVisibleSession(state.selectedKey, false); data.stale = true; paint(); });
+                collector.on('data', (next) => { data = next; cache.stale = next.stale; syncBoundSelection(); if (!state.processConfirmation && !state.notes?.editing)
                     reconcileInspectorSelection(data, state, state.boundSessionKey); paint(); queueFollow(); });
                 collector.on('diagnostic', (message) => { state.notice = message; paint(); });
                 collector.once('disconnected', (error) => { inputQueue = inputQueue.then(async () => { await recordFailure(error, 'poll-disconnect'); await stop(); }); });

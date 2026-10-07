@@ -41,7 +41,7 @@ export async function livePanelsTest({release,herdr=process.env.HERDR_BIN_PATH??
   const gamma=(await cli(['pane','split',alpha.pane_id,'--direction','down','--no-focus'])).pane;
   installed=await liveInstall(options);const store=new StateStore(path.join(installed.stateDir,'servers',identityName(endpoint)));
   const owner=await store.read('controller');const first=(await store.read('views')).find(r=>r.targetTerminalId===alpha.terminal_id);assert.ok(first?.open);
-  const shown=async terminal=>{const p=(await snapshot()).panes.find(p=>p.terminal_id===terminal);if(!p)return;const output=await exec(herdr,['--session',session,'pane','read',p.pane_id,'--source','visible','--lines','60'],{env,windowsHide:true});return output.stdout.includes('Overview')&&p;};
+  const shown=async terminal=>{const current=await snapshot(),p=current.panes.find(p=>p.terminal_id===terminal),record=(await store.read('views'))?.find(row=>row.terminalId===terminal);if(!p||!record?.open||!record.ready||p.tab_id!==current.focused_tab_id)return;const output=await exec(herdr,['--session',session,'pane','read',p.pane_id,'--source','visible','--lines','60'],{env,windowsHide:true});return output.stdout.includes('Overview')&&p;};
   await until('first view rendered',()=>shown(first.terminalId));
   await cli(['tab','focus',beta.tab_id]);await waitAction((await cli(['plugin','action','invoke','open','--plugin','iob.herdr-prism'])).log);
   const second=(await store.read('views')).find(r=>r.targetTerminalId===beta.terminal_id);assert.ok(second?.open);assert.notEqual(second.terminalId,first.terminalId);
@@ -70,7 +70,11 @@ export async function livePanelsTest({release,herdr=process.env.HERDR_BIN_PATH??
   await cli(['tab','focus',alpha.tab_id]);await waitAction((await cli(['plugin','action','invoke','activate-overview','--plugin','iob.herdr-prism'])).log);
   const restarted=await store.read('controller'),rows=await store.read('views');assert.notEqual(restarted.pid,owner.pid);
   assert.equal(rows.find(r=>r.targetTerminalId===alpha.terminal_id).open,false);assert.equal(rows.find(r=>r.targetTerminalId===beta.terminal_id).open,true);
-  await until('remembered second view rendered',()=>shown(rows.find(r=>r.targetTerminalId===beta.terminal_id).terminalId));await until('remembered same-tab view rendered',()=>shown(rows.find(r=>r.targetTerminalId===gamma.terminal_id).terminalId));assert.equal((await snapshot()).panes.length,5);
+  assert.equal(rows.find(r=>r.targetTerminalId===gamma.terminal_id).open,true);
+  await cli(['tab','focus',beta.tab_id]);assert.equal((await snapshot()).focused_tab_id,beta.tab_id);
+  await until('remembered second view rendered visibly and ready',()=>shown(rows.find(r=>r.targetTerminalId===beta.terminal_id).terminalId));
+  await rpc.call('pane.focus',{pane_id:gamma.pane_id});assert.equal((await snapshot()).focused_pane_id,gamma.pane_id);
+  await until('remembered same-tab view rendered visibly and ready',()=>shown(rows.find(r=>r.targetTerminalId===gamma.terminal_id).terminalId));assert.equal((await snapshot()).panes.length,5);
   result.independentPanels=true;result.repeatedOpenDidNotDuplicate=true;result.closePreservedOtherPanelAndCollector=true;result.restartPreservedOpenAndClosedTabs=true;
   await cli(['pane','focus','--pane',gamma.pane_id,'--direction','up']);assert.equal((await snapshot()).focused_pane_id,alpha.pane_id);await waitAction((await cli(['plugin','action','invoke','open','--plugin','iob.herdr-prism'])).log);
   const reopened=(await store.read('views')).find(r=>r.targetTerminalId===alpha.terminal_id);await until('resized panel reopened',()=>shown(reopened.terminalId));

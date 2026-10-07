@@ -85,9 +85,17 @@ export class Collector extends EventEmitter {
     activity;
     sidebar;
     accountReports = new Map();
+    revisionCounter = 0;
+    projectionData;
+    projections = new Map();
+    descendantData;
+    descendantNodes = new Map();
+    descendantCache = new Map();
+    observedCache;
+    focusedOwnerTerminalId;
     todoHydrated = new Set();
     derived = new Map();
-    constructor(options) { super(); this.activity = new ActivityMonitor(options.rpc); this.data.tabOrder = normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); this.sidebar = new SidebarInventory(options.rpc, this.git, matchesHarness, options.sidebarSampler, false); }
+    constructor(options) { super(); this.activity = new ActivityMonitor(options.rpc); this.data.tabOrder = normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); this.sidebar = new SidebarInventory(options.rpc, this.git, matchesHarness, options.sidebarSampler, false); this.on('data', () => { this.revisionCounter++; this.projections.clear(); this.descendantCache.clear(); this.descendantData = undefined; this.observedCache = undefined; }); }
     async init() {
         await this.store.init();
         this.data.server = await loadServerIdentity(this.store, { session: serverSession(this.endpoint) });
@@ -131,8 +139,11 @@ export class Collector extends EventEmitter {
         this.visibleSelections = next;
         this.paneOpen = next.length > 0;
         this.visibleSession = next.find(v => v.key)?.key;
-        const observed = this.observedKeys();
         this.visibilityGeneration++;
+        this.observedCache = undefined;
+        const observed = this.observedKeys();
+        this.revisionCounter++;
+        this.projections.clear();
         this.warmup = !previous.size || ![...observed].some(key => previous.has(key));
         for (const key of observed)
             if (!previous.has(key))
@@ -145,11 +156,21 @@ export class Collector extends EventEmitter {
     }
     isSessionVisible(key) { return this.paneOpen && (this.visibleSelections ? this.visibleSelections.some(v => v.key === key) : this.visibleSession === key); }
     isSessionInScope(key, owner, subtree) { return owner === key || subtree && this.descendants(key).includes(owner); }
+    get revision() { if (this.projectionData !== this.data) {
+        this.projectionData = this.data;
+        this.projections.clear();
+        this.revisionCounter++;
+    } return this.revisionCounter; }
+    setFocusedOwnerTerminalId(terminalId) { this.focusedOwnerTerminalId = terminalId; }
     observedKeys() {
+        if (this.observedCache?.data === this.data && this.observedCache.generation === this.visibilityGeneration)
+            return this.observedCache.keys;
         if (!this.paneOpen)
             return new Set();
         const selections = this.visibleSelections ?? [{ key: this.visibleSession, subtree: this.subtree, expanded: this.processesExpanded }];
-        return new Set(selections.flatMap(v => v.key ? [v.key, ...v.subtree ? this.descendants(v.key) : []] : []));
+        const keys = new Set(selections.flatMap(v => v.key ? [v.key, ...v.subtree ? this.descendants(v.key) : []] : []));
+        this.observedCache = { data: this.data, generation: this.visibilityGeneration, keys };
+        return keys;
     }
     observedScopes(key) {
         const selections = this.visibleSelections ?? [{ key: this.visibleSession, subtree: this.subtree, expanded: this.processesExpanded }];
@@ -157,7 +178,15 @@ export class Collector extends EventEmitter {
     }
     /** Scope is projected for the requesting view; shared data never adopts its preferences. */
     dataForView(key, subtree = false) {
-        return { ...this.data, sessions: this.data.sessions.map(session => this.resourceView(session, subtree, key)) };
+        const cacheKey = JSON.stringify([this.revision, this.visibilityGeneration, subtree ? key : undefined, subtree]);
+        const prior = this.projections.get(cacheKey);
+        if (prior)
+            return prior;
+        const data = { ...this.data, sessions: this.data.sessions.map(session => this.resourceView(session, subtree, key)) };
+        this.projections.set(cacheKey, data);
+        while (this.projections.size > 256)
+            this.projections.delete(this.projections.keys().next().value);
+        return data;
     }
     /** The foreground inspector owns this gate; finite hooks never open it. */
     setVisibleSession(key, open = true) {
@@ -167,6 +196,8 @@ export class Collector extends EventEmitter {
         this.visibleSession = key;
         this.paneOpen = open;
         this.visibilityGeneration++;
+        this.revisionCounter++;
+        this.projections.clear();
         this.warmup = true;
         if (open && key)
             this.todoHydrated.delete(key);
@@ -234,7 +265,15 @@ export class Collector extends EventEmitter {
         this.sampleTimer = setTimeout(() => { this.sampleTimer = undefined; void this.sampleProcesses(); }, Math.max(1, this.lastProcessAttemptAt + cadence - Date.now()));
     }
     descendants(key) {
-        const map = new Map(this.data.sessions.map(s => [s.key, s]));
+        if (this.descendantData !== this.data) {
+            this.descendantData = this.data;
+            this.descendantNodes = new Map(this.data.sessions.map(s => [s.key, s]));
+            this.descendantCache.clear();
+        }
+        const cached = this.descendantCache.get(key);
+        if (cached)
+            return cached;
+        const map = this.descendantNodes;
         const seen = new Set();
         const queue = [...map.get(key)?.children ?? []];
         while (queue.length) {
@@ -244,7 +283,9 @@ export class Collector extends EventEmitter {
             seen.add(k);
             queue.push(...map.get(k)?.children ?? []);
         }
-        return [...seen];
+        const keys = [...seen];
+        this.descendantCache.set(key, keys);
+        return keys;
     }
     resourceView(session, subtree, selectedKey) {
         const view = { ...session }, keys = subtree ? this.descendants(session.key) : [], observed = this.observedKeys().has(session.key);
@@ -549,7 +590,7 @@ export class Collector extends EventEmitter {
                         await this.sampleProcesses();
                     if (this.stopped)
                         return;
-                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource: this.nativeResource(a), git: this.sidebar.gitIdentity(a, s.git) }))), Date.now(), views, { grouping: this.settings.ui?.nativeGrouping, tabs: snapshot.tabs, selfJobs: true });
+                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource: this.nativeResource(a), git: this.sidebar.gitIdentity(a, s.git) }))), Date.now(), views, { grouping: this.settings.ui?.nativeGrouping, tabs: snapshot.tabs, selfJobs: true, ownerTerminalId: this.focusedOwnerTerminalId });
                     if (!this.viewInstalled && !this.publisher.diagnostics.length && views.some(s => s.attachment)) {
                         await this.publisher.installView();
                         this.viewInstalled = true;

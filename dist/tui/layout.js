@@ -122,6 +122,14 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
             const row = { ...input, messageBand: band % 2 };
             if (row.band !== false)
                 band++;
+            const arrow = row.action ? ' →' : '', available = Math.max(1, room - cellWidth(arrow));
+            if (row.valueForWidth) {
+                const valueWidth = fullField ? Math.max(1, room - Math.min(12, Math.max(1, room - 1))) : Math.max(1, available - (row.label ? Math.min(10, available) : 0));
+                row.value = row.valueForWidth(valueWidth);
+                row.text = (row.label ? row.label + ': ' : '') + row.value;
+                if (row.copy !== undefined)
+                    row.copy = row.value;
+            }
             const index = addRow(row, section.id);
             indices.push(index);
             const selected = index === state.cursor && row.selectable !== false;
@@ -134,7 +142,6 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
                         part.surface = row.messageBand ? 'messageOdd' : 'messageEven';
                 content.push({ parts: [span('│', 'border'), ...interior, span('│', 'border')], index, display, first, actionX: first && row.action ? width - 2 : undefined, disclosureX: first && row.disclosureColumn ? row.disclosureColumn + 2 : undefined });
             };
-            const arrow = row.action ? ' →' : '', available = Math.max(1, room - cellWidth(arrow));
             if (fullField) {
                 const labelWidth = Math.min(12, Math.max(1, room - 1)), valueWidth = Math.max(1, room - labelWidth);
                 const longLabel = cellWidth(row.label ?? '') > labelWidth;
@@ -156,7 +163,7 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
             }
         };
         for (const [i, field] of (section.fields ?? []).entries())
-            renderRow({ id: `${section.id}:field:${i}`, text: field.label + ': ' + field.value, label: field.label, value: field.value, role: field.role, copy: field.value, help: document?.help ?? 'Recorded field. The full value wraps within this panel; arrows select whole fields and paging or wheels scroll their content.' }, true);
+            renderRow({ id: `${section.id}:field:${i}`, text: field.label + ': ' + field.value, label: field.label, value: field.value, valueForWidth: field.valueForWidth, role: field.role, copy: field.value, help: document?.help ?? 'Recorded field. The full value wraps within this panel; arrows select whole fields and paging or wheels scroll their content.' }, true);
         if (section.text !== undefined)
             addProse(section.text);
         for (const row of section.rows)

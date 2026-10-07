@@ -42,6 +42,7 @@ export class NativePublisher {
     private rpc: Rpc;
     private sent = new Map<string, {
         text: string;
+        displayAgent:string;
         at: number;
         terminal: string;
     }>();
@@ -54,9 +55,9 @@ export class NativePublisher {
         if (this.sent.size && id !== this.serverId) throw new Error('Cannot replace an active publication server identity');
         this.serverId = id;
     }
-    ownsDisplay(pane:{pane_id:string;terminal_id:string;display_agent?:string|null}):boolean {const old=this.sent.get(pane.pane_id);return !!old&&old.terminal===pane.terminal_id&&JSON.parse(old.text).hat_line===pane.display_agent;}
-    ownership(): Publication[] { return [...this.sent].map(([paneId, record]) => ({ paneId, terminalId: record.terminal,displayAgentHash:hash(JSON.parse(record.text).hat_line), hashes: Object.fromEntries(Object.entries(JSON.parse(record.text) as Record<string, string>).map(([key, value]) => [key, hash(value)])) })); }
-    async publish(sessions: SessionView[], now = Date.now(), graph: SessionView[] = sessions,options:{grouping?:NativeGrouping;tabs?:Record<string,unknown>[];harnessOnly?:boolean;selfJobs?:boolean}={}): Promise<void> {
+    ownsDisplay(pane:{pane_id:string;terminal_id:string;display_agent?:string|null}):boolean {const old=this.sent.get(pane.pane_id);return !!old&&old.terminal===pane.terminal_id&&old.displayAgent===pane.display_agent;}
+    ownership(): Publication[] { return [...this.sent].map(([paneId, record]) => ({ paneId, terminalId: record.terminal,displayAgentHash:hash(record.displayAgent), hashes: Object.fromEntries(Object.entries(JSON.parse(record.text) as Record<string, string>).map(([key, value]) => [key, hash(value)])) })); }
+    async publish(sessions: SessionView[], now = Date.now(), graph: SessionView[] = sessions,options:{grouping?:NativeGrouping;tabs?:Record<string,unknown>[];harnessOnly?:boolean;selfJobs?:boolean;ownerTerminalId?:string}={}): Promise<void> {
         this.diagnostics = [];
         let rank = 0;
         const active = new Set(sessions.flatMap(s => s.attachment ? [s.attachment.pane_id] : []));
@@ -70,6 +71,7 @@ export class NativePublisher {
         const attention=(session:SessionView)=>{const level=['blocked','done','working','idle','paused'].indexOf(stateOf(session)??'');return level<0?5:level;};
         const grouped=!!options.grouping&&options.grouping!=='none';
         const ordered=[...sessions].sort((a,b)=>(grouped?group(a).localeCompare(group(b)):0)||attention(a)-attention(b));
+        const byKey=new Map(graph.map(session=>[session.key,session]));
         let previousGroup:string|undefined;
         for (const session of ordered) {
             const pane = session.attachment;
@@ -92,10 +94,10 @@ export class NativePublisher {
             const state=stateOf(session);
             const tokens: Record<string, string> = {
                 hat_harness: truncate(pane.agent??session.evidence.provider,16),
-                hat_line: truncate(String(pane.name??pane.terminal_title_stripped??pane.title_stripped??session.evidence.title??session.evidence.provider).split('|')[0].trim(),16),
+                hat_line: truncate(String(pane.name??pane.terminal_title_stripped??pane.title_stripped??pane.title??session.evidence.title??session.evidence.provider).split('|')[0].trim(),16),
                 hat_goal: truncate(session.evidence.goals.at(-1)?.objective?`Goal: ${session.evidence.goals.at(-1)!.objective}`:session.evidence.task?`Task: ${session.evidence.task}`:'',100),
                 hat_load: `${resource?.availability==='stale'?'~ ':''}${options.harnessOnly?'H ':''}CPU ${lowerBound?'≥':''}${number(cpu)}%  ${resource?.memoryLabel === 'working-set sum' ? 'WS' : 'RSS'} ${compactBytes(resource?.memoryBytes)}`,
-                hat_counts: `p${resource?.processes.length ?? '—'} a${this.descendants(session, graph)} m${session.evidence.reason === 'metadata only; transcript body not loaded' || session.evidence.availability === 'unavailable' && !session.evidence.messages.length ? '—' : session.evidence.messages.filter(m => m.role !== 'tool').length} r${session.refCoverage==='unavailable'?'—':session.refs?.length??'—'}${session.refCoverage==='partial'||session.refCoverage==='retained'?'+':''}`,
+                hat_counts: `p${resource?.processes.length ?? '—'} a${this.descendants(session, byKey)} m${session.evidence.reason === 'metadata only; transcript body not loaded' || session.evidence.availability === 'unavailable' && !session.evidence.messages.length ? '—' : session.evidence.messages.filter(m => m.role !== 'tool').length} r${session.refCoverage==='unavailable'?'—':session.refs?.length??'—'}${session.refCoverage==='partial'||session.refCoverage==='retained'?'+':''}`,
                 hat_branch: truncate(git?.branch ?? git?.branchState ?? 'Git —',12), hat_add: git?.added === undefined ? '' : `+${number(git.added)}`, hat_del: git?.deleted === undefined ? '' : `-${number(git.deleted)}`,
                 hat_div: `↑${number(git?.ahead)} ↓${number(git?.behind)}`, hat_conflict: git?.conflicts ? `conflicts ${git.conflicts}` : '',
                 hat_last: truncate(session.evidence.messages.filter(m => m.kind !== 'inter-agent' && m.role === 'assistant').at(-1)?.text ?? '', 100),
@@ -103,6 +105,9 @@ export class NativePublisher {
             };
             for (const key of keys)
                 tokens[key] = sanitize(tokens[key]).replace(/[\r\n\t]/g, ' ');
+            const owner=!!options.ownerTerminalId&&pane.terminal_id===options.ownerTerminalId;
+            const displayAgent=owner?`> ${tokens.hat_line}`:tokens.hat_line;
+            if(owner)tokens.hat_index='>';
             const text = JSON.stringify(tokens), old = this.sent.get(pane.pane_id);
             if (old && old.text === text && old.terminal === pane.terminal_id && now - old.at < 5000)
                 continue;
@@ -114,15 +119,15 @@ export class NativePublisher {
                 const liveForeign = Object.keys(live.tokens ?? {}).filter(k => !keys.includes(k)).length;
                 if (liveForeign + keys.length > 32)
                     throw new Error('Shared token budget changed before publication');
-                await this.rpc.call('pane.report_metadata', { pane_id: pane.pane_id, source, tokens,display_agent:tokens.hat_line, ttl_ms: 15000, seq: ++this.seq });
-                this.sent.set(pane.pane_id, { text, at: now, terminal: pane.terminal_id });
+                await this.rpc.call('pane.report_metadata', { pane_id: pane.pane_id, source, tokens,display_agent:displayAgent, ttl_ms: 15000, seq: ++this.seq });
+                this.sent.set(pane.pane_id, { text,displayAgent, at: now, terminal: pane.terminal_id });
             }
             catch (error) {
                 this.diagnostics.push(`${pane.pane_id}: ${(error as Error).message}`);
             }
         }
     }
-    private descendants(session: SessionView, sessions: SessionView[]): number { const byKey = new Map(sessions.map(s => [s.key, s])); const seen = new Set<string>(); const pending = [...session.children]; while (pending.length) {
+    private descendants(session: SessionView, byKey:ReadonlyMap<string,SessionView>): number { const seen = new Set<string>(); const pending = [...session.children]; while (pending.length) {
         const k = pending.pop()!;
         if (seen.has(k))
             continue;

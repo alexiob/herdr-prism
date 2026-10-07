@@ -6,6 +6,27 @@ test('native card starts with status, session name, tab and muted harness; optio
  assert.deepEqual(names(rows[0]),['state_icon','agent','tab','$hat_harness']);
  for(const token of ['$hat_attention','$hat_group'])assert.ok(rows.flat().some((v:any)=>v.token===token&&v.bold===true&&v.dim===false&&v.rules?.some((r:any)=>r.equals===''&&r.hide===true)));
 });
+test('focused Prism owner gets a bold cyan presentation without changing native identity or stealing focus',async()=>{
+ const reports=new Map<string,any>(),calls:any[]=[];
+ const sessions:any[]=['owner-a','owner-b'].map(id=>({key:id,depth:0,children:[],evidence:{provider:'pi',id,title:id,messages:[],tools:[],usage:[],goals:[]},attachment:{pane_id:id,terminal_id:'terminal-'+id,agent:'pi'}}));
+ const publisher=new NativePublisher({call:async(method:string,p:any)=>{calls.push({method,p});if(method==='pane.get')return {pane:sessions.find(s=>s.attachment.pane_id===p.pane_id).attachment};if(method==='pane.report_metadata')reports.set(p.pane_id,p);return{};}} as any);
+ await publisher.publish(sessions,1000,sessions,{ownerTerminalId:'terminal-owner-a'});
+ assert.equal(reports.get('owner-a').tokens.hat_index,'>');assert.equal(reports.get('owner-a').tokens.hat_line,'owner-a');assert.equal(reports.get('owner-b').tokens.hat_index,'');assert.equal(reports.get('owner-b').tokens.hat_line,'owner-b');assert.equal(reports.get('owner-a').display_agent,'> owner-a');assert.equal(publisher.ownsDisplay({...sessions[0].attachment,display_agent:'> owner-a'}),true);assert.equal(Object.keys(reports.get('owner-a').tokens).length,16);
+ const count=calls.length;await publisher.publish(sessions,1100,sessions,{ownerTerminalId:'terminal-owner-a'});assert.equal(calls.length,count,'holding the same owner adds no polling or publication');
+ await publisher.publish(sessions,1200,sessions,{ownerTerminalId:'terminal-owner-b'});assert.equal(calls.length-count,4,'switching owners only validates and republishes the two affected native entries');assert.equal(reports.get('owner-a').tokens.hat_index,'');assert.equal(reports.get('owner-a').tokens.hat_line,'owner-a');assert.equal(reports.get('owner-a').display_agent,'owner-a');assert.equal(reports.get('owner-b').tokens.hat_index,'>');assert.equal(reports.get('owner-b').tokens.hat_line,'owner-b');assert.equal(reports.get('owner-b').display_agent,'> owner-b');
+ const beforeClear=calls.length;await publisher.publish(sessions,1300,sessions);assert.equal(calls.length-beforeClear,2);assert.equal(reports.get('owner-b').tokens.hat_index,'');assert.ok(calls.every(call=>['pane.get','pane.report_metadata'].includes(call.method)),'highlight never changes keyboard focus');
+ await publisher.publish(sessions,1400,sessions,{ownerTerminalId:'foreign-terminal'});assert.equal(calls.length,beforeClear+2,'an unknown owner cannot highlight another native agent');
+ for(const theme of ['dark','light','mono'] as const){const label:any=nativeRows(theme).flat().find((token:any)=>token.token==='agent'),accent=label.rules.find((rule:any)=>rule.starts_with==='> ');assert.ok(accent&&accent.bold===true&&accent.dim===false);assert.equal(accent.fg,theme==='dark'?'#64D9E9':theme==='light'?'#155E75':undefined);}
+});
+test('owner presentation uses the native pane title instead of an old display alias and clears only its exact owned label',async()=>{
+ let label='> Stale Prism label';const tokens:any={},reports:any[]=[];
+ const attachment:any={pane_id:'owner',terminal_id:'own',agent:'pi',title:'Owner pane title',display_agent:label};
+ const session:any={key:'pi:canonical',depth:0,children:[],attachment,evidence:{provider:'pi',id:'canonical',title:label,messages:[],tools:[],usage:[],goals:[]}};
+ const rpc:any={call:async(method:string,p:any)=>{if(method==='pane.get')return {pane:{...attachment,display_agent:label,tokens}};if(method==='pane.report_metadata'){reports.push(p);Object.assign(tokens,p.tokens);if(p.display_agent)label=p.display_agent;if(p.clear_display_agent)label='';}return{};}};
+ const publisher=new NativePublisher(rpc);
+ await publisher.publish([session],1000,[session],{ownerTerminalId:'own'});assert.equal(label,'> Owner pane title');assert.equal(session.key,'pi:canonical');assert.equal(session.evidence.id,'canonical');assert.equal(attachment.title,'Owner pane title');assert.equal(publisher.ownsDisplay({...attachment,display_agent:label}),true);
+ await clearPublication(rpc,publisher.ownership());assert.equal(label,'');assert.equal(reports.at(-1).clear_display_agent,true);
+});
 test('compact display labels keep native fallback and clear only matching owned labels',async()=>{
  let label:string|undefined;const tokens:any={},calls:any[]=[];
  const rpc:any={call:async(method:string,p:any)=>{calls.push({method,p});if(method==='pane.get')return{pane:{terminal_id:'t',tokens:{...tokens},display_agent:label}};if(method==='pane.report_metadata'){Object.assign(tokens,p.tokens);if(p.display_agent)label=p.display_agent;if(p.clear_display_agent)label=undefined;}return{};}};

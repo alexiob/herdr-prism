@@ -37,8 +37,10 @@ export function nativeRows(theme = 'dark') {
     const light = theme === 'light', mono = theme === 'mono';
     const style = (token, fg, bold = false, optional = false) => ({ token, ...(!mono ? { fg } : {}), bold, dim: false, ...(optional ? { rules: [{ equals: '', hide: true }] } : {}) });
     const attention = style('$hat_attention', light ? '#854D0E' : '#F2C66D', true, true);
+    const agent = style('agent', light ? '#202938' : '#D6DFE8', true);
+    agent.rules = [{ starts_with: '> ', ...(!mono ? { fg: light ? '#155E75' : '#64D9E9' } : {}), bold: true, dim: false }];
     attention.rules.push(...['○ IDLE', 'Ⅱ PAUSED'].map(equals => ({ equals, ...(!mono ? { fg: light ? '#5D6875' : '#92A0AF' } : {}), bold: false, dim: false })), { equals: '● WORKING', ...(!mono ? { fg: light ? '#245D75' : '#7FB8CA' } : {}), bold: false, dim: false });
-    return [['state_icon', style('agent', light ? '#202938' : '#D6DFE8', true), style('tab', light ? '#374151' : '#B7C9DA'), style('$hat_harness', light ? '#5D6875' : '#92A0AF')],
+    return [['state_icon', agent, style('tab', light ? '#374151' : '#B7C9DA'), style('$hat_harness', light ? '#5D6875' : '#92A0AF')],
         [style('$hat_group', light ? '#155E75' : '#64D9E9', true, true)],
         [attention],
         [style('$hat_load', light ? '#202938' : '#D6DFE8')],

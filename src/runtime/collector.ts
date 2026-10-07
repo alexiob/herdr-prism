@@ -102,9 +102,17 @@ export class Collector extends EventEmitter {
     private activity:ActivityMonitor;
     private sidebar:SidebarInventory;
     private accountReports=new Map<string,AccountLimits>();
+    private revisionCounter=0;
+    private projectionData?:DashboardData;
+    private projections=new Map<string,DashboardData>();
+    private descendantData?:DashboardData;
+    private descendantNodes=new Map<string,SessionView>();
+    private descendantCache=new Map<string,string[]>();
+    private observedCache?:{data:DashboardData;generation:number;keys:Set<string>};
+    private focusedOwnerTerminalId?:string;
     private todoHydrated = new Set<string>();
     private derived = new Map<string, {revision?:string; messages:SessionEvidence['messages']; cwd?:string; refs:SessionView['refs']; refAttemptAt:number}>();
-    constructor(options: CollectorOptions) { super(); this.activity=new ActivityMonitor(options.rpc); this.data.tabOrder=normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess=options.signalProcess??((pid,signal)=>{process.kill(pid,signal);}); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); this.sidebar=new SidebarInventory(options.rpc,this.git,matchesHarness,options.sidebarSampler,false); }
+    constructor(options: CollectorOptions) { super(); this.activity=new ActivityMonitor(options.rpc); this.data.tabOrder=normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess=options.signalProcess??((pid,signal)=>{process.kill(pid,signal);}); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); this.sidebar=new SidebarInventory(options.rpc,this.git,matchesHarness,options.sidebarSampler,false);this.on('data',()=>{this.revisionCounter++;this.projections.clear();this.descendantCache.clear();this.descendantData=undefined;this.observedCache=undefined;}); }
     async init() { await this.store.init(); this.data.server = await loadServerIdentity(this.store, {session: serverSession(this.endpoint)}); this.publisher.setServerIdentity(this.data.server.id); const goals = await this.store.read<Record<string, GoalRecord[]>>('goals'); if (goals && typeof goals === 'object')
         for (const [key, value] of Object.entries(goals))
             if (Array.isArray(value))
@@ -123,8 +131,9 @@ export class Collector extends EventEmitter {
         if(this.visibleSelections&&JSON.stringify(next)===JSON.stringify(this.visibleSelections))return;
         const previous=this.observedKeys();
         this.visibleSelections=next;this.paneOpen=next.length>0;this.visibleSession=next.find(v=>v.key)?.key;
+        this.visibilityGeneration++;this.observedCache=undefined;
         const observed=this.observedKeys();
-        this.visibilityGeneration++;
+        this.revisionCounter++;this.projections.clear();
         this.warmup=!previous.size||![...observed].some(key=>previous.has(key));
         for(const key of observed)if(!previous.has(key))this.todoHydrated.delete(key);
         this.index.setDetailedRefs([]);this.updateResources();this.scheduleProcessSample();
@@ -132,10 +141,13 @@ export class Collector extends EventEmitter {
     }
     isSessionVisible(key:string):boolean {return this.paneOpen&&(this.visibleSelections ? this.visibleSelections.some(v=>v.key===key) : this.visibleSession===key);}
     isSessionInScope(key:string,owner:string,subtree:boolean):boolean {return owner===key||subtree&&this.descendants(key).includes(owner);}
+    get revision():number {if(this.projectionData!==this.data){this.projectionData=this.data;this.projections.clear();this.revisionCounter++;}return this.revisionCounter;}
+    setFocusedOwnerTerminalId(terminalId?:string){this.focusedOwnerTerminalId=terminalId;}
     private observedKeys():Set<string> {
+        if(this.observedCache?.data===this.data&&this.observedCache.generation===this.visibilityGeneration)return this.observedCache.keys;
         if(!this.paneOpen)return new Set();
         const selections=this.visibleSelections??[{key:this.visibleSession,subtree:this.subtree,expanded:this.processesExpanded}];
-        return new Set(selections.flatMap(v=>v.key?[v.key,...v.subtree?this.descendants(v.key):[]]:[]));
+        const keys=new Set(selections.flatMap(v=>v.key?[v.key,...v.subtree?this.descendants(v.key):[]]:[]));this.observedCache={data:this.data,generation:this.visibilityGeneration,keys};return keys;
     }
     private observedScopes(key:string):('self'|'subtree')[] {
         const selections=this.visibleSelections??[{key:this.visibleSession,subtree:this.subtree,expanded:this.processesExpanded}];
@@ -143,13 +155,13 @@ export class Collector extends EventEmitter {
     }
     /** Scope is projected for the requesting view; shared data never adopts its preferences. */
     dataForView(key?:string,subtree=false):DashboardData {
-        return {...this.data,sessions:this.data.sessions.map(session=>this.resourceView(session,subtree,key))};
+        const cacheKey=JSON.stringify([this.revision,this.visibilityGeneration,subtree?key:undefined,subtree]);const prior=this.projections.get(cacheKey);if(prior)return prior;const data={...this.data,sessions:this.data.sessions.map(session=>this.resourceView(session,subtree,key))};this.projections.set(cacheKey,data);while(this.projections.size>256)this.projections.delete(this.projections.keys().next().value!);return data;
     }
     /** The foreground inspector owns this gate; finite hooks never open it. */
     setVisibleSession(key?: string, open = true) {
         if (!this.visibleSelections && this.visibleSession === key && this.paneOpen === open) return;
         this.visibleSelections=undefined;
-        this.visibleSession = key; this.paneOpen = open; this.visibilityGeneration++; this.warmup = true; if(open && key)this.todoHydrated.delete(key);
+        this.visibleSession = key; this.paneOpen = open; this.visibilityGeneration++;this.revisionCounter++;this.projections.clear(); this.warmup = true; if(open && key)this.todoHydrated.delete(key);
         this.index.setDetailedRefs([]);
         this.scheduleProcessSample();
         if (this.timer || this.starting) void this.refresh().then(() => this.refresh());
@@ -193,13 +205,13 @@ export class Collector extends EventEmitter {
         const cadence = native ? observed.length ? Math.min(5000,foregroundCadence) : 5000 : foregroundCadence;
         this.sampleTimer = setTimeout(()=>{this.sampleTimer=undefined;void this.sampleProcesses();},Math.max(1,this.lastProcessAttemptAt+cadence-Date.now()));
     }
-    private descendants(key: string) { const map = new Map(this.data.sessions.map(s => [s.key, s])); const seen = new Set<string>(); const queue = [...map.get(key)?.children ?? []]; while (queue.length) {
+    private descendants(key: string) {if(this.descendantData!==this.data){this.descendantData=this.data;this.descendantNodes=new Map(this.data.sessions.map(s=>[s.key,s]));this.descendantCache.clear();}const cached=this.descendantCache.get(key);if(cached)return cached;const map=this.descendantNodes;const seen = new Set<string>(); const queue = [...map.get(key)?.children ?? []]; while (queue.length) {
         const k = queue.pop()!;
         if (seen.has(k))
             continue;
         seen.add(k);
         queue.push(...map.get(k)?.children ?? []);
-    } return [...seen]; }
+    } const keys=[...seen];this.descendantCache.set(key,keys);return keys; }
     private resourceView(session:SessionView,subtree:boolean,selectedKey?:string):SessionView {
         const view={...session},keys=subtree?this.descendants(session.key):[],observed=this.observedKeys().has(session.key);
         if(observed&&this.sampledGeneration===this.visibilityGeneration){
@@ -416,7 +428,7 @@ export class Collector extends EventEmitter {
                 if (this.settings.nativeMode !== 'inspector-only') {
                     if(Date.now()-this.lastProcessAttemptAt>=5000)await this.sampleProcesses();
                     if(this.stopped)return;
-                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource:this.nativeResource(a),git:this.sidebar.gitIdentity(a,s.git) }))), Date.now(), views,{grouping:this.settings.ui?.nativeGrouping,tabs:snapshot.tabs,selfJobs:true});
+                    await this.publisher.publish(views.flatMap(s => (s.attachments ?? []).map(a => ({ ...s, attachment: a, resource:this.nativeResource(a),git:this.sidebar.gitIdentity(a,s.git) }))), Date.now(), views,{grouping:this.settings.ui?.nativeGrouping,tabs:snapshot.tabs,selfJobs:true,ownerTerminalId:this.focusedOwnerTerminalId});
                     if (!this.viewInstalled && !this.publisher.diagnostics.length && views.some(s => s.attachment)) {
                         await this.publisher.installView();
                         this.viewInstalled = true;

@@ -11,10 +11,20 @@ export class TerminalUi extends EventEmitter {
     pending;
     paintTimer;
     lastPaint = 0;
-    constructor(options = {}) { super(); this.mono = options.monochrome === true; this.interactive = process.stdin.isTTY && process.stdout.isTTY; }
+    inputUntil = 0;
+    visible = true;
+    input;
+    output;
+    constructor(options = {}) { super(); this.input = options.input ?? process.stdin; this.output = options.output ?? process.stdout; this.mono = options.monochrome === true; this.interactive = this.input.isTTY && this.output.isTTY; }
     setMonochrome(value) { this.mono = value; this.frame = undefined; }
-    get columns() { return process.stdout.columns || 80; }
-    get rows() { return process.stdout.rows || 24; }
+    setVisible(visible) { if (!this.interactive || this.visible === visible)
+        return; this.visible = visible; if (!visible) {
+        clearTimeout(this.paintTimer);
+        this.paintTimer = undefined;
+        this.pending = undefined;
+    } }
+    get columns() { return this.output.columns || 80; }
+    get rows() { return this.output.rows || 24; }
     start() {
         if (this.closed || !this.interactive)
             return;
@@ -23,14 +33,14 @@ export class TerminalUi extends EventEmitter {
         clearTimeout(this.paintTimer);
         this.paintTimer = undefined;
         this.lastPaint = 0;
-        process.stdin.setRawMode(true);
-        process.stdin.resume();
-        process.stdin.on('data', this.onData);
-        process.stdout.on('resize', this.onResize);
-        process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[?2004h');
+        this.input.setRawMode(true);
+        this.input.resume();
+        this.input.on('data', this.onData);
+        this.output.on('resize', this.onResize);
+        this.output.write('\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[?2004h');
     }
     onResize = () => { this.frame = undefined; this.emit('resize'); };
-    dispatch = (event) => this.emit('input', event);
+    dispatch = (event) => { this.inputUntil = Date.now() + 200; this.emit('input', event); };
     onData = (data) => {
         clearTimeout(this.escapeTimer);
         for (const event of this.decoder.feed(data))
@@ -40,22 +50,23 @@ export class TerminalUi extends EventEmitter {
                 this.dispatch(event);
         }, 40);
     };
-    paint(frame) {
-        if (this.closed)
+    paint(frame, options = {}) { this.requestPaint(() => frame, options); }
+    /** Coalesce the expensive render, not just its output. Local input bypasses
+     * background cadence and cancels any queued, older frame. */
+    requestPaint(render, { immediate = false } = {}) {
+        if (this.closed || !this.visible)
             return;
-        if (this.interactive && Date.now() - this.lastPaint < 100) {
-            this.pending = frame;
-            if (!this.paintTimer)
-                this.paintTimer = setTimeout(() => {
-                    this.paintTimer = undefined;
-                    const pending = this.pending;
-                    this.pending = undefined;
-                    if (pending)
-                        this.flush(pending);
-                }, Math.max(1, 100 - (Date.now() - this.lastPaint)));
+        if (!this.interactive || !this.frame || immediate || Date.now() < this.inputUntil) {
+            clearTimeout(this.paintTimer);
+            this.paintTimer = undefined;
+            this.pending = undefined;
+            this.flush(render());
             return;
         }
-        this.flush(frame);
+        this.pending = render;
+        if (!this.paintTimer)
+            this.paintTimer = setTimeout(() => { this.paintTimer = undefined; const latest = this.pending; this.pending = undefined; if (latest && !this.closed)
+                this.flush(latest()); }, Math.max(0, 100 - (Date.now() - this.lastPaint)));
     }
     flush(frame) {
         if (this.closed)
@@ -63,7 +74,7 @@ export class TerminalUi extends EventEmitter {
         this.lastPaint = Date.now();
         if (!this.interactive) {
             if (!this.frame)
-                process.stdout.write(frame.lines.join('\n') + '\n');
+                this.output.write(frame.lines.join('\n') + '\n');
             this.frame = frame;
             return;
         }
@@ -78,27 +89,29 @@ export class TerminalUi extends EventEmitter {
             const rendered = frame.spans?.[i] ? styleSpans(frame.spans[i], { theme: this.mono ? 'mono' : frame.theme ?? 'dark', depth: /^(truecolor|24bit)$/.test(process.env.COLORTERM ?? '') ? 24 : process.env.TERM?.includes('256color') ? 8 : 4 }) : line;
             output += `\x1b[${i + 1};1H\x1b[2K${rendered}\x1b[0m`;
         }
-        output += frame.terminalCursor ? `\x1b[${frame.terminalCursor.line};${frame.terminalCursor.column}H\x1b[?25h` : '\x1b[?25l';
+        if (output || !this.frame || this.frame.terminalCursor?.line !== frame.terminalCursor?.line || this.frame.terminalCursor?.column !== frame.terminalCursor?.column)
+            output += frame.terminalCursor ? `\x1b[${frame.terminalCursor.line};${frame.terminalCursor.column}H\x1b[?25h` : '\x1b[?25l';
         if (output)
-            process.stdout.write(output);
+            this.output.write(output);
         this.frame = frame;
     }
     close() {
         if (this.closed)
             return;
         this.closed = true;
+        this.pending = undefined;
         clearTimeout(this.paintTimer);
         clearTimeout(this.escapeTimer);
-        process.stdin.off('data', this.onData);
-        process.stdout.off('resize', this.onResize);
+        this.input.off('data', this.onData);
+        this.output.off('resize', this.onResize);
         if (this.interactive) {
-            process.stdin.setRawMode(false);
-            process.stdin.pause();
+            this.input.setRawMode(false);
+            this.input.pause();
             // The pane owns this input stream. Finish pending Windows console reads
             // after restoring its mode, rather than leaving a paused TTY handle alive.
             if (process.platform === 'win32')
-                process.stdin.destroy();
-            process.stdout.write('\x1b[?2004l\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l');
+                this.input.destroy();
+            this.output.write('\x1b[?2004l\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l');
         }
     }
 }

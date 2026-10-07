@@ -9,6 +9,7 @@ export interface ResourceChart {
  values:(number|undefined)[];
  period?:{from:number;to:number};
  measuredCount:number;
+ peak?:number;
  partialCount:number;
  latestMeasuredAt?:number;
  explicitGaps:number;
@@ -33,12 +34,12 @@ export function resourceChart(history:ResourceHistory|undefined,kind:'cpu'|'memo
    const index=elapsed===0?width-1:Math.min(width-1,Math.floor((point.at-from)*width/elapsed));
    if(point.gap){result.explicitGaps++;if(width)result.values[index]=undefined;continue;}
    const value=values[i];if(value===undefined)continue;
-   result.measuredCount++;if(kind==='cpu'&&history?.cpu[i]===undefined&&point.cpuLowerBound!==undefined)result.partialCount++;result.latestMeasuredAt=point.at;
+   result.peak=Math.max(result.peak??0,value);result.measuredCount++;if(kind==='cpu'&&history?.cpu[i]===undefined&&point.cpuLowerBound!==undefined)result.partialCount++;result.latestMeasuredAt=point.at;
    if(width)result.values[index]=value;
   }
  }else{
   result.values=width?values.slice(-width):[];
-  result.measuredCount=values.filter(value=>value!==undefined).length;
+  const valid=values.filter((value):value is number=>value!==undefined);result.measuredCount=valid.length;for(const value of valid)result.peak=Math.max(result.peak??0,value);
   if(kind==='cpu')result.partialCount=values.filter((value,index)=>value!==undefined&&history?.cpu[index]===undefined&&points?.[index]?.cpuLowerBound!==undefined).length;
  }
  return result;

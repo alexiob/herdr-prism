@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
 import { checkInstall, verifyHelper, supportedPlatforms, requiredFiles, checkedRead } from './check-install.mjs';
 const rootDefault=fileURLToPath(new URL('..',import.meta.url));
-const documentation=['README.md','LICENSE','THIRD_PARTY_NOTICES.md','docs/install.md','docs/compatibility.md','docs/privacy.md'];
+const documentation=['README.md','LICENSE','THIRD_PARTY_NOTICES.md','docs/install.md','docs/compatibility.md','docs/privacy.md','docs/configuration.md','docs/controls.md','docs/performance.md','docs/ui-design-preview.md','companion/pi/README.md'];
 async function copyTree(root,from,to,accept){
  const info=await lstat(from);if(info.isSymbolicLink())throw new Error(`Refusing symlink release input: ${from}`);
  if(info.isDirectory()){await mkdir(to,{recursive:true});for(const child of await readdir(from))await copyTree(root,join(from,child),join(to,child),accept);return;}
@@ -22,7 +22,7 @@ export async function stageRelease({root=rootDefault,output,platforms=[`${proces
  if(output===root)throw new Error('Release output may not replace source root');
  try{await lstat(output);throw new Error('Release output exists; refusing overwrite');}catch(error){if(error.code!=='ENOENT')throw error;}
  for(const file of [...requiredFiles,...documentation,'scripts/check-install.mjs'])await checkedRead(root,file);
- const optionalDocs=[];for(const file of ['docs/design/herdr-prism.md','docs/implementation-progress.md','docs/provider-compatibility.md','docs/windows-handoff.md','docs/remote.md','docs/remote-visibility-api.md','docs/process-batching.md']){try{await checkedRead(root,file);optionalDocs.push(file);}catch(error){if(error.code!=='ENOENT')throw error;}}
+ const optionalDocs=[];for(const file of ['docs/design/herdr-prism.md','docs/implementation-progress.md','docs/provider-compatibility.md','docs/windows-handoff.md','docs/remote.md','docs/remote-visibility-api.md','docs/process-batching.md','docs/windows-validation.md','docs/ui-design-guide.md']){try{await checkedRead(root,file);optionalDocs.push(file);}catch(error){if(error.code!=='ENOENT')throw error;}}
  const updateTools=[];for(const file of ['install.sh','scripts/bootstrap-unix.mjs','scripts/bootstrap-windows.mjs','scripts/install-windows.ps1','scripts/uninstall-windows.ps1','scripts/install-update.mjs','scripts/update.mjs','scripts/update-activate.mjs','scripts/update-code.mjs','scripts/release.mjs']){try{await checkedRead(root,file);updateTools.push(file);}catch(error){if(error.code!=='ENOENT')throw error;}}
  const pkg=JSON.parse(await checkedRead(root,'package.json',1024*1024));if(typeof pkg.name!=='string'||typeof pkg.version!=='string')throw new Error('Source package name/version missing');
  for(const target of targets){const [platform,arch]=target.split('-');if(platform==='darwin'||platform==='win32'){await verifyHelper(root,platform,arch,{artifactDir:helperSource});for(const notice of ['COPYRIGHT-library.html','licenses/MIT.txt']){try{await checkedRead(root,join(helperSource,target,'rust-licenses',notice));}catch(error){throw new Error(`Required native license notice missing: ${target}/${notice}: ${error.message}`);}}}}

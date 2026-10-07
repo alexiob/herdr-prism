@@ -43,7 +43,7 @@ test('authoritative maintenance stops heavy collection after a view disappears w
  const store=new StateStore(directory);await store.write('views',[{tabId:'tab',paneId:'prism',terminalId:'view-term',open:true}]);
  let panes:any[]=[{pane_id:'prism',terminal_id:'view-term',tab_id:'tab'}],visible=false,scopes=0;
  const collector={data:{sessions:[],stale:false},setVisibleSelections(values:any[]){visible=values.length>0;if(values.length)scopes++;},dataForView(){return this.data;}};
- const rpc={call:async()=>({snapshot:{panes,focused_tab_id:'tab'}})};const host=new CollectorHost(collector as any,store,rpc as any);
+ const rpc={call:async()=>({snapshot:{agents:[],panes,focused_tab_id:'tab'}})};const host=new CollectorHost(collector as any,store,rpc as any);
  await host.request('view.poll',{terminalId:'view-term',key:'session',visible:true,subtree:false,expanded:false});assert.equal(visible,true);
  await host.request('view.poll',{terminalId:'view-term',key:'session',visible:true,subtree:false,expanded:false});assert.equal(scopes,2,'the collector receives the complete visible set; it deduplicates unchanged sampling preferences');
  panes=[];await host.request('maintenance');assert.equal(visible,false);assert.equal((await host.views.records())[0].open,false);
@@ -65,7 +65,7 @@ test('remote reference pages carry their matching content snapshot and revision'
  await new StateStore(context.serverStateDir).write('controller',{token:'fixture',pid:process.pid});
  const original=MailboxClient.prototype.request;
  const data=(revision:string)=>({sessions:[{key:'session',evidence:{contentRevision:revision}}],updatedAt:1,stale:false,diagnostics:[]});
- (MailboxClient.prototype as any).request=async(op:string)=>op==='ping'?{kind:'collector-service',ready:true,stale:false}:op==='view.poll'?{data:data('old')}:op==='page-references'?{page:{refs:[],hasMore:false,partial:false,observedAt:1},data:data('new'),contentRevision:'new'}:{};
+ (MailboxClient.prototype as any).request=async(op:string)=>op==='ping'?{kind:'collector-service',ready:true,stale:false}:op==='view.poll'?{data:data('old'),revision:'old',stale:false,snapshotRevision:1,snapshot:{protocol:22,agents:[],panes:[],focused_pane_id:'pane'}}:op==='page-references'?{page:{refs:[],hasMore:false,partial:false,observedAt:1},data:data('new'),contentRevision:'new'}:{};
  const view=new RemoteCollector(context,'pane','terminal');
  try{await view.start();const page=await view.pageReferences('session');assert.equal(view.data.sessions[0].evidence.contentRevision,'new');assert.equal((page as any).contentRevision,'new');assert.deepEqual(page?.refs,[]);}
  finally{await view.close();MailboxClient.prototype.request=original;}
@@ -85,8 +85,8 @@ test('one delayed failed poll is counted once and a following successful poll re
  await new StateStore(context.serverStateDir).write('controller',{token:'fixture',pid:process.pid});
  const original=MailboxClient.prototype.request;let polls=0,disconnected=0,diagnostics=0;
  const data={sessions:[],updatedAt:1,stale:false,diagnostics:[]};
- (MailboxClient.prototype as any).request=async(op:string)=>{if(op==='ping')return{kind:'collector-service',ready:true,stale:false};if(op==='view.poll'){if(++polls===2){await new Promise(resolve=>setTimeout(resolve,1300));throw Error('temporary failure');}return{data};}return{};};
- const view=new RemoteCollector(context,'pane','terminal');view.on('disconnected',()=>disconnected++);view.on('diagnostic',()=>diagnostics++);
+ (MailboxClient.prototype as any).request=async(op:string)=>{if(op==='ping')return{kind:'collector-service',ready:true,stale:false};if(op==='view.poll'){if(++polls===2){await new Promise(resolve=>setTimeout(resolve,1300));throw Error('temporary failure');}return{data,revision:'fixture',stale:false,snapshotRevision:1,snapshot:{protocol:22,agents:[],panes:[],focused_pane_id:'pane'}};}return{};};
+ const view=new RemoteCollector(context,'pane','terminal');view.setVisibleSession('session',true);view.on('disconnected',()=>disconnected++);view.on('diagnostic',()=>diagnostics++);
  try{await view.start();await new Promise(resolve=>setTimeout(resolve,2600));assert.equal(disconnected,0);assert.equal(diagnostics,1);assert.ok(polls>=3);assert.equal(view.data.stale,false);}
  finally{await view.close();MailboxClient.prototype.request=original;}
 });

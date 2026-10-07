@@ -1,0 +1,1 @@
+Herdr dashboard for Codex, Claude Code and Pi: agent trees, CPU/memory, owned processes, messages, references, To-do, Git changes, reported usage and limits, and private Markdown notes. Per-agent panels remember views and widths; updates preserve notes, settings and focus. Collect locally or on each SSH server.

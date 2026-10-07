@@ -9,8 +9,9 @@ session ID or checkout path against the viewing client's local machine.
 This follows [Herdr's selected-server plugin model](https://herdr.dev/docs/connecting-machines/).
 Herdr does not copy local plugins, Node, helper executables or configuration to
 SSH hosts. Install the appropriate platform package and Node on each host. The
-current Windows validation remains deferred; installing on a Windows SSH host
-does not bypass the [Windows release gate](windows-handoff.md).
+Windows local lifecycle and interaction evidence is recorded in
+[Windows validation](windows-validation.md). Windows SSH-host acceptance remains
+deferred; local validation does not certify that remote deployment.
 
 ## Install and activate remotely
 
@@ -26,7 +27,7 @@ Use that server's actual session name instead of `work`. Use
 projection. As for local installation, wait for the exact activation log to
 finish successfully. The [managed lifecycle wrapper](install.md#managed-live-lifecycle)
 can instead install and completely remove a checksummed release on that host;
-run it there with the intended `HERDR_SESSION` selected.
+run it there with `--session NAME` for the intended named server.
 
 From the viewing client, API-backed actions can target a saved machine explicitly:
 
@@ -47,7 +48,7 @@ removal. Disconnecting SSH is not an uninstall and leaves remote agents running.
 
 ## Identity, sidebar and actions
 
-The dashboard header identifies its **server hostname/session**. This is distinct
+The dashboard footer identifies its **server hostname/session**. This is distinct
 from the client's saved-machine label: that label is not exposed to server
 plugins. Each endpoint's private state has a persisted random server identity,
 so identical hostnames, pane IDs, session IDs and socket paths on separate hosts
@@ -77,8 +78,9 @@ detail popups stay on their owning server.
 ## Visibility boundary in Herdr 0.9.3
 
 Native cards on each macOS/Linux server retain lightweight checkout metadata
-(no status/diff scans) and five-second samples of verified harness PIDs. These
-are independent of the inspector and do not enumerate child processes.
+(no status/diff scans) and one shared five-second host process batch, summing
+the verified harness and owned jobs. They do not load background transcript
+bodies or run detailed background Git scans. See [native overview](../README.md#native-overview-and-privacy).
 
 The current gate collects the union of sessions displayed by visible panels,
 keeping each panel's scope separate. It pauses heavy transcript, refs, To-do, Git

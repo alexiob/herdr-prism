@@ -19,8 +19,8 @@ npm run ui:preview -- --browse --width 80
 
 The gallery includes Overview, Agents, Processes, Messages, Refs, To-do, Git,
 Notes, Notes editor, native sidebar content, contextual help and full detail.
-Use Tab/Shift+Tab to browse; up/down selects; left/right moves between Overview
-columns; Enter opens a destination or full content; `?` explains the selected
+Use Tab/Shift+Tab to browse; up/down selects; left/right switches independent
+subpanels; Enter opens a destination or full content; `?` explains the selected
 entry; Escape returns; `q` closes the preview. Notes editing is a layout example,
 not the persistent editor implementation.
 
@@ -58,9 +58,24 @@ paths teal, durations warm gold, Git additions/deletions green/red, and
 unavailable readings amber. Text and labels preserve meaning in mono/ASCII.
 Narrative content retains its full text; metric explanations appear in `?` help.
 
-In the current local Herdr session, the preview is in the pane named
-**Prism UI Gallery** (`w2:pN`), beside the agent's original pane. These IDs are
-session-specific, not installation instructions.
+## Option reference
+
+| Option | Effect |
+| --- | --- |
+| `--browse` | Interactive synthetic gallery; requires a TTY. |
+| `--width N` | Frame width; integer 26–240, default 50 columns. |
+| `--height N` | Frame height; integer 10–100, default 34 lines. |
+| `--theme dark\|light\|mono` | Palette; default dark. |
+| `--ascii` | ASCII glyph alternatives. |
+| `--plain` | Suppress ANSI colors. |
+| `--view NAME` | Print one view instead of the full gallery. Names: Overview, Notes, To-do, Git, Agents, Processes, Refs, Messages, Notes editor, Sidebar, Help, Detail. Quote names with spaces. |
+| `--entry ID` | Choose the synthetic entry for Detail/Help; examples above use fixture IDs. |
+| `--save DIR` | Write plain and ANSI frames for every view. |
+| `--help` | Print usage without accessing live data. |
+
+Inspector previews use the runtime's shared layout and bounded subpanel scroll
+metadata. Sidebar represents native content, without promising native card
+backgrounds or field actions. Demo output is synthetic, not performance evidence.
 
 The [design brief](superpowers/specs/2026-10-06-prism-ui-design.md) records the
 requested interaction rules and implementation scope. The live sidebar remains

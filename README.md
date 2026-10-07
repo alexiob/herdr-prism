@@ -2,10 +2,17 @@
 
 Version **0.5.0**.
 
-An eight-view terminal dashboard for Codex, Claude and Pi sessions in Herdr.
-It follows agent lineage, process ownership, messages, references, explicit goals,
-local To-do checkboxes, Git checkout state and private Markdown notes. An optional native overview adds
-compact summaries to Herdr's existing Agents panel.
+An eight-view terminal dashboard for Codex, Claude Code and Pi sessions in Herdr.
+Follow recorded worker trees, inspect CPU/memory and owned processes, read messages
+and references, track To-do and Git changes, and keep private Markdown notes.
+Per-agent panels remember views and widths; updates preserve notes, settings and
+focus. An optional native overview shows attention and resource summaries in
+Herdr's Agents panel. Collection runs locally or on each SSH server.
+
+[All features and controls](docs/controls.md) ·
+[Every setting and action](docs/configuration.md) ·
+[Installer options](docs/install.md#installer-option-reference) ·
+[Remote boundaries](docs/remote.md) · [Privacy](docs/privacy.md)
 
 **Release status:** implementation candidate. Actual macOS and Linux CI and
 GitHub installation checks have passed. Windows x64 now has local Node 22/24
@@ -40,11 +47,11 @@ The Windows installer also configures **Ctrl+B, then `i`** when the shortcut is
 free. Its setup and activation details are in
 [Windows setup](docs/install.md#windows-setup).
 
-Each agent tab remembers its own Prism right pane. Opening Prism in Claude's
-tab leaves Codex's pane intact. Press **Q** inside a pane to close only that tab's
-view; opening it again restores that view's preferences. Prism restarts restore
-the previously open tabs and keep closed tabs closed. All views share one
-collector, with heavy collection limited to the visible tab.
+Each native agent pane remembers its own Prism side panel. Several agents in one
+tab can each have a panel open at once. Press **Q** inside Prism to close that
+agent's panel; opening it again restores its preferences. Restarts restore the
+previously open panels and keep closed panels closed. All views on a server share
+one collector, with heavy collection limited to visible panels.
 
 To uninstall on Windows and remove the installer-owned shortcut:
 
@@ -274,7 +281,7 @@ cycles through each subpanel. List entries alternate subtle backgrounds; selecti
 uses a stronger, separate highlight. A multiline entry moves and highlights as one
 item, with one right arrow. Click its body to select; Enter or its arrow opens it.
 Wheels and paging read long entries within their subpanel. CPU and memory charts
-share a left edge and occupy adjacent rows.
+share a left edge, with one blank line between them.
 
 Agents shows this panel’s owner and only its recorded sub-agent tree. Each worker
 has a concise status and reported task or goal; unrelated host sessions are excluded.
@@ -292,7 +299,7 @@ focuses a live pane. Worktree grouping also stays within this tree.
 Fact details align quiet labels with colored quantities, identities, paths,
 durations and Git changes. Long rows show a concise summary; Enter retains full
 wrapped content. Dark, light and monochrome themes are supported through
-`inspector --theme dark|light|mono` or the persisted `theme` setting.
+`inspector.js --theme dark|light|mono` or the persisted `theme` setting.
 
 Notes always belong to the panel’s owning agent, even while inspecting a worker.
 The Notes header names that owner; worker navigation never switches notebooks.
@@ -368,6 +375,18 @@ up selected content. Herdr 0.9.3 exposes no attached-client visibility query, so
 last-client disconnect and background-machine pause remain an outstanding gate.
 Verified roots of other agents remain process attribution boundaries.
 
+Panels share one cached native snapshot and reuse per-revision dashboard
+projections. Unchanged replies omit the dashboard body; hidden panels send only
+a small visibility heartbeat after their initial load and suspend rendering. The focused Prism panel
+polls every 500 ms, other visible panels every second, and hidden panels check
+visibility every 500 ms so returning to a tab promptly resumes collection.
+These heartbeats do not scan transcripts or processes per panel. Rendering itself
+is coalesced, identical frames produce no terminal output, and input inside Prism
+bypasses the background paint delay. Herdr 0.9.3 exposes no reliable typing event
+for neighboring agent panes; Prism reduces their background work through native
+focus and visibility instead of guessing from terminal text.
+See [performance measurements and reproduction](docs/performance.md).
+
 Process details automatically fetch an **Output · shared terminal** snapshot from
 the owning harness pane. Press `r` to refresh. It contains up to 200 retained lines
 and 64 KiB, fetched only while that process detail is visible. This is the shared
@@ -380,7 +399,9 @@ Process facts and Output have separate bounded scroll areas. Left/right switches
 the active reader; arrows, paging keys and the mouse wheel scroll its content
 without pushing the other area out of view.
 
-CPU and memory history start in the same column. CPU uses a scale of at least
+CPU and memory history start in the same column and fill the remaining width of
+their panel. Overview and resource detail charts resize with the pane; their
+scale retains the observed period peak when columns are coalesced. CPU uses a scale of at least
 one logical core (100%); RSS is scaled against the displayed history peak.
 Missing readings remain gaps rather than measured zero.
 History retains measured observations when a new process is warming up its CPU
@@ -537,6 +558,12 @@ remain cached from the inspector and are discarded if checkout or HEAD changes. 
 Herdr cannot insert independent expandable group headers. Tab names follow
 Herdr's labels (Herdr omits an unnamed single tab).
 
+When keyboard focus is inside a registered Prism panel, its native owning agent
+keeps a **bold cyan name and `>` marker** in the left Agents list, including while
+inspecting a worker. This cue clears when focus leaves or the panel closes. Herdr
+0.9.3 reserves its full-card selection background for actual native pane focus;
+Prism's cue preserves keyboard focus in the sidebar.
+
 Herdr 0.9.3 cannot set alternating backgrounds on native left-sidebar cards;
 Prism uses alternating bands in its own right-panel lists.
 
@@ -600,5 +627,10 @@ The source [design](docs/design/herdr-prism.md) and implementation evidence
 ledger in `docs/implementation-progress.md` describe the complete acceptance scope.
 The [provider audit](docs/provider-compatibility.md) records inspected versions
 and format-specific coverage.
+
+The [settings and action reference](docs/configuration.md) includes defaults,
+validation, reload behavior, explicit goals, the launch bridge and optional
+provider integrations. The [controls guide](docs/controls.md) covers each view,
+mouse behavior, reader navigation, Notes editing and process confirmations.
 
 Licensed under [MIT](LICENSE); see [third-party notices](THIRD_PARTY_NOTICES.md).

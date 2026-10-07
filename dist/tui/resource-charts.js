@@ -34,6 +34,7 @@ export function resourceChart(history, kind, width, now) {
             const value = values[i];
             if (value === undefined)
                 continue;
+            result.peak = Math.max(result.peak ?? 0, value);
             result.measuredCount++;
             if (kind === 'cpu' && history?.cpu[i] === undefined && point.cpuLowerBound !== undefined)
                 result.partialCount++;
@@ -44,7 +45,10 @@ export function resourceChart(history, kind, width, now) {
     }
     else {
         result.values = width ? values.slice(-width) : [];
-        result.measuredCount = values.filter(value => value !== undefined).length;
+        const valid = values.filter((value) => value !== undefined);
+        result.measuredCount = valid.length;
+        for (const value of valid)
+            result.peak = Math.max(result.peak ?? 0, value);
         if (kind === 'cpu')
             result.partialCount = values.filter((value, index) => value !== undefined && history?.cpu[index] === undefined && points?.[index]?.cpuLowerBound !== undefined).length;
     }
