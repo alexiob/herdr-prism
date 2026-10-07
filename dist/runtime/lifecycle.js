@@ -127,8 +127,10 @@ export async function activate(context, rpc, options = {}) {
                 opened = await openRequested(target.pane_id);
         }
         if (!opened)
-            await ensureCollectorService(context);
+            await (options.ensureCollector?.() ?? ensureCollectorService(context));
     }
+    else if (options.restoreViewsOnly)
+        await (options.ensureCollector?.() ?? ensureCollectorService(context));
     else
         opened = await openRequested();
     if (opened) {

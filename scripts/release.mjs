@@ -1,5 +1,5 @@
 import { mkdir, readdir, lstat, copyFile, readFile, writeFile, rename, rm, chmod } from 'node:fs/promises';
-import { resolve, join, dirname, relative, isAbsolute } from 'node:path';
+import { resolve, join, dirname, relative, isAbsolute, basename, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
 import { checkInstall, verifyHelper, supportedPlatforms, requiredFiles, checkedRead } from './check-install.mjs';
@@ -17,22 +17,27 @@ export async function stageRelease({root=rootDefault,output,platforms=[`${proces
  if(!output)throw new Error('An explicit release --output directory is required');root=resolve(root);output=resolve(output);
  const targets=[...new Set(platforms.includes('all')?supportedPlatforms:platforms)];if(!targets.length||targets.some(target=>!supportedPlatforms.includes(target)))throw new Error('Unsupported release platform selection');
  if(!['native/sampler/artifacts','bin'].includes(helperSource))throw new Error('Unsupported native helper source');
- if(nodeBin!==undefined&&(typeof nodeBin!=='string'||!nodeBin.startsWith('/')||/[\x00-\x1f\x7f]/.test(nodeBin)||targets.some(target=>!target.startsWith('darwin-')&&!target.startsWith('linux-'))))throw new Error('Runtime binding requires an absolute Unix Node path and only Unix release targets');
+ if(nodeBin!==undefined&&(typeof nodeBin!=='string'||/[\x00-\x1f\x7f]/.test(nodeBin)||targets.some(target=>target.startsWith('win32-')?!/^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+\\)/.test(nodeBin):!nodeBin.startsWith('/'))))throw new Error('Runtime binding requires an absolute Node path for each selected platform (Unix or Windows)');
  for(const source of ['dist','companion','docs','scripts','bin','native/sampler/artifacts']){const rel=relative(join(root,source),output);if(rel===''||!isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+(process.platform==='win32'?'\\':'/')))throw new Error('Release output may not overlap copied input directories');}
  if(output===root)throw new Error('Release output may not replace source root');
  try{await lstat(output);throw new Error('Release output exists; refusing overwrite');}catch(error){if(error.code!=='ENOENT')throw error;}
  for(const file of [...requiredFiles,...documentation,'scripts/check-install.mjs'])await checkedRead(root,file);
  const optionalDocs=[];for(const file of ['docs/design/herdr-prism.md','docs/implementation-progress.md','docs/provider-compatibility.md','docs/windows-handoff.md','docs/remote.md','docs/remote-visibility-api.md','docs/process-batching.md']){try{await checkedRead(root,file);optionalDocs.push(file);}catch(error){if(error.code!=='ENOENT')throw error;}}
+ const updateTools=[];for(const file of ['install.sh','scripts/bootstrap-unix.mjs','scripts/bootstrap-windows.mjs','scripts/install-windows.ps1','scripts/uninstall-windows.ps1','scripts/install-update.mjs','scripts/update.mjs','scripts/update-activate.mjs','scripts/update-code.mjs','scripts/release.mjs']){try{await checkedRead(root,file);updateTools.push(file);}catch(error){if(error.code!=='ENOENT')throw error;}}
  const pkg=JSON.parse(await checkedRead(root,'package.json',1024*1024));if(typeof pkg.name!=='string'||typeof pkg.version!=='string')throw new Error('Source package name/version missing');
  for(const target of targets){const [platform,arch]=target.split('-');if(platform==='darwin'||platform==='win32'){await verifyHelper(root,platform,arch,{artifactDir:helperSource});for(const notice of ['COPYRIGHT-library.html','licenses/MIT.txt']){try{await checkedRead(root,join(helperSource,target,'rust-licenses',notice));}catch(error){throw new Error(`Required native license notice missing: ${target}/${notice}: ${error.message}`);}}}}
  await mkdir(dirname(output),{recursive:true});const staging=output+'.hat-stage-'+randomBytes(10).toString('hex');await mkdir(staging,{recursive:false});
  try{
   await copyTree(root,join(root,'dist'),join(staging,'dist'),path=>/\.(js|json)$/.test(path));
   await copyTree(root,join(root,'companion/pi/index.js'),join(staging,'companion/pi/index.js'));
-  for(const file of [...documentation,...optionalDocs,'herdr-plugin.toml','scripts/check-install.mjs','scripts/live-install.mjs'])await copyTree(root,join(root,file),join(staging,file));
+  for(const file of [...documentation,...optionalDocs,...updateTools,'herdr-plugin.toml','scripts/check-install.mjs','scripts/live-install.mjs'])await copyTree(root,join(root,file),join(staging,file));
   if(nodeBin!==undefined){
    const manifest=await readFile(join(staging,'herdr-plugin.toml'),'utf8');let count=0;
-   const bound=manifest.replace(/^(command\s*=\s*\[\s*)"node"(?=\s*[,\]])/gm,(_,prefix)=>{count++;return prefix+JSON.stringify(nodeBin);});
+   const bound=manifest.replace(/^(command\s*=\s*\[\s*)("(?:[^"\\]|\\.)*")(?=\s*[,\]])/gm,(_,prefix,quoted)=>{
+    const program=JSON.parse(quoted),name=win32.isAbsolute(program)?win32.basename(program):basename(program);
+    if(program!=='node'&&(!(isAbsolute(program)||win32.isAbsolute(program))||!['node','node.exe'].includes(name.toLowerCase())))throw Error('Cannot bind a manifest command that does not run Node');
+    count++;return prefix+JSON.stringify(nodeBin);
+   });
    if(!count||count!==(manifest.match(/^command\s*=/gm)?.length??0))throw new Error('Cannot bind every manifest command to the selected Node executable');
    await writeFile(join(staging,'herdr-plugin.toml'),bound);
   }

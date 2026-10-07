@@ -10,6 +10,26 @@ const literal=(value:string)=>"'"+value.replaceAll("'","''")+"'";
 const library=resolve('scripts/install-windows.ps1');
 async function run(body:string){return exec('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from("$ErrorActionPreference='Stop'; . "+literal(library)+"; "+body,'utf16le').toString('base64')],{windowsHide:true,timeout:15000});}
 
+test('Windows source download resolves a ref once and extracts only its immutable revision',windows,async t=>{
+ const root=await mkdtemp(join(tmpdir(),'prism-source-download-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const result=await run(`
+ $script:PrismTestUrls = @()
+ function Invoke-WebRequest { param([switch]$UseBasicParsing, $Headers, $Uri, $OutFile)
+  $script:PrismTestUrls += [string]$Uri
+  if ($Uri -like 'https://api.github.com/*') { [IO.File]::WriteAllText($OutFile, '{"sha":"${'a'.repeat(40)}"}') }
+  else { [IO.File]::WriteAllText($OutFile, 'synthetic archive') }
+ }
+ function Expand-Archive { param($LiteralPath, $DestinationPath)
+  [void][IO.Directory]::CreateDirectory((Join-Path $DestinationPath 'herdr-prism-${'a'.repeat(40)}'))
+ }
+ $download = Get-PrismSource -InstallRef 'feature/test' -Directory ${literal(root)}
+ if ($download.Revision -ne '${'a'.repeat(40)}') { throw 'Wrong immutable revision' }
+ Write-Output ($script:PrismTestUrls | ConvertTo-Json -Compress)
+ `);
+ const urls=JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1)!);
+ assert.deepEqual(urls,['https://api.github.com/repos/alexiob/herdr-prism/commits/feature%2Ftest','https://codeload.github.com/alexiob/herdr-prism/zip/'+'a'.repeat(40)]);
+});
+
 test('Windows installed runtime binds every Node command and repairs legacy open promise cleanup idempotently',windows,async t=>{
  const root=await mkdtemp(join(tmpdir(),'prism-runtime-bind-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const {mkdir}=await import('node:fs/promises');await mkdir(join(root,'dist/entrypoints'),{recursive:true});
@@ -70,6 +90,11 @@ test('Windows uninstall refuses an edited owned shortcut and preserves a user-ow
 test('Windows bootstrap enforces Node minimum and rejects malformed versions',windows,async()=>{
  const result=await run("@('v22.12.9','v22.13.0','v24.21.0','garbage','v24.0.0-beta') | ForEach-Object { Test-PrismNodeVersion $_ }");
  assert.deepEqual(result.stdout.trim().split(/\r?\n/),['False','True','True','False','False']);
+});
+
+test('Windows bootstrap accepts only a compatible x64 Node runtime',windows,async()=>{
+ const result=await run("Test-PrismNodeRuntime 'v22.13.0' 'ia32'; Test-PrismNodeRuntime 'v22.13.0' 'x64'; Test-PrismNodeRuntime 'v22.12.9' 'x64'; Test-PrismNodeRuntime 'v24.21.0' 'arm64'");
+ assert.deepEqual(result.stdout.trim().split(/\r?\n/),['False','True','False','False']);
 });
 
 test('Windows bootstrap rejects a tampered archive without installing or changing the original',windows,async t=>{

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import { pluginId } from "../native/publisher.js";
 import { identityName } from "../state/store.js";
-const booleanOptions = new Set(['own-native', 'inspector-only', 'once', 'demo', 'ascii', 'monochrome', 'help', 'all', 'no-follow']);
+const booleanOptions = new Set(['own-native', 'inspector-only', 'once', 'demo', 'ascii', 'monochrome', 'help', 'all', 'no-follow', 'restore-views-only']);
 export function parseArguments(argv) {
     const command = argv[0] && !argv[0].startsWith('--') ? argv.shift() : 'open';
     const options = {};

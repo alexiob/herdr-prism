@@ -19,7 +19,7 @@ compatible_node() {
 }
 help() {
     cat <<'EOF'
-Install dependencies and activate Herdr Prism on macOS/Linux x64 or arm64.
+Install or update Herdr Prism on macOS/Linux x64 or arm64.
 
   curl -fsSL https://raw.githubusercontent.com/alexiob/herdr-prism/main/install.sh | sh
   curl -fsSL https://raw.githubusercontent.com/alexiob/herdr-prism/main/install.sh | sh -s -- --inspector-only
@@ -36,7 +36,8 @@ Options:
   --help                Show this help
 
 No sudo or shell-profile changes. A missing server is started headlessly.
-Existing Prism registrations are preserved; remove them before updating.
+Rerunning updates Prism, preserving private Notes, preferences, panels and focus.
+Updates retain the saved mode; --inspector-only applies to a first installation.
 EOF
 }
 parse_options() {
@@ -124,11 +125,15 @@ main() {
         compatible_node "$prism_node_version" || install_node
     fi
     prism_node=$("$prism_node" -p 'process.execPath' </dev/null)
+    # Only the archive downloaded below owns revision metadata. An explicitly
+    # reviewed source directory must prove its own clean Git provenance.
+    PRISM_INSTALL_REVISION=; export PRISM_INSTALL_REVISION
     if [ -z "$prism_source" ]; then
         prism_encoded_ref=$("$prism_node" -p 'encodeURIComponent(process.argv[1])' "$prism_ref" </dev/null)
         download "https://api.github.com/repos/alexiob/herdr-prism/commits/$prism_encoded_ref" "$prism_temp/commit.json"
         prism_revision=$("$prism_node" -e 'const j=JSON.parse(require("node:fs").readFileSync(process.argv[1])); if(!/^[a-f0-9]{40}$/.test(j.sha)) throw Error("Invalid GitHub revision"); console.log(j.sha)' "$prism_temp/commit.json" </dev/null)
-        say "installing alexiob/herdr-prism at $prism_revision"
+        PRISM_INSTALL_REVISION=$prism_revision; export PRISM_INSTALL_REVISION
+        say "preparing alexiob/herdr-prism at $prism_revision"
         download "https://codeload.github.com/alexiob/herdr-prism/tar.gz/$prism_revision" "$prism_temp/prism.tar.gz"
         prism_source="$prism_temp/source"; mkdir "$prism_source"
         tar -xzf "$prism_temp/prism.tar.gz" --strip-components=1 -C "$prism_source" </dev/null

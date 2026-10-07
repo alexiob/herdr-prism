@@ -11,6 +11,19 @@ import { MailboxServer } from '../src/state/mailbox.ts';
 import { deactivate, managedRequest, acknowledge, activate } from '../src/runtime/lifecycle.ts';
 import { clearPublication } from '../src/native/publisher.ts';
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+test('update activation keeps a session with no previous panels empty',async t=>{
+ const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'hat-empty-update-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const context={stateDir:path.join(dir,'state'),configDir:path.join(dir,'config'),configPath:path.join(dir,'config.toml'),endpoint:'empty-update',serverStateDir:path.join(dir,'state','servers',identityName('empty-update'))};
+ await new StateStore(context.stateDir).init();await new StateStore(context.configDir).init();
+ const store=new StateStore(context.serverStateDir);let mailbox:MailboxServer|undefined;
+ t.after(async()=>{await mailbox?.close();});
+ const rpc={call:async():Promise<any>=>({snapshot:{panes:[]}})};
+ const result=await activate(context,rpc,{mode:'inspector-only',restoreViewsOnly:true,timeoutMs:3000,openView:async()=>{throw Error('must not open a default view during update');},ensureCollector:async()=>{
+  await store.write('controller',{token:'empty-update-controller',pid:process.pid});
+  mailbox=new MailboxServer(context.serverStateDir,'empty-update-controller',async()=>({ready:true,stale:false}));await mailbox.start();
+ }});
+ assert.equal(result.activated,true);assert.equal(await store.read('views'),undefined);
+});
 test('removal awaits actual collector cleanup, restores original config and guards other metadata', async () => {
     const dir = await freshPrivateDirectory(path.join(os.tmpdir(), 'hat-live-'));
     const stateDir = path.join(dir, 'state'), configDir = path.join(dir, 'config'), configPath = path.join(dir, 'config.toml'), endpoint = 'test-socket', serverStateDir = path.join(stateDir, 'servers', identityName(endpoint));

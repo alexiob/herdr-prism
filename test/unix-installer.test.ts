@@ -41,10 +41,16 @@ test('Unix bootstrap stages absolute Node commands and activates only the select
  const commands=(await readFile(f.calls,'utf8')).trim().split('\n').map(line=>JSON.parse(line));
  assert.ok(commands.slice(1).every(args=>args[0]==='--session'&&args[1]==='named-fixture'));
 });
-test('Unix bootstrap never replaces an existing plugin or starts an older running server',unix,async t=>{
+test('Unix bootstrap routes an installed plugin through the preserving updater and refuses an older server',unix,async t=>{
  const f=await fixture(t);await writeFile(f.control,JSON.stringify({running:true,version:'0.9.3',plugins:[{plugin_id:'iob.herdr-prism',plugin_root:'/foreign'}]}));
- const result=await bootstrapUnix({...f,install:async()=>{throw Error('must not install');},start:async()=>{throw Error('must not start');}});
- assert.equal(result.alreadyInstalled,true);assert.equal(result.activated,undefined);
+ let called=false;
+ const result=await bootstrapUnix({...f,install:async()=>{throw Error('must not install');},start:async()=>{throw Error('must not start');},update:async(options:any)=>{
+  called=true;assert.equal(options.session,f.session);assert.equal(options.root,f.root);assert.equal(options.release.includes('prism-bootstrap-'),true);
+  assert.equal(options.inspectorOnly,undefined,'updates retain saved mode');assert.equal(options.shortcut,undefined,'updates retain shortcut choice');
+  const manifest=await readFile(join(options.release,'herdr-plugin.toml'),'utf8');assert.ok(manifest.includes(JSON.stringify(process.execPath)));
+  return{updated:true,version:'0.5.0'};
+ }});
+ assert.equal(called,true);assert.equal(result.updated,true);assert.equal(result.activated,undefined);
  await writeFile(f.control,JSON.stringify({running:true,version:'0.9.2',plugins:[]}));
  await assert.rejects(bootstrapUnix({...f,install:async()=>{throw Error('must not install');},download:async()=>{throw Error('must not download');}}),/running.*0.9.3|upgrade.*restart/i);
 });

@@ -9,6 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
 import {stageRelease} from './release.mjs';
 import {liveInstall,pluginId} from './live-install.mjs';
+import {updateInstalled} from './install-update.mjs';
 
 const exec=promisify(execFile),rootDefault=fileURLToPath(new URL('..',import.meta.url));
 const herdrVersion='0.9.3';
@@ -77,7 +78,8 @@ async function startServer({herdrBin,session,env}){
 /** The caller has supplied a reviewed source tree. Downloads need no npm/toolchain. */
 export async function bootstrapUnix({root=rootDefault,herdrBin,session,prepareOnly=false,noStart=false,inspectorOnly=false,
  dependencyDir=join(process.env.XDG_DATA_HOME??join(homedir(),'.local','share'),'herdr-prism','dependencies'),
- env=process.env,install=liveInstall,start=startServer,download=downloadFile}={}){
+ env=process.env,install=liveInstall,update=updateInstalled,start=startServer,download=downloadFile,
+ revision=env.PRISM_INSTALL_REVISION,ref='main'}={}){
  const target=`${process.platform}-${process.arch}`;
  if(!herdrAssets[target])throw new Error('This bootstrap supports macOS/Linux x64 and arm64 only');
  if(!atLeast(process.versions.node,[22,13,0]))throw new Error('Node >=22.13.0 is required');
@@ -102,12 +104,14 @@ export async function bootstrapUnix({root=rootDefault,herdrBin,session,prepareOn
  }
  const listing=JSON.parse((await cli(herdrBin,session,['plugin','list','--plugin',pluginId,'--json'],env)).stdout);
  if(listing.result?.type!=='plugin_list'||!Array.isArray(listing.result.plugins))throw new Error('Unrecognized plugin registration response');
- if(listing.result.plugins.some(item=>item.plugin_id===pluginId))return {alreadyInstalled:true,herdrBin,nodeBin:process.execPath,startedServer};
+ const existing=listing.result.plugins.find(item=>item.plugin_id===pluginId);
  const temp=await mkdtemp(join(tmpdir(),'prism-bootstrap-'));
  try{
   const release=join(temp,'release');
   await stageRelease({root,output:release,platforms:[target],nodeBin:process.execPath,helperSource:'bin'});
-  const result=await install({root:release,herdrBin,session,env,inspectorOnly,shortcut:true,timeoutMs:60000});
+  const result=existing
+   ?await update({root,release,info:existing,herdrBin,session,env,revision,ref,nodeBin:process.execPath,timeoutMs:60000})
+   :await install({root:release,herdrBin,session,env,inspectorOnly,shortcut:true,timeoutMs:60000});
   return {...result,herdrBin,nodeBin:process.execPath,startedServer};
  }finally{await rm(temp,{recursive:true,force:true});}
 }
@@ -119,12 +123,15 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
    const arg=process.argv[i];
    if(['--prepare-only','--no-start','--inspector-only'].includes(arg))options[{'--prepare-only':'prepareOnly','--no-start':'noStart','--inspector-only':'inspectorOnly'}[arg]]=true;
    else if(['--source-dir','--herdr-bin','--session','--node-bin','--ref'].includes(arg)&&process.argv[i+1]){
-    const value=process.argv[++i];if(arg==='--source-dir')options.root=value;else if(arg==='--herdr-bin')options.herdrBin=value;else if(arg==='--session')options.session=value;
+    const value=process.argv[++i];if(arg==='--source-dir')options.root=value;else if(arg==='--herdr-bin')options.herdrBin=value;else if(arg==='--session')options.session=value;else if(arg==='--ref')options.ref=value;
    }else throw new Error('Unknown or incomplete installer option: '+arg);
   }
   const result=await bootstrapUnix(options);
   if(result.prepared)console.log(`Prism: prerequisites ready. Herdr: ${quote(result.herdrBin)}; Node: ${quote(result.nodeBin)}`);
-  else if(result.alreadyInstalled)console.log('Prism: already registered; left in place. Use its documented deactivation/removal commands before updating.');
+  else if(result.updated){
+   console.log(`Prism: updated to ${result.version??'the reviewed version'}. Private state, panel visibility, widths and focus preserved.`);
+   if(result.cleanupPending)console.warn(`Prism: code backup cleanup remains pending; recovery metadata: ${result.recoveryJournal??join(result.stateDir,'update-recovery.json')}. Retained code backup: ${result.recovery?.backup??'see recovery metadata'}.`);
+  }
   else {
    console.log('Prism: active in the selected Herdr session.');
    console.log(result.shortcut==='conflict'?'Prism: prefix+i is already assigned or uses unsupported syntax; existing binding preserved. Open from the Prism action menu.':'Open Prism: Ctrl+B, then i (or your configured Herdr prefix, then i). Close the focused panel: q.');

@@ -28,3 +28,11 @@ test('width restoration accepts only the pinned export and split-ratio request t
  assert.throws(()=>schema.validateRequest('layout.set_split_ratio',{pane_id:'w1:p1',path:[],ratio:NaN}),/finite/);
  assert.throws(()=>schema.validateRequest('layout.apply',{}),/Unsupported/,'supporting width changes must not enable replacing a whole native layout');
 });
+
+test('update focus restoration accepts the pinned generic terminal focus request',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const bundled=JSON.parse(await readFile(new URL('../src/herdr/protocol.json',import.meta.url),'utf8')),pinned=JSON.parse(await readFile(new URL('./fixtures/herdr/protocol-22.json',import.meta.url),'utf8'));
+ assert.deepEqual(bundled.schemas.request.oneOf.find((value:any)=>value.properties.method.const==='pane.focus'),pinned.schemas.request.oneOf.find((value:any)=>value.properties.method.const==='pane.focus'));
+ schema.validateRequest('pane.focus',{pane_id:'w1:p1'});
+ assert.throws(()=>schema.validateRequest('pane.focus',{target:'w1:p1'}),/pane_id/);
+});

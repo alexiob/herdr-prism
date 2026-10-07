@@ -8,7 +8,7 @@ export interface Arguments {
     options: Record<string, string | boolean>;
     positionals: string[];
 }
-const booleanOptions = new Set(['own-native', 'inspector-only', 'once', 'demo', 'ascii', 'monochrome', 'help', 'all', 'no-follow']);
+const booleanOptions = new Set(['own-native', 'inspector-only', 'once', 'demo', 'ascii', 'monochrome', 'help', 'all', 'no-follow', 'restore-views-only']);
 export function parseArguments(argv: string[]): Arguments { const command = argv[0] && !argv[0].startsWith('--') ? argv.shift()! : 'open'; const options: Record<string, string | boolean> = {}; const positionals: string[] = []; for (let i = 0; i < argv.length; i++) {
     const value = argv[i];
     if (value === '--') {

@@ -2,6 +2,9 @@
 [CmdletBinding()]
 param(
     [string]$Ref = 'main',
+    [string]$Session,
+    [switch]$InspectorOnly,
+    [string]$SourceDir,
     [switch]$Yes,
     [switch]$PrepareOnly,
     [switch]$Uninstall
@@ -15,6 +18,10 @@ $script:PrismNodeExeSha = 'ba4e6d110e8c1592a1ecd390f6b05f3da124b13871a5be62b341a
 function Test-PrismNodeVersion([string]$Value) {
     if ($Value -notmatch '^v?(\d+)\.(\d+)\.(\d+)$') { return $false }
     return ([int]$Matches[1] -gt 22 -or ([int]$Matches[1] -eq 22 -and [int]$Matches[2] -ge 13))
+}
+
+function Test-PrismNodeRuntime([string]$Version, [string]$Architecture) {
+    return ((Test-PrismNodeVersion $Version) -and $Architecture -eq 'x64')
 }
 
 function Assert-PrismRegularPath([string]$Path, [bool]$Directory) {
@@ -300,7 +307,7 @@ function Invoke-PrismWindowsUninstall {
 }
 
 function Invoke-PrismWindowsInstall {
-    param([string]$InstallRef = 'main', [switch]$AssumeYes, [switch]$OnlyPrepare)
+    param([string]$InstallRef = 'main', [switch]$AssumeYes, [switch]$OnlyPrepare, [string]$SessionName, [switch]$InspectOnly, [string]$ReviewedSource)
     $architecture = $env:PROCESSOR_ARCHITEW6432
     if (-not $architecture) { $architecture = $env:PROCESSOR_ARCHITECTURE }
     if ($env:OS -ne 'Windows_NT' -or $architecture -ne 'AMD64') { throw 'This installer supports Windows x64 only.' }
@@ -318,39 +325,76 @@ function Invoke-PrismWindowsInstall {
     if ([version]"$($Matches[1]).$($Matches[2]).$($Matches[3])" -lt [version]'0.9.3') { throw 'Herdr 0.9.3 or newer is required. Upgrade Herdr before running this installer.' }
     $node = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     $version = if ($node) { $output = (& $node.Source --version | Out-String).Trim(); if ($LASTEXITCODE -eq 0) { $output } else { '' } } else { '' }
-    if (-not (Test-PrismNodeVersion $version)) {
+    $nodeArchitecture = if ($node -and (Test-PrismNodeVersion $version)) { $output = (& $node.Source -p process.arch | Out-String).Trim(); if ($LASTEXITCODE -eq 0) { $output } else { '' } } else { '' }
+    if (-not (Test-PrismNodeRuntime $version $nodeArchitecture)) {
         $directory = Join-Path $env:LOCALAPPDATA "Programs/node-v$script:PrismNodeVersion-win-x64"
         $nodeExe = Install-PrismNodeRuntime -Directory $directory
         Set-PrismNodePath $directory
         $version = (& $nodeExe --version | Out-String).Trim()
         if ($LASTEXITCODE -ne 0 -or -not (Test-PrismNodeVersion $version)) { throw 'Installed Node runtime failed verification.' }
+        $nodeArchitecture = (& $nodeExe -p process.arch | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not (Test-PrismNodeRuntime $version $nodeArchitecture)) { throw 'Installed Node runtime architecture failed verification.' }
     } else { $nodeExe = $node.Source }
     Write-Host "Ready: $herdrVersion; Node $version"
     if ($OnlyPrepare) { return }
-    $listing = & $herdr.Source plugin list --plugin iob.herdr-prism --json
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect existing Prism registration.' }
-    $plugins = ($listing | Out-String | ConvertFrom-Json).result.plugins
-    if (@($plugins).Count -gt 0) {
-        Write-Host 'Prism is already installed. For updates, deactivate it before reinstalling; see docs/install.md.'
-        Enable-PrismShortcut $herdr.Source $nodeExe $plugins[0].plugin_root
-        return
+    if ($SessionName -and ($SessionName -notmatch '^[A-Za-z0-9_.-]{1,128}$' -or $SessionName.StartsWith('-'))) { throw 'Invalid Herdr session name.' }
+    # Download and validate new code before the shared updater stops any panel.
+    # The exclusive temporary directory holds code only, never private state.
+    $stage = Join-Path ([IO.Path]::GetTempPath()) ('prism-source-' + [Guid]::NewGuid().ToString('N'))
+    [void](New-Item -ItemType Directory -Path $stage -ErrorAction Stop)
+    try {
+        if ($ReviewedSource) {
+            $source = [IO.Path]::GetFullPath($ReviewedSource)
+            Assert-PrismRegularPath $source $true
+            $revision = $null
+        } else {
+            $download = Get-PrismSource -InstallRef $InstallRef -Directory $stage
+            $source = $download.Root
+            $revision = $download.Revision
+        }
+        $bootstrap = Join-Path $source 'scripts/bootstrap-windows.mjs'
+        Assert-PrismRegularPath $bootstrap $false
+        $arguments = @($bootstrap, '--root', $source, '--herdr-bin', $herdr.Source, '--ref', $InstallRef)
+        if ($revision) { $arguments += @('--revision', $revision) }
+        if ($SessionName) { $arguments += @('--session', $SessionName) }
+        if ($InspectOnly) { $arguments += '--inspector-only' }
+        & $nodeExe @arguments
+        if ($LASTEXITCODE -ne 0) { throw 'Prism install/update failed. Private state retained; inspect the reported recovery information.' }
+    } finally {
+        Assert-PrismRegularPath $stage $true
+        Remove-Item -LiteralPath $stage -Recurse -Force
     }
-    $arguments = @('plugin', 'install', 'alexiob/herdr-prism', '--ref', $InstallRef)
-    if ($AssumeYes) { $arguments += '--yes' }
-    & $herdr.Source @arguments
-    if ($LASTEXITCODE -ne 0) { throw 'Herdr plugin installation failed.' }
-    $listing = & $herdr.Source plugin list --plugin iob.herdr-prism --json
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect installed Prism registration.' }
-    $installed = ($listing | Out-String | ConvertFrom-Json).result.plugins
-    Enable-PrismShortcut $herdr.Source $nodeExe $installed[0].plugin_root
-    Write-Host 'Install complete. Activate in your chosen Herdr session:'
-    Write-Host '  herdr plugin action invoke activate-overview --plugin iob.herdr-prism'
+}
+
+function Get-PrismSource {
+    param([string]$InstallRef, [string]$Directory)
+    if ($InstallRef -notmatch '^[A-Za-z0-9_./-]{1,128}$' -or $InstallRef.StartsWith('-')) { throw 'Invalid Git ref.' }
+    Assert-PrismRegularPath $Directory $true
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $commitPath = Join-Path $Directory 'commit.json'
+    $encoded = [Uri]::EscapeDataString($InstallRef)
+    Invoke-WebRequest -UseBasicParsing -Headers @{ 'User-Agent' = 'herdr-prism-installer' } -Uri "https://api.github.com/repos/alexiob/herdr-prism/commits/$encoded" -OutFile $commitPath
+    Assert-PrismRegularPath $commitPath $false
+    if ((Get-Item -LiteralPath $commitPath).Length -gt 65536) { throw 'GitHub revision response exceeds the installer limit.' }
+    $revision = (Get-Content -LiteralPath $commitPath -Raw | ConvertFrom-Json).sha
+    if ($revision -notmatch '^[a-f0-9]{40}$') { throw 'Invalid immutable GitHub revision.' }
+    Write-Host "Prism: preparing alexiob/herdr-prism at $revision"
+    $archive = Join-Path $Directory 'prism.zip'
+    Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/alexiob/herdr-prism/zip/$revision" -OutFile $archive
+    Assert-PrismRegularPath $archive $false
+    if ((Get-Item -LiteralPath $archive).Length -gt 134217728) { throw 'Prism source archive exceeds the installer limit.' }
+    $unpacked = Join-Path $Directory 'source'
+    Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+    $roots = @(Get-ChildItem -LiteralPath $unpacked -Directory)
+    if ($roots.Count -ne 1 -or $roots[0].Name -ne "herdr-prism-$revision") { throw 'Unexpected immutable Prism archive root.' }
+    Assert-PrismRegularPath $roots[0].FullName $true
+    return [PSCustomObject]@{ Root = $roots[0].FullName; Revision = $revision }
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
     try {
         if ($Uninstall) { Invoke-PrismWindowsUninstall }
-        else { Invoke-PrismWindowsInstall -InstallRef $Ref -AssumeYes:$Yes -OnlyPrepare:$PrepareOnly }
+        else { Invoke-PrismWindowsInstall -InstallRef $Ref -AssumeYes:$Yes -OnlyPrepare:$PrepareOnly -SessionName $Session -InspectOnly:$InspectorOnly -ReviewedSource $SourceDir }
     }
     catch { Write-Error $_ -ErrorAction Continue; exit 1 }
 }

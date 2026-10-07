@@ -8,7 +8,7 @@ configuration and the outstanding visibility API boundary.
 
 ### macOS and Linux setup
 
-Install dependencies and Prism with one command:
+Install or update Prism with one command:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/alexiob/herdr-prism/main/install.sh | sh
@@ -39,9 +39,9 @@ owned shortcut and layout; shared Node/Herdr dependencies remain installed.
 
 A missing local Herdr server is started headlessly. Attach using the command
 printed by the installer. Existing servers are never restarted; an old server
-must be upgraded deliberately before installation. Existing Prism registrations
-are left in place; remove/deactivate them using their installation's documented
-lifecycle before updating.
+must be upgraded deliberately before installation. Rerunning updates an existing
+managed or GitHub installation through the preserving lifecycle below. Local
+developer links are refused before deactivation; update those checkouts explicitly.
 
 Pass options without saving the script:
 
@@ -75,33 +75,29 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
 
 The script supports Windows x64, reuses Node 22.13 or newer on PATH, and otherwise
 installs checksum-pinned Node 24.21.0 under `%LOCALAPPDATA%\Programs` and adds it
-to the user PATH. It updates the current installation process's PATH immediately
-and notifies Windows environment listeners. No administrator rights or persistent
-execution-policy change is required. Existing plugin state and permissions are
-handled by Herdr's normal installation flow. An existing Prism installation is
-left in place; follow the deactivation/reinstallation commands below for updates.
+to the user PATH. It notifies Windows environment listeners. No administrator
+rights or persistent execution-policy change is required. Start the selected
+Herdr session first; the installer keeps that server running.
 
-After installation (including reruns), the Windows installer adds **Ctrl+B, then I**
-(`prefix+i`) to open Prism and reloads Herdr's configuration. With a custom prefix,
-use that prefix followed by I. Press **Q** in the focused Prism panel to close it.
-The installer preserves existing config bytes and ACLs, saves the original as
-`config.toml.prism-shortcut.bak`, and skips the shortcut with a warning if it is
-already assigned. Reruns do not duplicate the binding. `-PrepareOnly` does not
-configure it. The shortcut remains available after Prism deactivation and is
-removed by the Windows uninstaller below. User-created bindings are preserved;
-if the installer-owned block was edited, removal stops rather than guessing.
+It resolves the requested ref to an immutable commit, downloads that source and
+validates a platform release before installation or deactivation. Manifest
+commands use the verified absolute Node executable, including when a running
+server has an older PATH. A first install activates Prism and configures the free
+**Ctrl+B, then `i`** shortcut through the reversible configuration backup. Updates
+retain the saved native mode and shortcut choice, including opt-outs and foreign
+bindings. Both paths preserve private configuration/state permissions.
 
-Use `-Yes` to accept the reviewed plugin manifest without a prompt, `-Ref <commit>`
-to choose a Git revision (default `main`), or `-PrepareOnly` to set up prerequisites
-without installing the plugin. The script does not restart an existing Herdr
-server or activate a pane. It binds commands in the Windows installed manifest
-to the verified absolute Node executable and reloads Herdr, so an existing
-server's stale PATH does not prevent actions or panes from starting. Older
-installed `open` actions receive a backed-up compatibility repair that awaits
-panel opening before closing RPC; shared repository sources remain untouched.
-Backups use `.prism-windows.bak` beside each changed installed file, preserving
-its original contents and permissions. Then activate Prism explicitly in your
-chosen session using the command below.
+Pass `-Ref <tag-or-commit>`, `-Session <name>`, or `-InspectorOnly` when invoking the
+saved script. `-InspectorOnly` applies to a first installation; updates retain
+the existing mode. `-PrepareOnly` sets up prerequisites without installing or
+updating Prism. `-SourceDir <reviewed-source>` uses local reviewed compiled source.
+`-Yes` remains accepted for compatibility; invoking the installer authorizes its
+reviewed install/update operation. No separate activation command is needed.
+
+For your Windows update test: create a Note, resize two panels independently,
+leave one closed and focus either a native or Prism pane; rerun the same installer
+and verify version `0.5.0`, the Note, widths, visibility and focus. CI also runs
+isolated update acceptance with synthetic private Notes and two named servers.
 
 ### Install and activate
 
@@ -132,20 +128,33 @@ Activation is an asynchronous Herdr action: inspect its exact plugin command log
 for successful completion rather than treating a returned invocation ID as ready.
 The release wrapper below additionally waits for authenticated readiness.
 
-Herdr 0.9.3 updates a GitHub installation by reinstalling it. Stop the old
-collector before replacing its files, then activate the new installation:
+### Preserving updates
 
-```sh
-herdr plugin action invoke deactivate --plugin iob.herdr-prism
-herdr plugin install alexiob/herdr-prism
-herdr plugin action invoke activate-overview --plugin iob.herdr-prism
-```
+Use the same shell or PowerShell command shown above. The shared updater works
+with both receipt-owned managed copies and Herdr GitHub installations. It validates
+and prepares the new code before stopping the old collectors. It keeps the same
+canonical installation root, managed receipt token, and GitHub source metadata;
+GitHub revision metadata records the exact reviewed commit.
 
-Wait for successful deactivation before reinstalling. For a reviewed release,
-add `--ref <tag-or-commit>` to install. The tested 0.9.3 CLI has no `plugin update`
-command and replaces its managed GitHub checkout during reinstall. Newer Herdr
-documentation describes a separate update command and retained installation
-generations; check the installed CLI/version before relying on those features.
+The updater discovers recorded local servers and captures each panel's owning
+terminal, open/closed intent and exact focus. Deactivation flushes Notes editors
+and saves live widths before replacement. Reopening restores each panel beside
+its own agent using the existing per-view preference stores. Notes and recovery
+drafts are never copied from a stale pre-stop snapshot. Settings, local To-do
+checks, tab order, reader choices, pinning, theme, native ownership and shortcut
+opt-outs remain private and retained. Disabled/deactivated installations remain
+inactive. Running Herdr servers and agent jobs are not restarted.
+
+Code replacement is reversible and uses a same-filesystem staged directory.
+Failed activation restores the previous installation and views. An incomplete
+recovery leaves a private `update-recovery.json` journal, code backup and lock
+rather than deleting evidence; the error reports the recovery locations. Do not
+use complete removal for updating: it deliberately purges private data.
+
+The bare Herdr 0.9.3 reinstall command replaces code but does not run this Prism
+state-preserving lifecycle. Use the Prism installer for updates. Local developer
+source links require explicit source-checkout maintenance and are never replaced
+by the installer.
 
 To stop, restore the previous layout and disable automatic startup:
 
@@ -258,8 +267,9 @@ node scripts/live-install.mjs install --root . --managed-dir "/absolute/path/her
 The destination must not exist and must be separate from the source checkout.
 The wrapper copies only verified release files. It never installs directly into
 or later deletes the user's source checkout or extracted release directory.
-It refuses to supersede an existing plugin registration; this release uses a
-fresh managed copy rather than an in-place update.
+The low-level `live-install.mjs install` command creates a first managed copy and
+refuses an existing registration. For updates, use the platform bootstrap above;
+it runs the shared preserving updater on the same canonical managed root.
 
 ## Existing native layout ownership
 
@@ -418,13 +428,11 @@ and Rust notices. Staging does not compile/download or overwrite existing output
 A GitHub source installation must already contain reviewed compiled release files;
 Herdr's build hook only checks prerequisites. Linking does not build source.
 
-For an update that retains notes and settings, deactivate and wait for success,
-unlink the stopped managed copy, then install the new reviewed release through its
-wrapper. Existing private data remains; the new wrapper takes managed ownership.
-For a deliberate fresh reset, complete uninstall through the old managed wrapper
-first; complete uninstall purges prior local plugin state. An existing collector is not assumed to restart merely
-because Herdr registers a new installation. Actual macOS/Linux/Windows live
-lifecycle tests and CI runs are required before advertising certification.
+For an update that retains private data and panel state, use the platform installer
+with the new reviewed source/revision. Its lifecycle stops the old code before
+replacement and restores the existing view/focus state. Complete uninstall is
+reserved for a deliberate reset and purges local plugin state. Registering new
+files or reloading Herdr configuration alone does not restart Prism's collectors.
 
 Each Herdr tab remembers its own Prism right pane and inspector preferences.
 The open shortcut creates or focuses the pane in the current tab. Q closes only

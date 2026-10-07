@@ -1,5 +1,7 @@
 # Herdr Prism
 
+Version **0.5.0**.
+
 An eight-view terminal dashboard for Codex, Claude and Pi sessions in Herdr.
 It follows agent lineage, process ownership, messages, references, explicit goals,
 local To-do checkboxes, Git checkout state and private Markdown notes. An optional native overview adds
@@ -21,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/alexiob/herdr-prism/main/install.sh
 ```
 
 The installer checks dependencies, supplies checksum-pinned Node and Herdr when
-missing, and activates Prism in your local Herdr session. It uses user-local
+missing, and installs or updates Prism in your local Herdr session. It uses user-local
 directories and configures **Ctrl+B, then `i`** to open the panel when the
 shortcut is free. It prints the exact command for complete Prism removal.
 A running Herdr server needs no restart; a missing server is started headlessly.
@@ -121,70 +123,50 @@ for the lifecycle and configuration details.
 
 ## Update to the latest version
 
-First stop Prism in each Herdr session where it is active:
+Rerun the installer. It installs Prism when missing and updates an existing
+managed or GitHub installation in place.
+
+macOS and Linux:
 
 ```sh
-herdr plugin action invoke deactivate --plugin iob.herdr-prism
-herdr plugin log list --plugin iob.herdr-prism --limit 5
+curl -fsSL https://raw.githubusercontent.com/alexiob/herdr-prism/main/install.sh | sh
 ```
 
-Wait for the returned deactivation log ID to show `succeeded` before replacing
-files. This closes Prism views and flushes notes; agent panes keep running.
-Use `--session <name>` before `plugin` for a named Herdr session.
-
-For a GitHub installation, reinstall the latest `main`:
-
-```sh
-herdr plugin install alexiob/herdr-prism --ref main
-```
-
-On Windows, rerun the PowerShell installer after reinstalling to restore its
-absolute Node runtime binding and check the shortcut:
+Windows x64, in PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/alexiob/herdr-prism/main/scripts/install-windows.ps1 | iex
 ```
 
-For a macOS/Linux shell-installer or managed-release installation, unregister the
-stopped linked copy while retaining private settings and notes, then rerun the
-installer:
+The update validates the downloaded code before stopping Prism. It flushes Notes
+editors, stops collectors in every recorded local Herdr session, replaces code,
+then restores the previous activation mode, open and closed panels, independent
+widths, view preferences, shortcut choice and exact native or Prism focus.
+Private Notes, recovered drafts, To-do checks and settings remain in their existing
+private directories. The Herdr servers and agent processes keep running. Disabled
+or deactivated installations stay that way.
+
+Use `--ref <tag-or-commit>` and `--session <name>` with the Unix installer. Save the
+Windows script to pass `-Ref <tag-or-commit>` or `-Session <name>`; see
+[installer options](docs/install.md). `--inspector-only` / `-InspectorOnly` chooses
+the mode for a first installation; updates retain the existing choice.
+
+If replacement or activation fails, Prism restores the previous code and panel
+state. If recovery itself fails, the installer reports the retained code backup
+and private recovery journal; preserve these files and inspect the reported error
+before rerunning. Updates never call the complete-removal scripts.
+
+Local developer links are left untouched and report how to update their reviewed
+checkout. Run `git pull --rebase`, checks and `npm run build` there, using the
+manual deactivate/activate lifecycle when changing running code.
+
+Check the installed version and source revision:
 
 ```sh
-herdr plugin unlink iob.herdr-prism
-curl -fsSL https://raw.githubusercontent.com/alexiob/herdr-prism/main/install.sh | sh
+herdr plugin list --plugin iob.herdr-prism --json
 ```
 
-For an inspector-only Unix installation, use the installer flag:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/alexiob/herdr-prism/main/install.sh | sh -s -- --inspector-only
-```
-
-For a named session, append `--session <name>` to the installer arguments, for
-example `sh -s -- --inspector-only --session work`. Preserve your installation
-mode and session when updating.
-
-A local development link can instead be updated with `git pull --rebase` and
-`npm run build` in its source checkout. After a GitHub reinstall or local rebuild,
-activate the new code and open the panel:
-
-```sh
-herdr plugin action invoke activate-overview --plugin iob.herdr-prism
-herdr plugin log list --plugin iob.herdr-prism --limit 5
-```
-
-Use `activate-inspector` if you use inspector-only mode. Wait for the activation
-log to show `succeeded`, then open the updated panel:
-
-```sh
-herdr plugin action invoke open --plugin iob.herdr-prism
-```
-
-The Unix installer activates automatically. Settings, notes and To-do checks are retained
-by these update steps; complete removal scripts purge that data and are for
-uninstallation. Reloading Herdr configuration alone does not restart Prism code.
-Herdr 0.9.3 uses reinstall, with no `plugin update` command. Check the installed
-source/revision with `herdr plugin list --plugin iob.herdr-prism --json`.
+The source revision distinguishes subsequent updates that share version 0.5.0.
 
 ## Dashboard
 

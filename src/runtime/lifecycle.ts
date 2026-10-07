@@ -80,6 +80,9 @@ export async function activate(context: LifecycleContext, rpc: Rpc, options: {
     root?: string;
     timeoutMs?: number;
     openView?: (targetPaneId?:string)=>Promise<any>;
+    /** An update restores prior visibility without opening a new default view. */
+    restoreViewsOnly?: boolean;
+    ensureCollector?: ()=>Promise<any>;
 } = {}) {
     if (process.platform === 'win32' && process.env.HERDR_PLUGIN_ID === pluginId)
         await securePluginNamespace(context.configDir, context.stateDir);
@@ -126,8 +129,9 @@ export async function activate(context: LifecycleContext, rpc: Rpc, options: {
             const target=record.targetTerminalId?snapshot.panes.find((p:any)=>p.terminal_id===record.targetTerminalId):snapshot.agents?.find((a:any)=>a.tab_id===record.tabId);
             if(target)opened=await openRequested(target.pane_id);
         }
-        if(!opened)await ensureCollectorService(context);
-    }else opened=await openRequested();
+        if(!opened)await (options.ensureCollector?.()??ensureCollectorService(context));
+    }else if(options.restoreViewsOnly)await (options.ensureCollector?.()??ensureCollectorService(context));
+    else opened=await openRequested();
     if(opened){const pluginPane=opened.plugin_pane;
     if(pluginPane?.plugin_id!==pluginId||pluginPane.entrypoint!=='inspector'||typeof pluginPane.pane?.pane_id!=='string'||typeof pluginPane.pane?.terminal_id!=='string')throw new Error('Invalid dashboard pane ownership response');
     // The child may fail before it writes its controller; the server's open result

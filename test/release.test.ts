@@ -22,7 +22,15 @@ test('staged release rejects a removed integrity index and preserves existing de
 test('installation checks finite startup and event hooks referenced by the manifest',async t=>{const root=await fixture(t);await rm(join(root,'dist/entrypoints/startup.js'));const result=await checkInstall({root,platform:'linux',arch:'x64',nodeVersion:'24.0.0'});assert.equal(result.ok,false);assert.ok(result.errors.some((x:string)=>x.includes('startup.js')));});
 test('source design and evidence documents referenced by README survive staging when present',async t=>{const root=await fixture(t);await mkdir(join(root,'docs/design'));await writeFile(join(root,'docs/design/herdr-prism.md'),'source design');await writeFile(join(root,'docs/implementation-progress.md'),'actual evidence');const output=join(root,'documented');await stageRelease({root,output,platforms:['linux-x64']});assert.equal(await readFile(join(output,'docs/design/herdr-prism.md'),'utf8'),'source design');assert.equal(await readFile(join(output,'docs/implementation-progress.md'),'utf8'),'actual evidence');});
 
-test('release bundles the live lifecycle wrapper alongside precompiled security helpers',async t=>{const root=await fixture(t),output=join(root,'lifecycle');await stageRelease({root,output,platforms:['linux-x64']});assert.ok((await readFile(join(output,'scripts/live-install.mjs'),'utf8')).includes('liveUninstall'));assert.ok(await readFile(join(output,'dist/config/safe-file.js'),'utf8'));});
+test('release bundles install/update lifecycle tools alongside precompiled security helpers',async t=>{
+ const root=await fixture(t),output=join(root,'lifecycle');
+ const tools=['update.mjs','update-activate.mjs','update-code.mjs','install-update.mjs','bootstrap-unix.mjs','bootstrap-windows.mjs','release.mjs'];
+ for(const file of tools)await writeFile(join(root,'scripts',file),await readFile(new URL('../scripts/'+file,import.meta.url)));
+ await stageRelease({root,output,platforms:['linux-x64']});
+ assert.ok((await readFile(join(output,'scripts/live-install.mjs'),'utf8')).includes('liveUninstall'));assert.ok(await readFile(join(output,'dist/config/safe-file.js'),'utf8'));
+ const index=JSON.parse(await readFile(join(output,'checksums.json'),'utf8'));
+ for(const file of tools){assert.ok(index.files['scripts/'+file]);assert.equal(await readFile(join(output,'scripts',file),'utf8'),await readFile(join(root,'scripts',file),'utf8'));}
+});
 
 test('Unix bootstrap release binds every Node command before checksumming, with safe TOML path escaping',async t=>{
  const root=await fixture(t),output=join(root,'bound');
@@ -35,6 +43,11 @@ test('Unix bootstrap release binds every Node command before checksumming, with 
  assert.equal(commands.length,3);assert.ok(commands.every(command=>command[0]===nodeBin));
  assert.equal(await readFile(join(root,'herdr-plugin.toml'),'utf8'),manifest,'source checkout stays reusable');
  assert.equal((await checkInstall({root:output,platform:'linux',arch:'arm64',nodeVersion:'24.21.0'})).ok,true);
+ const rebound=join(root,'rebound'),nextNode='/opt/verified runtime/node';
+ await stageRelease({root:output,output:rebound,platforms:['linux-arm64'],nodeBin:nextNode});
+ const nextCommands=(await readFile(join(rebound,'herdr-plugin.toml'),'utf8')).split('\n').filter(line=>line.startsWith('command = ')).map(line=>JSON.parse(line.slice(10)));
+ assert.ok(nextCommands.every(command=>command[0]===nextNode),'reviewed runtime bindings can be updated without changing other arguments');
+ assert.equal((await checkInstall({root:rebound,platform:'linux',arch:'arm64'})).ok,true);
  await assert.rejects(stageRelease({root,output:join(root,'relative'),platforms:['linux-x64'],nodeBin:'node'}),/absolute.*Unix/i);
  await assert.rejects(stageRelease({root,output:join(root,'foreign'),platforms:['all'],nodeBin}),/Unix/i);
 });
@@ -46,4 +59,15 @@ test('GitHub bootstrap stages committed helper binaries without requiring ignore
  assert.equal((await checkInstall({root:output,platform:'darwin',arch:'arm64',nodeVersion:'24.21.0'})).ok,true);
  await writeFile(join(root,'bin/darwin-arm64/hat-sampler'),'tampered');
  await assert.rejects(stageRelease({root,output:join(root,'tampered-helper'),platforms:['darwin-arm64'],helperSource:'bin'}),/checksum/i);
+});
+
+test('Windows release binds a verified absolute runtime before checksumming',async t=>{
+ const root=await fixture(t);await helper(root,'win32','x64');
+ await writeFile(join(root,'herdr-plugin.toml'),'id = "iob.herdr-prism"\n[[build]]\ncommand = ["node", "scripts/check-install.mjs"]\n');
+ const nodeBin='C:\\Users\\Prism Test\\日本語\\node.exe',output=join(root,'windows-bound');
+ await stageRelease({root,output,platforms:['win32-x64'],nodeBin});
+ const command=(await readFile(join(output,'herdr-plugin.toml'),'utf8')).split('\n').find(line=>line.startsWith('command'))!;
+ assert.equal(JSON.parse(command.slice(command.indexOf('=')+1))[0],nodeBin);
+ assert.equal((await checkInstall({root:output,platform:'win32',arch:'x64'})).ok,true);
+ await assert.rejects(stageRelease({root,output:join(root,'relative-windows'),platforms:['win32-x64'],nodeBin:'node.exe'}),/absolute/i);
 });

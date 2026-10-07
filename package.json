@@ -1,6 +1,6 @@
 {
   "name": "herdr-prism",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "Herdr session inspector with agent lineage, process telemetry, messages, refs, To-do and Git worktrees",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/alexiob/herdr-prism.git" },

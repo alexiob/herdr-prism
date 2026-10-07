@@ -3,7 +3,8 @@ import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {mkdtemp,mkdir,writeFile,readFile,rm,open,realpath,access,readdir} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 const exec=promisify(execFile),root=fileURLToPath(new URL('..',import.meta.url));
 async function until(probe,label){for(let i=0;i<100;i++){try{const result=await probe();if(result)return result;}catch{}await delay(100);}throw new Error('Timed out: '+label);}
@@ -44,12 +45,52 @@ export async function bootstrapUnixTest({herdr,proof,publicRef}){
   const configured=await readFile(configPath,'utf8');assert.match(configured,/key = "prefix\+i"/);assert.match(configured,/command = "iob.herdr-prism.open"/);
   assert.equal(server.exitCode,null,'existing server was not restarted');
   evidence.checks.liveInstall={pipeline:true,pinnedNode:'24.21.0',nodeAbsentFromServerPath:true,allManifestCommandsAbsolute:true,authenticatedActive:true,existingServerPreserved:true,shortcutConfigured:true};
-  // Close the inspector, then reopen through real Ctrl+B / i on a client PTY.
+  // Repeat the exact installer while its inspector is still open. The private
+  // fixture contains invented Notes only; no provider or user history is read.
   const servers=await readdir(join(receipt.stateDir,'servers'));assert.equal(servers.length,1);
-  const record=JSON.parse(await readFile(join(receipt.stateDir,'servers',servers[0],'pane.json'),'utf8'));
+  const serverDir=join(receipt.stateDir,'servers',servers[0]);
+  const {StateStore}=await import(pathToFileURL(join(managedDir,'dist/state/store.js')).href);
+  const {NotesStore}=await import(pathToFileURL(join(managedDir,'dist/state/notes.js')).href);
+  const {panelViewStore}=await import(pathToFileURL(join(managedDir,'dist/runtime/panel-views.js')).href);
+  const {HerdrClient}=await import(pathToFileURL(join(managedDir,'dist/herdr/client.js')).href);
+  const state=new StateStore(serverDir),rpc=new HerdrClient((await cli(['status','server','--json'])).socket,{timeoutMs:5000});
+  let record=JSON.parse(await readFile(join(serverDir,'pane.json'),'utf8')),shortcutPreferences,inspectorPid;
   assert.equal(typeof record.paneId,'string');
+  try{
+   const views=await state.read('views'),view=views.find(value=>value.paneId===record.paneId&&value.open);assert.ok(view?.targetTerminalId);
+   const notes=await new NotesStore(serverDir).save('codex:bootstrap-update-fixture','# Synthetic bootstrap fixture\n\nPreserve these invented Notes across an installer rerun.\n',null);
+   const preferences=panelViewStore(serverDir,view.tabId,view.targetTerminalId);
+   shortcutPreferences=preferences;
+   await preferences.write('preferences',{pin:true,tab:'Refs',collapsed:['fixture-fold'],expanded:['fixture-expand'],readers:[]});
+   const exported=await rpc.call('layout.export',{pane_id:record.paneId});
+   const find=(node,path=[])=>{if(node?.type!=='split')return;if(node.second?.type==='pane'&&node.second.pane_id===record.paneId)return{path,ratio:node.ratio};return find(node.first,[...path,false])??find(node.second,[...path,true]);};
+   const split=find(exported.layout.root);assert.ok(split,'owned inspector split');
+   await rpc.call('layout.set_split_ratio',{pane_id:record.paneId,path:split.path,ratio:Math.min(0.85,split.ratio+0.07)});
+   const panelWidth=snapshot=>snapshot.layouts.find(layout=>layout.tab_id===view.tabId)?.panes.find(pane=>pane.pane_id===snapshot.panes.find(pane=>pane.terminal_id===record.terminalId)?.pane_id)?.rect.width;
+   await until(async()=>(await preferences.read('panel-size'))?.custom===true,'user width preference recorded');
+   await cli(['plugin','pane','focus',record.paneId]);
+   const before=(await cli(['api','snapshot'])).result.snapshot,beforeWidth=panelWidth(before);
+   const focus=(snapshot,records)=>{const pane=snapshot.panes.find(value=>value.pane_id===snapshot.focused_pane_id),owned=records.find(value=>value.terminalId===pane?.terminal_id);return owned?{panelTarget:owned.targetTerminalId}:{nativeTerminal:pane?.terminal_id};};
+   const intent=records=>records.map(({tabId,targetTerminalId,open})=>({tabId,targetTerminalId,open})).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+   const beforeFocus=focus(before,views),beforeIntent=intent(views),receiptBytes=await readFile(join(managedDir,'.hat-managed-install.json'));
+   const privateFiles=[notes.path,join(preferences.dir,'preferences.json'),join(preferences.dir,'panel-size.json'),join(receipt.configDir,'settings.json')];
+   const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),privateHashes=await Promise.all(privateFiles.map(async file=>hash(await readFile(file))));
+   const rerun=exec('/bin/sh',['-s','--',...sourceArgs,'--herdr-bin',herdr,'--session',session,'--no-start'],{env,cwd:directory,encoding:'utf8',timeout:180000,maxBuffer:2*1024*1024});rerun.child.stdin.end(script);
+   const updateOutput=await rerun;await writeFile(join(proof,'installer-rerun.log'),updateOutput.stdout+updateOutput.stderr,{mode:0o600});assert.match(updateOutput.stdout,/updated to 0\.5\.0/);
+   const updated=(await cli(['plugin','list','--plugin','iob.herdr-prism','--json'])).result.plugins[0];assert.equal(updated.version,'0.5.0');assert.equal(updated.plugin_root,managedDir);assert.equal(updated.enabled,registration.enabled);
+   assert.deepEqual(await readFile(join(managedDir,'.hat-managed-install.json')),receiptBytes,'managed ownership receipt preserved exactly');
+   assert.deepEqual(await Promise.all(privateFiles.map(async file=>hash(await readFile(file)))),privateHashes,'invented Notes and private preference bytes preserved');
+   const restoredViews=await state.read('views');assert.deepEqual(intent(restoredViews),beforeIntent);record=JSON.parse(await readFile(join(serverDir,'pane.json'),'utf8'));inspectorPid=restoredViews.find(value=>value.paneId===record.paneId)?.pid;assert.ok(Number.isSafeInteger(inspectorPid)&&inspectorPid>0);
+   const after=(await cli(['api','snapshot'])).result.snapshot;assert.deepEqual(focus(after,restoredViews),beforeFocus);assert.equal(panelWidth(after),beforeWidth);assert.equal(server.exitCode,null);
+   evidence.checks.installerRerun={sameCommand:true,version:'0.5.0',sameCanonicalRoot:true,exactReceiptPreserved:true,syntheticNotesAndPreferencesPreserved:true,openIntentPreserved:true,focusPreserved:true,widthPreserved:true,nodeAbsentFromServerPath:true,serverPreserved:true};
+  }finally{rpc.close();}
+  // Close the inspector, then reopen through real Ctrl+B / i on a client PTY.
   await cli(['plugin','pane','close',record.paneId]);
   await until(async()=>!(await cli(['api','snapshot'])).result.snapshot.panes.some(p=>p.pane_id===record.paneId),'closed original inspector');
+  await until(()=>{try{process.kill(inspectorPid,0);return false;}catch(error){if(error.code==='ESRCH')return true;throw error;}},'closed inspector finished preference save');
+  // The separate shortcut fixture intentionally expects Overview. Reset only
+  // this invented preference after the preservation assertions have completed.
+  await shortcutPreferences.write('preferences',{pin:false,tab:'Overview',collapsed:[],expanded:[],readers:[]});
   const client=await exec('python3',[join(root,'scripts/smoke/prism-shortcut.py'),herdr,session],{env,cwd:directory,encoding:'utf8',timeout:30000,maxBuffer:65536});
   evidence.checks.shortcutPTY=JSON.parse(client.stdout);
   await exec(nodeBin,[join(managedDir,'scripts/live-install.mjs'),'uninstall','--herdr-bin',herdr,'--session',session],{env,cwd:directory,timeout:90000});

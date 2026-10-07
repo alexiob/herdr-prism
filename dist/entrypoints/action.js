@@ -22,7 +22,7 @@ export async function main(argv = process.argv.slice(2)) {
         const request = await managedRequest(root, operation);
         const rpc = new HerdrClient(context.endpoint);
         try {
-            const result = operation === 'deactivate' ? await deactivate(context, rpc, { request, root }) : await activate(context, rpc, { mode: args.command === 'activate-inspector' || request?.mode === 'inspector-only' ? 'inspector-only' : 'overview', ownNative: args.command !== 'activate-inspector' && (request?.mode === 'own-native' || request === undefined), root, request });
+            const result = operation === 'deactivate' ? await deactivate(context, rpc, { request, root }) : await activate(context, rpc, { mode: args.command === 'activate-inspector' || request?.mode === 'inspector-only' ? 'inspector-only' : 'overview', ownNative: args.command !== 'activate-inspector' && (request?.mode === 'own-native' || request === undefined), root, request, restoreViewsOnly: args.options['restore-views-only'] === true });
             if (request)
                 await acknowledge(root, request, { ok: true, result });
             return result;

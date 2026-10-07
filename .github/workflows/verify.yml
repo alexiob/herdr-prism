@@ -49,7 +49,14 @@ jobs:
       - name: Verify native runner architecture
         run: node -e "if(process.platform!=='${{ matrix.target.platform }}'||process.arch!=='${{ matrix.target.arch }}')throw Error('Runner architecture mismatch')"
       - name: Install pinned native development toolchain and license documents
-        run: rustup toolchain install 1.90.0 --profile minimal --component rust-docs
+        run: |
+          for attempt in 1 2 3; do
+            if rustup toolchain install 1.90.0 --profile minimal --component rust-docs; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep "$((attempt * 5))"
+          done
       - name: Native unit tests
         run: cargo test --locked --offline --manifest-path native/sampler/Cargo.toml
       - name: Build and checksum native artifact
@@ -91,6 +98,8 @@ jobs:
         run: node scripts/live-features-test.mjs --release artifacts/release --proof artifacts/live-features-proof
       - name: Independent tab panes, remembered visibility and crash recovery
         run: node scripts/live-panels-test.mjs --release artifacts/release --proof artifacts/live-panels-proof
+      - name: Actual two-server update, private Notes, focus and rollback acceptance
+        run: node scripts/live-update-test.mjs --release artifacts/release --herdr "$HERDR_BIN_PATH" --proof artifacts/live-update-proof
       - name: Pinned ordinary GitHub install and lifecycle on Linux and Windows
         if: github.event_name == 'push' && (matrix.target.platform == 'linux' || matrix.target.platform == 'win32') && matrix.node == '24'
         run: node scripts/github-herdr-test.mjs --repo "${{ github.repository }}" --ref "${{ github.sha }}" --expected-commit "${{ github.sha }}" --proof artifacts/github-herdr-proof
@@ -123,6 +132,13 @@ jobs:
         with:
           name: live-panels-${{ matrix.target.platform }}-${{ matrix.target.arch }}-node${{ matrix.node }}
           path: artifacts/live-panels-proof
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: live-update-${{ matrix.target.platform }}-${{ matrix.target.arch }}-node${{ matrix.node }}
+          path: artifacts/live-update-proof
           if-no-files-found: ignore
           retention-days: 14
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
