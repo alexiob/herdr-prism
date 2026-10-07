@@ -331,7 +331,7 @@ so focusing a neighboring agent does not move an existing inspector. Explicit
 child/history inspection stays selected until the bound conversation changes.
 Pinning and Notes editing hold the selected conversation.
 
-New panels aim for **60 content columns**, constrained by the available split
+New panels aim for **60 columns**, constrained by the available split
 space. Resize a panel using Herdr's normal pane-resize controls; Prism saves that
 width separately for each bound agent view on the collecting server. Reopening
 or reactivating restores its own width. Whole-terminal or outer-layout resizing

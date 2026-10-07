@@ -867,3 +867,14 @@ Proofs: `artifacts/prism-pane-width-mac-accepted/panels.json` and
 helper artifacts were not changed in this pass; Windows-only acceptance remains
 with its assigned machine/CI runner. Missing attached-client visibility remains
 an upstream Herdr dependency.
+
+The subsequent CI acceptance correction updates the hidden-resource probe to
+verify unchanged hidden transcript text while a bounded synthetic harness CPU
+burst remains measurable on macOS/Linux. Windows keeps the legacy cached-resource
+expectation. Notes acceptance now distinguishes neighboring-pane focus from a
+change to the bound conversation, and all panel lookups use the target terminal.
+The corrected complete feature acceptance passed on macOS and Linux arm64:
+`artifacts/prism-current-features-mac/features.json` and
+`artifacts/prism-current-features-linux/features.json`. The Linux sampler's denied/
+exited mock now constructs paths with `path.join`, so its fixture remains valid
+on Windows without changing native Windows collection.
