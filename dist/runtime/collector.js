@@ -1,3 +1,4 @@
+import { ActivityMonitor, activityState } from "./activity.js";
 import { normalizeTabOrder } from "../config/tab-order.js";
 import { normalizeNativeGrouping } from "../config/native-grouping.js";
 import { realpath } from 'node:fs/promises';
@@ -16,7 +17,7 @@ import { StateStore, identityName } from "../state/store.js";
 import { NativePublisher } from "../native/publisher.js";
 import { loadServerIdentity, serverSession } from "./server.js";
 function blank(provider, id, cwd, reason = 'Exact local transcript unavailable') { return { id, provider, cwd, messages: [], tools: [], usage: [], goals: [], availability: 'unavailable', reason }; }
-function nativeState(agent) { return typeof agent.agent_status === 'string' ? agent.agent_status : agent.agent_status?.state ?? agent.agent_status?.status ?? 'unknown'; }
+function nativeState(agent) { return activityState(agent); }
 export function matchesHarness(provider, p) {
     const basename = (v) => v.split(/[\\/]/).at(-1)?.replace(/\.exe$/i, '') ?? '';
     const allowed = provider === 'claude' ? ['claude'] : provider === 'codex' ? ['codex'] : provider === 'pi' ? ['pi', 'pi-coding-agent'] : [];
@@ -35,7 +36,7 @@ export function matchesHarness(provider, p) {
     return false;
 }
 function sameOccupant(a, b) { return a.terminal_id === b.terminal_id && a.agent === b.agent && a.agent_session?.kind === b.agent_session?.kind && a.agent_session?.value === b.agent_session?.value; }
-function inactive(state) { return state !== undefined && ['idle', 'done', 'completed', 'complete', 'error', 'interrupted', 'historical', 'waiting', 'blocked'].includes(state); }
+function inactive(state) { return state !== undefined && ['idle', 'paused', 'done', 'completed', 'complete', 'error', 'interrupted', 'historical', 'waiting', 'blocked'].includes(state); }
 export class Collector extends EventEmitter {
     data = { sessions: [], updatedAt: 0, stale: true, diagnostics: [] };
     index;
@@ -76,9 +77,10 @@ export class Collector extends EventEmitter {
     processesExpanded = false;
     lastProcessAttemptAt = 0;
     rootProofs = new Map();
+    activity;
     todoHydrated = new Set();
     derived = new Map();
-    constructor(options) { super(); this.data.tabOrder = normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
+    constructor(options) { super(); this.activity = new ActivityMonitor(options.rpc); this.data.tabOrder = normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess = options.signalProcess ?? ((pid, signal) => { process.kill(pid, signal); }); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
     async init() {
         await this.store.init();
         this.data.server = await loadServerIdentity(this.store, { session: serverSession(this.endpoint) });
@@ -221,6 +223,8 @@ export class Collector extends EventEmitter {
                 const snapshot = structuredClone(result.snapshot ?? result);
                 if (!Array.isArray(snapshot.agents) || typeof snapshot.protocol !== 'number')
                     throw new Error('Invalid Herdr snapshot');
+                if (this.settings.nativeMode !== 'inspector-only' || this.paneOpen)
+                    await this.activity.update(snapshot.agents);
                 this.snapshot = snapshot;
                 this.index.setActiveRefs(snapshot.agents.flatMap(agent => agent.agent_session ? [{ provider: agent.agent ?? 'unknown', kind: agent.agent_session.kind, value: agent.agent_session.value }] : []));
                 const rejected = new Set();

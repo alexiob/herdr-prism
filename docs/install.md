@@ -154,8 +154,10 @@ herdr plugin action invoke deactivate --plugin iob.herdr-prism
 herdr plugin disable iob.herdr-prism
 ```
 
-Wait for successful deactivation in the plugin log before disabling. To enable
-and reactivate later:
+Wait for successful deactivation in the plugin log before disabling. Activation
+restores the free default `prefix+i` binding after updates or deactivation; foreign
+key assignments and recorded installer opt-outs are preserved. To enable and
+reactivate later:
 
 ```sh
 herdr plugin enable iob.herdr-prism

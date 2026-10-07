@@ -65,12 +65,14 @@ Use `activate-inspector` instead for inspector-only coexistence. Standard update
 enable/disable and uninstall commands are described in
 [installation](docs/install.md#standard-herdr-commands).
 
-Next, add the shortcut to Herdr's `config.toml`: `~/.config/herdr/config.toml`
+Activation adds **prefix+i** when the key is free and restores it after an
+update. It preserves existing assignments and a recorded installer opt-out.
+To inspect the binding or choose another key, edit Herdr's `config.toml`: `~/.config/herdr/config.toml`
 on macOS/Linux, or `%APPDATA%\herdr\config.toml` on Windows. If you set
 `HERDR_CONFIG_PATH`, edit that file instead; `herdr --help` shows the resolved
-path. Plain GitHub installation does not add this binding automatically.
+path.
 
-Add this block once, preserving other bindings. If `prefix+i` is already
+The default binding looks like this; avoid adding it twice. If `prefix+i` is already
 assigned, choose another free key instead of adding a duplicate:
 
 ```toml
@@ -379,12 +381,20 @@ Git changes. Memory uses human sizes such as `3.2kB` or `1.2GB`; values have at
 most one decimal. `~` marks a cached resource sample. Full names, branches,
 Goals and descendant counts remain in the right panel.
 
-Blocked agents have a bold amber **INPUT REQUIRED** row. Idle agents show
-**WAITING FOR YOU** and completed agents **READY TO REVIEW**. These labels use
-Herdr's native state, so idle means waiting for another request, not necessarily
-an unanswered approval. Cards sort by attention: input required, ready to review,
-waiting for a request, working, then unknown states. Agents at the same level
-retain their previous lineage order; native state changes update the ordering.
+Agents with a detected live question, choice or approval prompt have a bold
+amber **INPUT REQUIRED** row. Completed native turns show **READY TO REVIEW**;
+working agents show a quiet blue **WORKING** row. Idle agents show muted **IDLE**,
+and an idle agent with an explicitly paused goal shows **PAUSED**. Idle alone
+never implies an unanswered question. Sorting is input required, ready to
+review, working, idle, paused, then unknown states; ties retain lineage order.
+
+Herdr 0.9.3 can report current Claude question sheets and working spinners as
+idle. Prism supplements its native status with lightweight terminal detection:
+at most four current-screen reads of 24 lines per inventory tick, with a short
+cache and an exact occupant recheck. Recognized Claude/Codex UI controls and
+working indicators update the display; narrative questions and old transcript
+text do not establish attention. Unsupported or unreadable UI falls back to
+native state. This leaves background transcript, Git and resource updates paused.
 Empty attention and group rows are hidden.
 
 To group native cards, add `"nativeGrouping": "project"` or `"tab"` inside the

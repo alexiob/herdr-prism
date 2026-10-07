@@ -1,3 +1,4 @@
+import { activityState } from "../runtime/activity.js";
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { serverIdPattern } from "../runtime/server.js";
@@ -69,8 +70,8 @@ export class NativePublisher {
         const tabName = (session) => { const id = session.attachment?.tab_id; const tab = options.tabs?.find(t => (t.tab_id ?? t.id) === id); return String(tab?.label ?? tab?.name ?? id ?? ''); };
         const project = (session) => session.git?.commonDir?.replace(/[\\/]\.git$/, '') ?? session.git?.root ?? session.attachment?.foreground_cwd ?? session.attachment?.cwd ?? session.evidence.cwd ?? 'Unknown project';
         const group = (session) => options.grouping === 'tab' ? session.attachment?.tab_id ?? '' : options.grouping === 'project' ? project(session) : '';
-        const stateOf = (session) => { const status = session.attachment?.agent_status; return typeof status === 'string' ? status : status?.state ?? status?.status ?? session.evidence.state; };
-        const attention = (session) => { const level = ['blocked', 'done', 'idle', 'working'].indexOf(stateOf(session) ?? ''); return level < 0 ? 4 : level; };
+        const stateOf = (session) => { const state = session.attachment ? activityState(session.attachment, now) : session.evidence.state; return state === 'idle' && session.evidence.goals.at(-1)?.status === 'paused' ? 'paused' : state; };
+        const attention = (session) => { const level = ['blocked', 'done', 'working', 'idle', 'paused'].indexOf(stateOf(session) ?? ''); return level < 0 ? 5 : level; };
         const grouped = !!options.grouping && options.grouping !== 'none';
         const ordered = [...sessions].sort((a, b) => (grouped ? group(a).localeCompare(group(b)) : 0) || attention(a) - attention(b));
         let previousGroup;
@@ -97,7 +98,7 @@ export class NativePublisher {
                 hat_branch: truncate(git?.branch ?? git?.branchState ?? 'Git —', 12), hat_add: git?.added === undefined ? '' : `+${number(git.added)}`, hat_del: git?.deleted === undefined ? '' : `-${number(git.deleted)}`,
                 hat_div: `↑${number(git?.ahead)} ↓${number(git?.behind)}`, hat_conflict: git?.conflicts ? `conflicts ${git.conflicts}` : '',
                 hat_last: truncate(session.evidence.messages.filter(m => m.kind !== 'inter-agent' && m.role === 'assistant').at(-1)?.text ?? '', 100),
-                hat_rank: `${grouped ? '' : attention(session) + ':'}${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability === 'stale' ? 'cached' : resource?.availability ?? 'unavailable', hat_group: truncate(groupLabel, 28), hat_attention: state === 'blocked' ? '! INPUT REQUIRED' : state === 'done' ? '✓ READY TO REVIEW' : state === 'idle' ? '○ WAITING FOR YOU' : ''
+                hat_rank: `${grouped ? '' : attention(session) + ':'}${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability === 'stale' ? 'cached' : resource?.availability ?? 'unavailable', hat_group: truncate(groupLabel, 28), hat_attention: state === 'blocked' ? '! INPUT REQUIRED' : state === 'done' ? '✓ READY TO REVIEW' : state === 'idle' ? '○ IDLE' : state === 'paused' ? 'Ⅱ PAUSED' : state === 'working' ? '● WORKING' : ''
             };
             for (const key of keys)
                 tokens[key] = sanitize(tokens[key]).replace(/[\r\n\t]/g, ' ');

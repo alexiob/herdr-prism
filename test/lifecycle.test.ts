@@ -96,6 +96,7 @@ test('live activation waits for authenticated ready pane and marks only owned di
         const settings = JSON.parse(await readFile(path.join(context.configDir, 'settings.json'), 'utf8'));
         assert.equal(settings.autostart, true);
         assert.equal(settings.nativeMode, 'inspector-only');
+        assert.match(await readFile(context.configPath,'utf8'),/key = "prefix\+i"/,'activation restores the free default shortcut without an installer request');
     }
     finally {
         await server?.close();for(const[key,value]of Object.entries(savedEnv))if(value===undefined)delete process.env[key];else process.env[key]=value;
@@ -124,4 +125,10 @@ test('failed inspector startup retains authoritative opened-pane identity for co
  await store.write('pane',{paneId:'reused',terminalId:'gone-term'});
  const rpc={call:async(method:string,params:any={}):Promise<any>=>{if(method==='session.snapshot')return{snapshot:{focused_pane_id:'agent',panes:[pane,{pane_id:'reused',terminal_id:'replacement-term'}]}};if(method==='plugin.pane.open')return{plugin_pane:{plugin_id:'iob.herdr-prism',entrypoint:'inspector',pane}};if(method==='plugin.pane.close')closed.push(params.pane_id);return{};}};
  await assert.rejects(activate(context,rpc,{openView:()=>openPanel(rpc),mode:'inspector-only',timeoutMs:150}),/did not become ready/);assert.deepEqual(await store.read('pane'),{paneId:pane.pane_id,terminalId:pane.terminal_id});await deactivate(context,rpc,{timeoutMs:150});assert.deepEqual(closed,['never-started']);
+});
+
+
+test('explicit shortcut opt-out survives ordinary reactivation until explicitly enabled',async t=>{
+ const {shortcutPreference}=await import('../src/runtime/lifecycle.ts');const dir=await freshPrivateDirectory(path.join(os.tmpdir(),'prism-shortcut-pref-'));t.after(()=>rm(dir,{recursive:true,force:true}));const config=new StateStore(dir);
+ assert.equal(await shortcutPreference(config),true);assert.equal(await shortcutPreference(config,false),false);assert.equal(await shortcutPreference(new StateStore(dir)),false);assert.equal(await shortcutPreference(config,true),true);assert.equal(await shortcutPreference(new StateStore(dir)),true);
 });

@@ -1,3 +1,4 @@
+import {ActivityMonitor,activityState} from './activity.ts';
 import {normalizeTabOrder} from '../config/tab-order.ts';
 import {normalizeNativeGrouping} from '../config/native-grouping.ts';
 import {realpath} from 'node:fs/promises';
@@ -35,7 +36,7 @@ export interface CollectorOptions {
     signalProcess?: (pid:number,signal:'SIGTERM')=>void;
 }
 function blank(provider: string, id: string, cwd?: string, reason = 'Exact local transcript unavailable'): SessionEvidence { return { id, provider, cwd, messages: [], tools: [], usage: [], goals: [], availability: 'unavailable', reason }; }
-function nativeState(agent: HerdrAgent): string { return typeof agent.agent_status === 'string' ? agent.agent_status : agent.agent_status?.state ?? agent.agent_status?.status ?? 'unknown'; }
+function nativeState(agent: HerdrAgent): string { return activityState(agent); }
 export function matchesHarness(provider: string, p: {
     name?: string;
     argv0?: string;
@@ -47,7 +48,7 @@ export function matchesHarness(provider: string, p: {
     return allowed.includes(basename(script)) || /[\\/]node_modules[\\/](?:@earendil-works[\\/]pi-coding-agent[\\/]dist[\\/]bundle[\\/]cli\.js|@mariozechner[\\/]pi-coding-agent[\\/]dist[\\/]cli\.js)$/.test(script); if (provider === 'claude')
     return /[\\/]@anthropic-ai[\\/]claude-code[\\/]cli\.js$/.test(script); return false; }
 function sameOccupant(a: HerdrAgent, b: HerdrAgent): boolean { return a.terminal_id === b.terminal_id && a.agent === b.agent && a.agent_session?.kind === b.agent_session?.kind && a.agent_session?.value === b.agent_session?.value; }
-function inactive(state?:string):boolean { return state !== undefined && ['idle','done','completed','complete','error','interrupted','historical','waiting','blocked'].includes(state); }
+function inactive(state?:string):boolean { return state !== undefined && ['idle','paused','done','completed','complete','error','interrupted','historical','waiting','blocked'].includes(state); }
 export class Collector extends EventEmitter {
     data: DashboardData = { sessions: [], updatedAt: 0, stale: true, diagnostics: [] };
     readonly index: ProviderIndex;
@@ -88,9 +89,10 @@ export class Collector extends EventEmitter {
     private processesExpanded = false;
     private lastProcessAttemptAt = 0;
     private rootProofs = new Map<string,{attachment:HerdrAgent;root:ProcessRoot;bootId:string;verifiedAt:number}>();
+    private activity:ActivityMonitor;
     private todoHydrated = new Set<string>();
     private derived = new Map<string, {revision?:string; messages:SessionEvidence['messages']; cwd?:string; refs:SessionView['refs']; refAttemptAt:number}>();
-    constructor(options: CollectorOptions) { super(); this.data.tabOrder=normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess=options.signalProcess??((pid,signal)=>{process.kill(pid,signal);}); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
+    constructor(options: CollectorOptions) { super(); this.activity=new ActivityMonitor(options.rpc); this.data.tabOrder=normalizeTabOrder(options.settings.ui?.tabOrder); this.signalProcess=options.signalProcess??((pid,signal)=>{process.kill(pid,signal);}); this.endpoint = options.endpoint; this.paneOpen = options.paneOpen === true; this.visibleSession = options.visibleSession; this.rpc = options.rpc; this.settings = options.settings; this.store = new StateStore(options.stateDir); this.index = options.index ?? new ProviderIndex({ codexHome: options.settings.providerHomes.codex, claudeHome: options.settings.providerHomes.claude, piHome: options.settings.providerHomes.pi, maxMessages: 200 }); this.sampler = options.sampler ?? createSampler(); this.git = options.git ?? new GitCache(); this.publisher = new NativePublisher(options.rpc); }
     async init() { await this.store.init(); this.data.server = await loadServerIdentity(this.store, {session: serverSession(this.endpoint)}); this.publisher.setServerIdentity(this.data.server.id); const goals = await this.store.read<Record<string, GoalRecord[]>>('goals'); if (goals && typeof goals === 'object')
         for (const [key, value] of Object.entries(goals))
             if (Array.isArray(value))
@@ -172,6 +174,7 @@ export class Collector extends EventEmitter {
                 const snapshot: HerdrSnapshot = structuredClone(result.snapshot ?? result);
                 if (!Array.isArray(snapshot.agents) || typeof snapshot.protocol !== 'number')
                     throw new Error('Invalid Herdr snapshot');
+                if(this.settings.nativeMode!=='inspector-only'||this.paneOpen)await this.activity.update(snapshot.agents);
                 this.snapshot = snapshot;
                 this.index.setActiveRefs(snapshot.agents.flatMap(agent => agent.agent_session ? [{ provider: agent.agent ?? 'unknown', kind: agent.agent_session.kind, value: agent.agent_session.value }] : []));
                 const rejected=new Set<string>();

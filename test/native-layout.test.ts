@@ -18,7 +18,7 @@ test('native card resources stay compact and grouping publishes stable ranks wit
  const tokens=new Map();const sessions:any[]=['b','a','c'].map((id,i)=>({key:id,depth:0,children:[],evidence:{id,provider:'codex',title:'Session '+id,state:i===1?'blocked':'idle',cwd:'/projects/'+(i===2?'beta':'alpha'),messages:[],tools:[],goals:[],usage:[]},attachment:{pane_id:id,terminal_id:id,tab_id:i===2?'tab2':'tab1',agent_status:i===1?'blocked':'idle'},resource:{availability:'known',cpuPercent:2.456,memoryBytes:'3200',memoryLabel:'RSS sum',processes:[]}}));
  const publisher=new NativePublisher({call:async(method:string,p:any)=>{if(method==='pane.get')return{pane:{terminal_id:p.pane_id}};if(method==='pane.report_metadata')tokens.set(p.pane_id,p.tokens);return{};}} as any);
  await publisher.publish(sessions,1000,sessions,{grouping:'project',tabs:[{tab_id:'tab1',label:'Work'},{tab_id:'tab2',label:'Test'}]});
- assert.equal(tokens.get('a').hat_attention,'! INPUT REQUIRED');assert.equal(tokens.get('b').hat_attention,'○ WAITING FOR YOU');
+ assert.equal(tokens.get('a').hat_attention,'! INPUT REQUIRED');assert.equal(tokens.get('b').hat_attention,'○ IDLE');
  assert.equal(tokens.get('a').hat_load,'CPU 2.5%  RSS 3.2kB');
  assert.equal(tokens.get('a').hat_group,'Project: alpha');assert.equal(tokens.get('b').hat_group,'');assert.equal(tokens.get('c').hat_group,'Project: beta');
  await publisher.publish(sessions,7000,sessions,{grouping:'none'});assert.ok([...tokens.values()].every(v=>v.hat_group===''));
@@ -29,6 +29,6 @@ test('native attention order uses authoritative status, stays stable within tier
  const reports=new Map<string,any>(),order:string[]=[];
  const sessions:any[]=[['w','working'],['i1','idle'],['b','blocked'],['d','done'],['u','unknown'],['i2','idle']].map(([id,state])=>({key:id,depth:0,children:[],evidence:{id,provider:'codex',state:'blocked',messages:[],tools:[],usage:[],goals:[]},attachment:{pane_id:id,terminal_id:id,agent:'codex',agent_status:{state}}}));
  const publisher=new NativePublisher({call:async(method:string,p:any)=>{if(method==='pane.get')return{pane:{...sessions.find(s=>s.key===p.pane_id).attachment}};if(method==='pane.report_metadata'){reports.set(p.pane_id,p.tokens);order.push(p.pane_id);}return{};}} as any);
- await publisher.publish(sessions,1000);assert.deepEqual(order,['b','d','i1','i2','w','u']);assert.deepEqual([...reports.entries()].sort((a,b)=>a[1].hat_rank.localeCompare(b[1].hat_rank)).map(([id])=>id),order);
- order.length=0;sessions.find(s=>s.key==='b').attachment.agent_status={state:'working'};await publisher.publish(sessions,7000);assert.deepEqual(order,['d','i1','i2','w','b','u']);
+ await publisher.publish(sessions,1000);assert.deepEqual(order,['b','d','w','i1','i2','u']);assert.deepEqual([...reports.entries()].sort((a,b)=>a[1].hat_rank.localeCompare(b[1].hat_rank)).map(([id])=>id),order);
+ order.length=0;sessions.find(s=>s.key==='b').attachment.agent_status={state:'working'};await publisher.publish(sessions,7000);assert.deepEqual(order,['d','w','b','i1','i2','u']);
 });

@@ -57,6 +57,10 @@ export async function livePanelsTest({release,herdr=process.env.HERDR_BIN_PATH??
   assert.equal(rows.find(r=>r.tabId===alpha.tab_id).open,false);assert.equal(rows.find(r=>r.tabId===beta.tab_id).open,true);
   await until('remembered second view rendered',()=>shown(rows.find(r=>r.tabId===beta.tab_id).terminalId));assert.equal((await snapshot()).panes.length,3);
   result.independentPanels=true;result.repeatedOpenDidNotDuplicate=true;result.closePreservedOtherPanelAndCollector=true;result.restartPreservedOpenAndClosedTabs=true;
+  await waitAction((await cli(['plugin','action','invoke','deactivate','--plugin','iob.herdr-prism'])).log);
+  assert.equal((await snapshot()).panes.length,2);assert.equal(await readFile(configPath,'utf8'),original);
+  await waitAction((await cli(['plugin','action','invoke','activate-overview','--plugin','iob.herdr-prism'])).log);
+  assert.match(await readFile(configPath,'utf8'),/key = "prefix\+i"/);result.shortcutRestoredAfterDeactivateReactivate=true;
   await liveUninstall(options);installed=undefined;assert.equal((await snapshot()).panes.length,2);assert.equal(await readFile(configPath,'utf8'),original);result.completeUninstallPreservedNativePanes=true;
   // Start a separate proven owner with no views, then stop only our named server.
   const stateDir=path.join(directory,'liveness-state'),configDir=path.join(directory,'liveness-config');await new StateStore(stateDir).init();await new StateStore(configDir).write('settings',{providerHomes,nativeMode:'inspector-only',todosEnabled:true,sampleIntervalMs:2000});

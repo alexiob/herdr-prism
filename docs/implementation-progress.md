@@ -794,3 +794,34 @@ must preserve a last known same-model snapshot, and a legacy-only archive must
 not reintroduce mirror counters when logical same-ID rollouts merge. Precedence
 now applies before the assembly retention cap as well as within each parser.
 Final targeted provider/metrics/follow suite: 93/93 on macOS.
+
+
+## 2026-10-07 — truthful attention and shortcut reactivation
+
+A live Claude question sheet and stopped agents were both reported as `idle` by
+Herdr0.9.3. The old publisher mapped every idle state to WAITING FOR YOU, so all
+cards were amber and tied in urgency. Idle now remains quiet; pending UI choices
+are detected from current terminal controls and working spinners can correct an
+idle native observation. Exact native blocked state remains authoritative; paused
+goals cannot turn a working agent into paused. Bounded detection reads at most four
+24-line screens per inventory tick, retaining only status metadata, with an
+occupant recheck, two-second scan cadence and four-second freshness. No background
+transcript, Git or process scans are introduced. Native lifecycle state is not
+reported back or overwritten. Supported detectors are Claude/Codex English UI;
+unsupported/failed reads retain native status.
+
+The update sequence removed the owned prefix+i binding during deactivation;
+ordinary activation recreated it only for a managed installer request. Activation
+now restores the free default key and respects foreign bindings. Explicit installer
+shortcut opt-outs persist in private config across ordinary reactivation. The live
+binding was restored immediately and server reload returned applied with no
+configuration diagnostics.
+
+Verification: macOS full suite 398 tests (375 passed, 23 platform/opt-in skips),
+then final focused activity/config/collector/lifecycle/installer/schema suite
+60/60 on macOS and Linux arm64 Node22. Isolated actual live Herdr install,
+deactivate/reactivate with shortcut restoration, independent panels and complete
+removal pass on macOS and Linux. Proofs are in local ignored
+`artifacts/prism-activity-mac-panels` and `artifacts/prism-activity-linux-panels`.
+Review reproduced the transient shortcut opt-out before its persistence fix;
+final review reports no important findings.
