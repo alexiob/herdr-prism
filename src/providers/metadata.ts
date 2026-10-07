@@ -5,7 +5,7 @@ import {CodexAdapter} from './codex.ts';
 import {ClaudeAdapter} from './claude.ts';
 import {PiAdapter} from './pi.ts';
 
-/** Discovery reads one bounded header plus Pi's bounded explicit-fact tail. No message adapter consumes bodies. */
+/** Discovery reads one bounded header plus Pi's bounded names/explicit-fact windows. No message adapter consumes bodies. */
 export async function metadata(provider:string,path:string,maxRecord:number):Promise<EvidenceBuilder> {
  const builder=provider==='codex'?new CodexAdapter(provider,path,1):provider==='claude'?new ClaudeAdapter(path,1):new PiAdapter(provider,path,1);
  const file=await open(path,'r');try{
@@ -20,9 +20,9 @@ export async function metadata(provider:string,path:string,maxRecord:number):Pro
  else {
  if(first.type==='session')builder.consume({record:first,offset:0});else builder.diagnostic('Pi session header unavailable');
  if(builder.supported){
- // Companion facts are plain metadata. Read only a bounded first/last window, and never parse message records.
+ // Session names and companion facts are plain metadata. Read only a bounded first/last window, and never parse message records.
  const bound=Math.min(maxRecord,65536);const head=Buffer.alloc(Math.min(stat.size,bound));if(head.length)await file.read(head,0,head.length,0);const tailOffset=Math.max(head.length,stat.size-bound);const tail=Buffer.alloc(Math.max(0,stat.size-tailOffset));if(tail.length)await file.read(tail,0,tail.length,tailOffset);
- const scan=(buffer:Buffer,base:number,partial:boolean)=>{let start=partial?buffer.indexOf(10)+1:0;if(partial&&start===0)return;while(start<buffer.length){const next=buffer.indexOf(10,start);if(next<0)break;const row=buffer.subarray(start,next).toString('utf8');if(/"customType"\s*:\s*"iob\.herdr-prism"/.test(row)){try{const record=object(JSON.parse(row));if(record.type==='custom'&&['delegation','goal','state'].includes(object(record.data).kind))builder.consume({record,offset:base+start});}catch{builder.diagnostic('malformed explicit companion metadata');}}start=next+1;}};
+ const scan=(buffer:Buffer,base:number,partial:boolean)=>{let start=partial?buffer.indexOf(10)+1:0;if(partial&&start===0)return;while(start<buffer.length){const next=buffer.indexOf(10,start);if(next<0)break;const row=buffer.subarray(start,next).toString('utf8');if(/"customType"\s*:\s*"iob\.herdr-prism"|"type"\s*:\s*"session_info"/.test(row)){try{const record=object(JSON.parse(row));if(record.type==='session_info'||record.type==='custom'&&record.customType==='iob.herdr-prism'&&['delegation','goal','state'].includes(object(record.data).kind))builder.consume({record,offset:base+start});}catch{builder.diagnostic('malformed explicit session metadata');}}start=next+1;}};
  scan(head,0,false);scan(tail,tailOffset,tailOffset>head.length);
  }
  }

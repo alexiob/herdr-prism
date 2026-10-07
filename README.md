@@ -296,7 +296,11 @@ share a left edge and have a blank line between them.
 
 Agents shows this panel’s owner and only its recorded sub-agent tree. Each worker
 has a concise status and reported task or goal; unrelated host sessions are excluded.
-Enter inspects a worker inside Prism. Its name replaces the owner’s name, and a
+Enter inspects a worker inside Prism. The first line shows its breadcrumb,
+for example **Project agent > Parser > Verifier**. The current agent is highlighted;
+click an ancestor’s name to return to it. Narrow panels shorten names and collapse
+older ancestors to **…**, keeping the current agent visible. Missing or cyclic
+lineage also uses **…** rather than inventing a parent relationship. A
 **Worker view** banner provides clickable **Parent** (for nested workers) and
 **Owning agent** controls. `Escape` or `Backspace` returns one level outside
 details/help/editors; `Shift+F` returns directly to the owner’s Overview. These

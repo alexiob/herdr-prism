@@ -67,7 +67,7 @@ function contentRows(session:SessionView,state:UiState,columns:number,now:number
 }
 export function renderScreen(data:DashboardData,state:UiState,columns:number,height:number,now=Date.now()):RenderedScreen {
   if(data.tabOrder)state.tabOrder=[...data.tabOrder];
-  columns=Math.max(1,Math.floor(columns));height=Math.max(1,Math.floor(height));const session=data.sessions.find(s=>s.key===state.selectedKey)??(!state.restrictAutomaticSelection?data.sessions[0]:undefined);if(session&&!state.selectedKey)state.selectedKey=session.key;
+  columns=Math.max(1,Math.floor(columns));height=Math.max(1,Math.floor(height));const session=data.sessions.find(s=>s.key===state.selectedKey)??(!state.selectedKey&&!state.restrictAutomaticSelection?data.sessions[0]:undefined);if(session&&!state.selectedKey)state.selectedKey=session.key;
   if(state.refSources&&state.refSources.sessionKey!==session?.key){state.detail=undefined;closeDetail(state);}if(state.refSources&&state.refSources.revision!==session?.evidence.contentRevision)state.refSources.stale=true;
   const numericTargets=new Map<number,string>();let rows:ScreenRow[]=[];
   const server=data.server?`${data.server.host}/${data.server.session} · `:'';

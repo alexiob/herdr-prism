@@ -168,12 +168,16 @@ export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH
    const panel=await ownPane(beta.tab_id,beta.terminal_id),send=value=>cli(['pane','send-text',panel.pane_id,value]),screen=()=>text(panel.pane_id),notePath=path.join(store.dir,'notes',identityName('pi:fixture-beta'),'note.md'),saved=await readFile(notePath,'utf8'),nativeFocus=(await snapshot()).focused_pane_id;
    await send('\t\t\t\t');await until('recorded descendants appear in scoped Agents',async()=>{const value=await screen();return value.includes('[Agents]')&&value.includes('fixture-grandchild');});
    await send('3\r');await until('nested recorded worker inspection banner',async()=>{const value=await screen();return value.includes('fixture-grandchild')&&value.includes('Recorded worker')&&value.includes('Parent')&&value.includes('Owning agent');});
+   assert.match((await screen()).split('\n')[0],/fixture-beta > fixture-child > fixture-grandchild/,'first-line breadcrumb names the complete recorded location');
    assert.ok(!(await screen()).includes('no history'),'recorded worker has a clear resource explanation instead of empty charts');
+   const breadcrumb=(await screen()).split('\n')[0],parentColumn=breadcrumb.indexOf('fixture-child')+1;assert.ok(parentColumn>0);
+   await send(`\x1b[<0;${parentColumn};1M\x1b[<0;${parentColumn};1m`);await until('breadcrumb click returns to the recorded parent',async()=>(await screen()).split('\n')[0].trim()==='fixture-beta > fixture-child');
+   await send('\t\t\t\t');await until('Agents available after ancestor click',async()=>(await screen()).includes('[Agents]'));await send('3\r');await until('grandchild inspection restored',async()=>(await screen()).split('\n')[0].includes('fixture-grandchild'));
    await send('\x7f');await until('Backspace returns to recorded parent',async()=>{const value=await screen();return value.split('\n')[0].includes('fixture-child')&&!value.split('\n')[0].includes('fixture-grandchild');});
    await send('\t');await until('Notes remains the owning beta notebook during worker inspection',async()=>{const value=await screen();return value.includes('[Notes]')&&value.split('\n')[0].includes('fixture-beta')&&value.includes('External authoritative edit');});assert.equal(await readFile(notePath,'utf8'),saved);
    await send('F');await until('Shift+F returns to the owning Overview with live resources',async()=>{const value=await screen();return value.includes('[Overview]')&&value.split('\n')[0].includes('fixture-beta')&&!value.includes('Recorded worker');});
    assert.equal((await snapshot()).focused_pane_id,nativeFocus,'worker navigation must not focus a native agent');assert.equal(await readFile(notePath,'utf8'),saved);
-   return{nestedBanner:true,parentBackspace:true,directOwnerReturn:true,ownerNotebookPreserved:true,recordedResourceExplanation:true,nativeFocusPreserved:true};
+   return{nestedBanner:true,fullBreadcrumb:true,breadcrumbAncestorClick:true,parentBackspace:true,directOwnerReturn:true,ownerNotebookPreserved:true,recordedResourceExplanation:true,nativeFocusPreserved:true};
   });
   await stage('livePanelTabOrderReload',async()=>{
    const panel=await ownPane(beta.tab_id,beta.terminal_id),send=value=>cli(['pane','send-text',panel.pane_id,value]),screen=()=>text(panel.pane_id),settingsPath=path.join(settingsDir,'settings.json');

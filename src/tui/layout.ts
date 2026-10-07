@@ -1,5 +1,5 @@
 import {resolveNotesSessionKey,inspectionParentKey} from '../runtime/follow.ts';
-import {sessionName} from './identity.ts';
+import {sessionName,breadcrumbPath,fitBreadcrumb} from './identity.ts';
 import {orderedTabs,tabLabel} from './types.ts';
 import type {DashboardData,UiState,ScreenRow,RenderedScreen,DetailDocument,DetailSection,TabRegion,RowRegion,SectionRegion,ReaderPosition} from './types.ts';
 import type {TextSpan} from './theme.ts';
@@ -18,11 +18,19 @@ export function renderLayout(data:DashboardData,state:UiState,sections:LayoutSec
  columns=Math.max(1,Math.floor(columns));height=Math.max(1,Math.floor(height));
  const notebook=state.tab==='Notes'&&!state.help&&state.detail===undefined;
  const displayedKey=notebook?resolveNotesSessionKey(state):state.selectedKey;
- const session=data.sessions.find(s=>s.key===displayedKey)??(!notebook&&!state.restrictAutomaticSelection&&!state.notes?.editing?data.sessions[0]:undefined);
+ const session=data.sessions.find(s=>s.key===displayedKey)??(!displayedKey&&!notebook&&!state.restrictAutomaticSelection&&!state.notes?.editing?data.sessions[0]:undefined);
  const name=session?sessionName(session):notebook&&state.notes&&state.notes.sessionKey===displayedKey?state.notes.title:'Agent unavailable',provider=session?.evidence.provider??'—',model=session?.evidence.model??session?.usage?.model??'model —';
  const inspecting=Boolean(!notebook&&state.boundSessionKey&&displayedKey!==state.boundSessionKey),transcriptOnly=inspecting&&session&&!session.attachment&&!session.attachments?.length;
- const header:TextSpan[][]=[[span(`${data.demo?'[DEMO] ':''}${name}`,'accent')],[span(`${provider} · ${model} · ${session?.evidence.state??'unknown'}${state.pin&&!notebook?' · Pinned':''}`,'identity')]];
  const navigationRegions:NonNullable<RenderedScreen['navigationRegions']>=[];
+ const path=breadcrumbPath(data,notebook?displayedKey:state.boundSessionKey,displayedKey??session?.key);path.at(-1)!.label=name;
+ const demoPrefix=data.demo&&columns>=20?'[DEMO] ':'',parts=fitBreadcrumb(path,columns-cellWidth(demoPrefix)),breadcrumb:TextSpan[]=[span(demoPrefix,'secondary')];let breadcrumbX=cellWidth(demoPrefix)+1;
+ for(const [index,part]of parts.entries()){
+  if(index){breadcrumb.push(span(' > ','secondary'));breadcrumbX+=3;}
+  const current=index===parts.length-1;breadcrumb.push({...span(part.label,current?'accent':'path'),bold:current});
+  if(part.key&&!current)navigationRegions.push({x:breadcrumbX,y:1,width:cellWidth(part.label),action:{type:part.key===state.boundSessionKey?'follow-bound':'select',sessionKey:part.key}});
+  breadcrumbX+=cellWidth(part.label);
+ }
+ const header:TextSpan[][]=[breadcrumb,[span(`${provider} · ${model} · ${session?.evidence.state??'unknown'}${state.pin&&!notebook?' · Pinned':''}`,'identity')]];
  if(inspecting){
   const parentKey=inspectionParentKey(data,state),parent=data.sessions.find(s=>s.key===parentKey),owner=data.sessions.find(s=>s.key===state.boundSessionKey);
   const descriptor=transcriptOnly?'Recorded worker':'Worker view';

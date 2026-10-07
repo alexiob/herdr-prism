@@ -4,7 +4,7 @@ import { filePath, identity, object, time } from "./common.js";
 import { CodexAdapter } from "./codex.js";
 import { ClaudeAdapter } from "./claude.js";
 import { PiAdapter } from "./pi.js";
-/** Discovery reads one bounded header plus Pi's bounded explicit-fact tail. No message adapter consumes bodies. */
+/** Discovery reads one bounded header plus Pi's bounded names/explicit-fact windows. No message adapter consumes bodies. */
 export async function metadata(provider, path, maxRecord) {
     const builder = provider === 'codex' ? new CodexAdapter(provider, path, 1) : provider === 'claude' ? new ClaudeAdapter(path, 1) : new PiAdapter(provider, path, 1);
     const file = await open(path, 'r');
@@ -64,7 +64,7 @@ export async function metadata(provider, path, maxRecord) {
             else
                 builder.diagnostic('Pi session header unavailable');
             if (builder.supported) {
-                // Companion facts are plain metadata. Read only a bounded first/last window, and never parse message records.
+                // Session names and companion facts are plain metadata. Read only a bounded first/last window, and never parse message records.
                 const bound = Math.min(maxRecord, 65536);
                 const head = Buffer.alloc(Math.min(stat.size, bound));
                 if (head.length)
@@ -79,14 +79,14 @@ export async function metadata(provider, path, maxRecord) {
                     if (next < 0)
                         break;
                     const row = buffer.subarray(start, next).toString('utf8');
-                    if (/"customType"\s*:\s*"iob\.herdr-prism"/.test(row)) {
+                    if (/"customType"\s*:\s*"iob\.herdr-prism"|"type"\s*:\s*"session_info"/.test(row)) {
                         try {
                             const record = object(JSON.parse(row));
-                            if (record.type === 'custom' && ['delegation', 'goal', 'state'].includes(object(record.data).kind))
+                            if (record.type === 'session_info' || record.type === 'custom' && record.customType === 'iob.herdr-prism' && ['delegation', 'goal', 'state'].includes(object(record.data).kind))
                                 builder.consume({ record, offset: base + start });
                         }
                         catch {
-                            builder.diagnostic('malformed explicit companion metadata');
+                            builder.diagnostic('malformed explicit session metadata');
                         }
                     }
                     start = next + 1;

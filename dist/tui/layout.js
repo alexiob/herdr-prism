@@ -1,5 +1,5 @@
 import { resolveNotesSessionKey, inspectionParentKey } from "../runtime/follow.js";
-import { sessionName } from "./identity.js";
+import { sessionName, breadcrumbPath, fitBreadcrumb } from "./identity.js";
 import { orderedTabs, tabLabel } from "./types.js";
 import { span, pad, summary, readableWrap, valueSpans, asciiText, fitSpans } from "./widgets.js";
 import { cellWidth, truncate, age } from "./text.js";
@@ -24,11 +24,26 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
     height = Math.max(1, Math.floor(height));
     const notebook = state.tab === 'Notes' && !state.help && state.detail === undefined;
     const displayedKey = notebook ? resolveNotesSessionKey(state) : state.selectedKey;
-    const session = data.sessions.find(s => s.key === displayedKey) ?? (!notebook && !state.restrictAutomaticSelection && !state.notes?.editing ? data.sessions[0] : undefined);
+    const session = data.sessions.find(s => s.key === displayedKey) ?? (!displayedKey && !notebook && !state.restrictAutomaticSelection && !state.notes?.editing ? data.sessions[0] : undefined);
     const name = session ? sessionName(session) : notebook && state.notes && state.notes.sessionKey === displayedKey ? state.notes.title : 'Agent unavailable', provider = session?.evidence.provider ?? '—', model = session?.evidence.model ?? session?.usage?.model ?? 'model —';
     const inspecting = Boolean(!notebook && state.boundSessionKey && displayedKey !== state.boundSessionKey), transcriptOnly = inspecting && session && !session.attachment && !session.attachments?.length;
-    const header = [[span(`${data.demo ? '[DEMO] ' : ''}${name}`, 'accent')], [span(`${provider} · ${model} · ${session?.evidence.state ?? 'unknown'}${state.pin && !notebook ? ' · Pinned' : ''}`, 'identity')]];
     const navigationRegions = [];
+    const path = breadcrumbPath(data, notebook ? displayedKey : state.boundSessionKey, displayedKey ?? session?.key);
+    path.at(-1).label = name;
+    const demoPrefix = data.demo && columns >= 20 ? '[DEMO] ' : '', parts = fitBreadcrumb(path, columns - cellWidth(demoPrefix)), breadcrumb = [span(demoPrefix, 'secondary')];
+    let breadcrumbX = cellWidth(demoPrefix) + 1;
+    for (const [index, part] of parts.entries()) {
+        if (index) {
+            breadcrumb.push(span(' > ', 'secondary'));
+            breadcrumbX += 3;
+        }
+        const current = index === parts.length - 1;
+        breadcrumb.push({ ...span(part.label, current ? 'accent' : 'path'), bold: current });
+        if (part.key && !current)
+            navigationRegions.push({ x: breadcrumbX, y: 1, width: cellWidth(part.label), action: { type: part.key === state.boundSessionKey ? 'follow-bound' : 'select', sessionKey: part.key } });
+        breadcrumbX += cellWidth(part.label);
+    }
+    const header = [breadcrumb, [span(`${provider} · ${model} · ${session?.evidence.state ?? 'unknown'}${state.pin && !notebook ? ' · Pinned' : ''}`, 'identity')]];
     if (inspecting) {
         const parentKey = inspectionParentKey(data, state), parent = data.sessions.find(s => s.key === parentKey), owner = data.sessions.find(s => s.key === state.boundSessionKey);
         const descriptor = transcriptOnly ? 'Recorded worker' : 'Worker view';
