@@ -68,7 +68,9 @@ export async function liveUninstall(options={}){
   const dirs=[...new Set([await proveDirectory(result.configDir,root,receipt),await proveDirectory(result.stateDir,root,receipt)])];
   if(info){await herdr(options,['plugin','disable',pluginId]);await herdr(options,['plugin','uninstall',pluginId]);if(await registration(options))throw new Error('Herdr still registers the plugin; owned files retained');}
   // Recheck ownership immediately before each deletion. Never delete a linked source checkout.
-  for(const dir of dirs){await proveDirectory(dir,root,receipt);await rm(dir,{recursive:true,force:false});}
+  // Already-admitted finite hooks can release files during the owned-state walk.
+  // Admission never recreates a missing root; bounded fs retries let that walk finish.
+  for(const dir of dirs){await proveDirectory(dir,root,receipt);await rm(dir,{recursive:true,force:false,maxRetries:10,retryDelay:100});}
   await readReceipt(root);await rm(root,{recursive:true,force:false});return {removed:true,pluginId,managedDir:root,purged:dirs};
  });
 }
