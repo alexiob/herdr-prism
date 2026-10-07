@@ -8,6 +8,7 @@ import { atomicWrite, readOptional, securePluginNamespace, restrict } from "../c
 import { acquireAdmission } from "./admission.js";
 import { pluginId, source, clearPublication } from "../native/publisher.js";
 import { openTabPanel, ensureCollectorService } from "./collector-service.js";
+import { requestedViewsReady } from "./panel-views.js";
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 async function recordedPanes(store, controller) { const views = await store.read('views') ?? []; if (!Array.isArray(views) || views.length > 128)
     throw new Error('Invalid panel ownership records'); return [...views, await store.read('pane'), controller].filter((value) => !!value && typeof value.terminalId === 'string'); }
@@ -110,18 +111,26 @@ export async function activate(context, rpc, options = {}) {
     await waitForViewsStopped(context.serverStateDir, options.timeoutMs ?? 15000);
     const openView = options.openView ?? ((targetPaneId) => openTabPanel(context, targetPaneId));
     let opened;
+    const requested = [];
+    const openRequested = async (targetPaneId) => {
+        const result = await openView(targetPaneId), owned = result.plugin_pane;
+        if (owned?.plugin_id !== pluginId || owned.entrypoint !== 'inspector' || typeof owned.pane?.pane_id !== 'string' || typeof owned.pane?.terminal_id !== 'string')
+            throw new Error('Invalid dashboard pane ownership response');
+        requested.push({ paneId: owned.pane.pane_id, terminalId: owned.pane.terminal_id });
+        return result;
+    };
     if (remembered.length) {
         const response = await rpc.call('session.snapshot'), snapshot = response.snapshot ?? response;
         for (const record of remembered.filter(r => r.open)) {
             const target = record.targetTerminalId ? snapshot.panes.find((p) => p.terminal_id === record.targetTerminalId) : snapshot.agents?.find((a) => a.tab_id === record.tabId);
             if (target)
-                opened = await openView(target.pane_id);
+                opened = await openRequested(target.pane_id);
         }
         if (!opened)
             await ensureCollectorService(context);
     }
     else
-        opened = await openView();
+        opened = await openRequested();
     if (opened) {
         const pluginPane = opened.plugin_pane;
         if (pluginPane?.plugin_id !== pluginId || pluginPane.entrypoint !== 'inspector' || typeof pluginPane.pane?.pane_id !== 'string' || typeof pluginPane.pane?.terminal_id !== 'string')
@@ -136,7 +145,7 @@ export async function activate(context, rpc, options = {}) {
         if (controller) {
             try {
                 const status = await controller.client.request('ping');
-                if (status.ready && !status.stale)
+                if (status.ready && !status.stale && await requestedViewsReady(serverStore, rpc, requested))
                     return { activated: true, configDir: context.configDir, stateDir: context.stateDir, mode, conflicts: changed.conflicts, ...(changed.shortcut ? { shortcut: changed.shortcut } : {}) };
             }
             catch { /* Pane startup is asynchronous; wait for its authenticated ready signal. */ }

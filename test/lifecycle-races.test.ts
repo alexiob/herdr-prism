@@ -29,10 +29,11 @@ test('activation replaces an owned inspector that exits between snapshot and clo
     const store = new StateStore(context.serverStateDir);
     await store.write('pane', { paneId: 'exiting', terminalId: 'exiting-terminal' });
     let gone = false, opened = false;
+    const replacement={pane_id:'replacement',terminal_id:'replacement-terminal',tab_id:'tab'};
     let mailbox: MailboxServer | undefined;
     t.after(async () => { await mailbox?.close(); });
     const rpc = { call: async (method: string, params: any = {}): Promise<any> => {
-        if (method === 'session.snapshot') return { snapshot: { focused_pane_id: 'original', panes: gone ? [] : [{ pane_id: 'exiting', terminal_id: 'exiting-terminal' }] } };
+        if (method === 'session.snapshot') return { snapshot: { focused_pane_id: 'original', panes: opened ? [replacement] : gone ? [] : [{ pane_id: 'exiting', terminal_id: 'exiting-terminal' }] } };
         if (method === 'plugin.pane.close') {
             assert.equal(params.pane_id, 'exiting');
             gone = true;
@@ -42,9 +43,10 @@ test('activation replaces an owned inspector that exits between snapshot and clo
             assert.ok(gone);
             opened = true;
             await store.write('controller', { token: 'replacement-token', pid: process.pid });
+            await store.write('views',[{paneId:replacement.pane_id,terminalId:replacement.terminal_id,tabId:replacement.tab_id,targetTerminalId:'original-terminal',pid:process.pid,open:true,ready:true}]);
             mailbox = new MailboxServer(context.serverStateDir, 'replacement-token', async () => ({ ready: true, stale: false }));
             await mailbox.start();
-            return { plugin_pane: { plugin_id: 'iob.herdr-prism', entrypoint: 'inspector', pane: { pane_id: 'replacement', terminal_id: 'replacement-terminal' } } };
+            return { plugin_pane: { plugin_id: 'iob.herdr-prism', entrypoint: 'inspector', pane: replacement } };
         }
         return {};
     } };

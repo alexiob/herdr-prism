@@ -74,22 +74,24 @@ test('live activation waits for authenticated ready pane and marks only owned di
     const context = { stateDir: path.join(dir, 'state'), configDir: path.join(dir, 'config'), configPath: path.join(dir, 'config.toml'), endpoint: 'test', serverStateDir: path.join(dir, 'state', 'servers', identityName('test')) };
     const {privateDir}=await import('../src/config/safe-file.ts');await privateDir(context.stateDir);await privateDir(context.configDir);const savedEnv={HERDR_PLUGIN_ID:process.env.HERDR_PLUGIN_ID,HERDR_PLUGIN_CONFIG_DIR:process.env.HERDR_PLUGIN_CONFIG_DIR,HERDR_PLUGIN_STATE_DIR:process.env.HERDR_PLUGIN_STATE_DIR};process.env.HERDR_PLUGIN_ID='iob.herdr-prism';process.env.HERDR_PLUGIN_CONFIG_DIR=context.configDir;process.env.HERDR_PLUGIN_STATE_DIR=context.stateDir;
     const store = new StateStore(context.serverStateDir);
-    let ready = false, server: MailboxServer | undefined;
+    let ready = true, frontendReady=false, timer:NodeJS.Timeout|undefined, server: MailboxServer | undefined;
     const root = path.join(dir, 'managed');
     await mkdir(root);
     const request: any = { version: 1, pluginId: 'iob.herdr-prism', token: '1234567890123456', requestId: 'x', operation: 'activate', mode: 'inspector-only' };
     const rpc = { call: async (method: string): Promise<any> => { if (method === 'session.snapshot')
-            return { snapshot: { focused_pane_id: 'agent' } }; if (method === 'plugin.pane.open') {
+            return { snapshot: { focused_pane_id: 'agent',panes:[{pane_id:'panel',terminal_id:'panel-term',tab_id:'tab'}] } }; if (method === 'plugin.pane.open') {
             await store.write('controller', { token: 'controller-token', pid: process.pid });
             server = new MailboxServer(context.serverStateDir, 'controller-token', async (op) => op === 'ping' ? { ready, stale: !ready } : { paneId: 'panel' });
             await server.start();
-            setTimeout(() => { ready = true; }, 150);
+            await store.write('views',[{paneId:'panel',terminalId:'panel-term',targetTerminalId:'agent-term',tabId:'tab',open:true,pid:process.pid,ready:false}]);
+            timer=setTimeout(()=>{frontendReady=true;void store.write('views',[{paneId:'panel',terminalId:'panel-term',targetTerminalId:'agent-term',tabId:'tab',open:true,pid:process.pid,ready:true}]);},150);
             return{plugin_pane:{plugin_id:'iob.herdr-prism',entrypoint:'inspector',pane:{pane_id:'panel',terminal_id:'panel-term'}}};
         } return {}; } };
     try {
         const result = await activate(context, rpc, { openView:()=>openPanel(rpc), mode: 'inspector-only', request, root, timeoutMs: 3000 });
         assert.equal(result.activated, true);
         assert.equal(ready, true);
+        assert.equal(frontendReady,true,'a ready collector cannot stand in for an unpainted frontend');
         const owner = JSON.parse(await readFile(path.join(context.stateDir, '.hat-lifecycle-owner.json'), 'utf8'));
         assert.equal(owner.token, request.token);
         assert.equal(owner.installRoot, root);
@@ -99,6 +101,7 @@ test('live activation waits for authenticated ready pane and marks only owned di
         assert.match(await readFile(context.configPath,'utf8'),/key = "prefix\+i"/,'activation restores the free default shortcut without an installer request');
     }
     finally {
+        clearTimeout(timer);
         await server?.close();for(const[key,value]of Object.entries(savedEnv))if(value===undefined)delete process.env[key];else process.env[key]=value;
         await rm(dir, { recursive: true, force: true });
     }
@@ -115,8 +118,8 @@ test('reactivation closes every recorded old owned pane before opening replaceme
  const store=new StateStore(context.serverStateDir);const servers:MailboxServer[]=[];t.after(async()=>{for(const server of servers)await server.close();});
  const start=async(token:string,paneId:string,terminalId:string)=>{await store.write('controller',{token,pid:process.pid,paneId,terminalId});let server:MailboxServer;server=new MailboxServer(context.serverStateDir,token,async op=>{if(op==='shutdown'){setTimeout(()=>void(async()=>{await server.close();await store.remove('controller');})(),30);return{stopping:true};}return{ready:true,stale:false};});servers.push(server);await server.start();};
  await store.write('pane',{paneId:'persisted-old',terminalId:'persisted-term'});await start('old-token','controller-old','controller-term');
- const panes=[{pane_id:'agent',terminal_id:'agent-term'},{pane_id:'persisted-old',terminal_id:'persisted-term'},{pane_id:'controller-old',terminal_id:'controller-term'},{pane_id:'foreign',terminal_id:'foreign-term'}];const closed:string[]=[];
- const rpc={call:async(method:string,params:any={}):Promise<any>=>{if(method==='session.snapshot')return{snapshot:{focused_pane_id:'agent',panes}};if(method==='plugin.pane.close'){closed.push(params.pane_id);panes.splice(panes.findIndex(p=>p.pane_id===params.pane_id),1);}if(method==='plugin.pane.open'){assert.deepEqual(new Set(closed),new Set(['persisted-old','controller-old']),'all old owned panes close before marker is replaced');const pane={pane_id:'replacement',terminal_id:'replacement-term'};panes.push(pane);await store.write('pane',{paneId:'replacement',terminalId:'replacement-term'});await start('new-token','replacement','replacement-term');return{plugin_pane:{plugin_id:'iob.herdr-prism',entrypoint:'inspector',pane}};}return{};}};
+ const panes=[{pane_id:'agent',terminal_id:'agent-term',tab_id:'tab'},{pane_id:'persisted-old',terminal_id:'persisted-term',tab_id:'tab'},{pane_id:'controller-old',terminal_id:'controller-term',tab_id:'tab'},{pane_id:'foreign',terminal_id:'foreign-term',tab_id:'tab'}];const closed:string[]=[];
+ const rpc={call:async(method:string,params:any={}):Promise<any>=>{if(method==='session.snapshot')return{snapshot:{focused_pane_id:'agent',panes}};if(method==='plugin.pane.close'){closed.push(params.pane_id);panes.splice(panes.findIndex(p=>p.pane_id===params.pane_id),1);}if(method==='plugin.pane.open'){assert.deepEqual(new Set(closed),new Set(['persisted-old','controller-old']),'all old owned panes close before marker is replaced');const pane={pane_id:'replacement',terminal_id:'replacement-term',tab_id:'tab'};panes.push(pane);await store.write('pane',{paneId:'replacement',terminalId:'replacement-term'});await store.write('views',[{paneId:pane.pane_id,terminalId:pane.terminal_id,tabId:pane.tab_id,targetTerminalId:'agent-term',pid:process.pid,open:true,ready:true}]);await start('new-token','replacement','replacement-term');return{plugin_pane:{plugin_id:'iob.herdr-prism',entrypoint:'inspector',pane}};}return{};}};
  await activate(context,rpc,{openView:()=>openPanel(rpc),mode:'inspector-only',timeoutMs:3000});await deactivate(context,rpc,{timeoutMs:3000});assert.deepEqual(new Set(closed),new Set(['persisted-old','controller-old','replacement']));assert.ok(panes.some(p=>p.pane_id==='foreign'));assert.ok(panes.some(p=>p.pane_id==='agent'));
 });
 

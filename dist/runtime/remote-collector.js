@@ -32,6 +32,8 @@ export class RemoteCollector extends EventEmitter {
     setVisibleSession(key, visible = true) { this.key = key; this.visible = visible; }
     setScope(subtree) { this.subtree = subtree; }
     setProcessesExpanded(expanded) { this.expanded = expanded; }
+    async markReady() { if (this.stopped || !this.client)
+        throw new Error('View is not running'); return this.client.request('view.ready', { paneId: this.paneId, terminalId: this.terminalId, pid: process.pid }); }
     invalidate() { if (this.client)
         void this.refresh().catch(error => this.emit('diagnostic', error.message)); }
     async refresh() {

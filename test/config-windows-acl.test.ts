@@ -62,6 +62,24 @@ test('icacls owner and DACL modes use separate literal argv with numeric SID pre
  assert.deepEqual(api.windowsAclCommands(unc,user,false),[[unc,'/setowner','*'+user],[unc,'/inheritance:r','/grant:r','*'+user+':F']]);
  assert.throws(()=>api.windowsAclCommands(directory,user+' /T',true),/SID/);
 });
+test('long absolute drive and UNC ACL arguments use validated extended paths without changing literal components',()=>{
+ const tail=['a'.repeat(90),'b'.repeat(90),'literal $(text) & space','c'.repeat(60)].join('\\');
+ const drive='C:\\private\\'+tail,unc='\\\\server\\share\\'+tail;
+ for(const [path,expected]of [[drive,'\\\\?\\'+drive],[unc,'\\\\?\\UNC\\'+unc.slice(2)]]){
+  assert.ok(path!.length>=260);const commands=api.windowsAclCommands(path!,user,true,[system]);
+  assert.ok(commands.every(command=>command[0]===expected));assert.deepEqual(commands.map(command=>command.slice(1)),[['/setowner','*'+user],['/inheritance:r','/grant:r','*'+user+':(OI)(CI)F'],['/remove:g','*'+system]]);
+  assert.deepEqual(api.windowsAclCommands(expected!,user,true),commands.slice(0,2),'an already-qualified path is never prefixed twice');
+ }
+ const slashDrive=drive.replace(/\\/g,'/');assert.equal(api.windowsAclCommands(slashDrive,user,false)[0]![0],'\\\\?\\'+drive);
+ const atLimit='C:\\'+['a'.repeat(100),'b'.repeat(100),'c'.repeat(54)].join('\\');assert.equal(atLimit.length,259);assert.equal(api.windowsAclCommands(atLimit,user,false)[0]![0],atLimit);assert.equal(api.windowsAclCommands(atLimit+'c',user,false)[0]![0],'\\\\?\\'+atLimit+'c');
+ for(const path of ['relative\\'+tail,'C:'+tail,'\\'+tail,'\\\\.\\C:\\'+tail,'\\\\?\\GLOBALROOT\\'+tail,'C:\\private\\..\\'+tail,'C:\\private\\'+tail+' ','C:\\private\\'+tail+'*','C:\\private\\'+tail+'\0','\\\\?\\C:/private/'+tail])assert.throws(()=>api.windowsAclCommands(path,user,false),/path|canonical|absolute/i,path);
+});
+test('actual Windows nested private atomic files beyond MAX_PATH retain strict ACLs and missing-file failures',{skip:process.platform!=='win32'},async t=>{
+ const root=await mkdtemp(join(tmpdir(),'prism-long-acl-'));t.after(()=>rm(root,{recursive:true,force:true}));await security.restrict(root);
+ const directory=join(root,'a'.repeat(80),'b'.repeat(80),'c'.repeat(70));assert.ok(directory.length>260);await security.privateDir(directory);
+ const file=join(directory,'preferences $(literal) & unchanged.json');await security.atomicWrite(file,'long-path original');await security.atomicWrite(file,'long-path replacement');assert.equal(await readFile(file,'utf8'),'long-path replacement');security.assertWindowsAcl(await security.readWindowsAcl(directory),{strict:true});security.assertWindowsAcl(await security.readWindowsAcl(file),{strict:true});
+ await assert.rejects(security.restrict(join(directory,'missing-file.json')),error=>(error as NodeJS.ErrnoException).code==='ENOENT');
+});
 test('fresh-artifact ACL plan removes every foreign grant SID after securing user access, excluding and deduplicating the user SID',()=>{
  const directory='C:\\own private\\$(literal) & unchanged';
  assert.deepEqual(api.windowsAclCommands(directory,user,true,[admin,user,system,admin,user]),[[directory,'/setowner','*'+user],[directory,'/inheritance:r','/grant:r','*'+user+':(OI)(CI)F'],[directory,'/remove:g','*'+admin,'*'+system]]);

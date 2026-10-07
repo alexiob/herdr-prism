@@ -39,9 +39,40 @@ export function assertWindowsAcl(acl, { strict = false, allowTokenOwner = false 
     if (strict && foreign.length)
         throw new Error('Foreign allow ACL (residual SIDs: ' + foreign.join(', ') + ')');
 }
+/** Qualify long filenames for the external ACL tool independently of Node's fs APIs.
+ * Extended Windows paths bypass normalization, so refuse ambiguous components
+ * instead of changing which object passed the ownership inspection. */
+export function windowsAclPath(path) {
+    if (typeof path !== 'string' || !path || /[\x00-\x1f]/.test(path))
+        throw new Error('Invalid Windows ACL path');
+    const native = path.replace(/\//g, '\\'), extended = native.startsWith('\\\\?\\');
+    if (native.startsWith('\\\\.\\'))
+        throw new Error('Unsupported Windows ACL device path');
+    if (!extended && path.length < 260) {
+        if (/[?*]/.test(path))
+            throw new Error('Invalid Windows ACL wildcard path');
+        return path;
+    }
+    if (extended && native !== path)
+        throw new Error('Extended Windows ACL path must be canonical');
+    const absolute = extended ? (native.slice(4, 8).toUpperCase() === 'UNC\\' ? '\\\\' + native.slice(8) : native.slice(4)) : native;
+    const drive = /^[A-Za-z]:\\/.test(absolute), unc = /^\\\\[^\\<>:"|?*]+\\[^\\<>:"|?*]+(?:\\|$)/.test(absolute);
+    if (!drive && !unc)
+        throw new Error('Long Windows ACL path must be an absolute drive or UNC filename');
+    const components = (drive ? absolute.slice(3) : absolute.slice(2)).split('\\');
+    if (components.at(-1) === '')
+        components.pop();
+    if (components.some(component => !component || component.length > 255 || /[<>:"|?*]|[ .]$/.test(component)))
+        throw new Error('Long Windows ACL path must have canonical literal components');
+    const qualified = extended ? path : drive ? '\\\\?\\' + absolute : '\\\\?\\UNC\\' + absolute.slice(2);
+    if (qualified.length >= 32767)
+        throw new Error('Windows ACL path exceeds the extended path limit');
+    return qualified;
+}
 export function windowsAclCommands(path, sid, directory, allowSids = []) {
     if (!validSid(sid) || !Array.isArray(allowSids) || allowSids.some(value => !validSid(value)))
         throw new Error('Invalid current user or ACL grant SID');
+    path = windowsAclPath(path);
     // /setowner and DACL modification are separate documented icacls modes.
     const commands = [[path, '/setowner', '*' + sid], [path, '/inheritance:r', '/grant:r', `*${sid}:${directory ? '(OI)(CI)' : ''}F`]];
     // Inheritance removal affects only inherited ACEs; /grant:r replaces grants for

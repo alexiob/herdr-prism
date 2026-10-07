@@ -1,11 +1,34 @@
 import type {Rpc} from '../model/types.ts';
-import {StateStore,identityName} from '../state/store.ts';
+import {StateStore,identityName,processIsAbsent} from '../state/store.ts';
 import {openPanel} from './actions.ts';
 import {join} from 'node:path';
 
 export const DEFAULT_PANEL_COLUMNS=60;
-export interface PanelRecord {tabId:string;paneId:string;terminalId:string;targetTerminalId?:string;open:boolean;pid?:number;}
+export interface PanelRecord {tabId:string;paneId:string;terminalId:string;targetTerminalId?:string;open:boolean;pid?:number;ready?:boolean;}
 export function panelViewStore(serverStateDir:string,tabId:string,targetTerminalId?:string){return new StateStore(join(serverStateDir,'views',identityName(targetTerminalId ? JSON.stringify([tabId,targetTerminalId]) : tabId)));}
+/** Herdr can start the child before returning its authoritative open identity. */
+export async function waitForPanelRecord(store:StateStore,own:{paneId:string;terminalId:string;tabId:string},timeoutMs=10000):Promise<PanelRecord>{
+ const deadline=Date.now()+timeoutMs;
+ do{
+  const rows=await store.read<PanelRecord[]>('views');
+  if(rows!==undefined&&(!Array.isArray(rows)||rows.length>128))throw new Error('Invalid panel ownership records');
+  const record=rows?.find(row=>row.terminalId===own.terminalId);
+  if(record&&(record.paneId!==own.paneId||record.tabId!==own.tabId||!record.open))throw new Error('Inspector binding identity changed');
+  if(record&&typeof record.targetTerminalId==='string'&&record.targetTerminalId)return record;
+  if(Date.now()>=deadline)break;
+  await new Promise(resolve=>setTimeout(resolve,Math.min(25,deadline-Date.now())));
+ }while(Date.now()<=deadline);
+ throw new Error('Inspector binding did not become available');
+}
+/** A collector being ready says nothing about its independently launched frontends. */
+export async function requestedViewsReady(store:StateStore,rpc:Rpc,requested:{paneId:string;terminalId:string}[]):Promise<boolean>{
+ if(!requested.length)return true;
+ const records=await new PanelViews(store,rpc).records();
+ const selected=requested.map(own=>records.find(record=>record.terminalId===own.terminalId&&record.paneId===own.paneId));
+ if(selected.some(record=>!record?.open||record.ready!==true||!Number.isSafeInteger(record.pid)||record.pid! < 1||processIsAbsent(record.pid!)))return false;
+ const response=await rpc.call('session.snapshot'),panes=(response.snapshot??response).panes;
+ return selected.every(record=>panes.some((pane:any)=>pane.pane_id===record!.paneId&&pane.terminal_id===record!.terminalId&&pane.tab_id===record!.tabId));
+}
 /** Only authoritative open responses and exact terminal identities own a view. */
 export class PanelViews {
  private store:StateStore;private rpc:Rpc;
@@ -54,7 +77,7 @@ export class PanelViews {
  }
  async records():Promise<PanelRecord[]>{
   const rows=await this.store.read<PanelRecord[]>('views')??[];
-  if(!Array.isArray(rows)||rows.length>128||rows.some(r=>!r||typeof r.tabId!=='string'||typeof r.paneId!=='string'||typeof r.terminalId!=='string'||typeof r.open!=='boolean'||r.targetTerminalId!==undefined&&typeof r.targetTerminalId!=='string'))throw new Error('Invalid panel ownership records');
+  if(!Array.isArray(rows)||rows.length>128||rows.some(r=>!r||typeof r.tabId!=='string'||typeof r.paneId!=='string'||typeof r.terminalId!=='string'||typeof r.open!=='boolean'||r.targetTerminalId!==undefined&&typeof r.targetTerminalId!=='string'||r.ready!==undefined&&typeof r.ready!=='boolean'))throw new Error('Invalid panel ownership records');
   return rows;
  }
  async open(targetPaneId?:string){
@@ -74,7 +97,7 @@ export class PanelViews {
   const opened=await openPanel(this.rpc,{targetPaneId:nativeTarget.pane_id});
   const owned=opened.plugin_pane;
   if(owned?.plugin_id!=='iob.herdr-prism'||owned.entrypoint!=='inspector'||typeof owned.pane?.pane_id!=='string'||typeof owned.pane?.terminal_id!=='string')throw new Error('Invalid dashboard ownership response');
-  const record:PanelRecord={tabId:target.tab_id,paneId:owned.pane.pane_id,terminalId:owned.pane.terminal_id,targetTerminalId,open:true};
+  const record:PanelRecord={tabId:target.tab_id,paneId:owned.pane.pane_id,terminalId:owned.pane.terminal_id,targetTerminalId,open:true,ready:false};
   await this.store.write('views',[...records.filter(r=>r.targetTerminalId!==targetTerminalId),record]);
   await this.current(owned.pane);
   await this.sizePanel(record,nativeTarget.pane_id);
@@ -83,13 +106,20 @@ export class PanelViews {
  async register(paneId:string,terminalId:string,pid:number){
   if(typeof paneId!=='string'||typeof terminalId!=='string'||!Number.isSafeInteger(pid)||pid<1)throw new Error('Invalid view registration');
   const rows=await this.records(),record=rows.find(r=>r.terminalId===terminalId);
-  if(!record)throw new Error('Unowned view terminal');
+  if(!record?.open)throw new Error('Unowned or closed view terminal');
   const response=await this.rpc.call('session.snapshot'),pane=(response.snapshot??response).panes.find((p:any)=>p.terminal_id===terminalId&&p.pane_id===paneId);
   if(!pane||pane.tab_id!==record.tabId)throw new Error('View identity changed');
-  record.pid=pid;record.paneId=paneId;record.open=true;await this.store.write('views',rows);
+  record.pid=pid;record.paneId=paneId;record.ready=false;await this.store.write('views',rows);
   return record;
  }
+ async ready(paneId:string,terminalId:string,pid:number){
+  const rows=await this.records(),record=rows.find(r=>r.terminalId===terminalId);
+  if(!record?.open||record.paneId!==paneId||!Number.isSafeInteger(pid)||pid<1||record.pid!==pid||processIsAbsent(pid))throw new Error('View readiness requires its live registration');
+  const response=await this.rpc.call('session.snapshot'),pane=(response.snapshot??response).panes.find((p:any)=>p.terminal_id===terminalId&&p.pane_id===paneId&&p.tab_id===record.tabId);
+  if(!pane)throw new Error('View readiness identity changed');
+  record.ready=true;await this.store.write('views',rows);return{ready:true};
+ }
  async captureWidths(){const response=await this.rpc.call('session.snapshot');await this.observeWidths(response.snapshot??response);}
- async closed(terminalId:string){await this.captureWidths();const rows=await this.records();const row=rows.find(r=>r.terminalId===terminalId);if(row){row.open=false;await this.store.write('views',rows);}}
- async reconcile(){const rows=await this.records(),response=await this.rpc.call('session.snapshot'),panes=(response.snapshot??response).panes;let changed=false;for(const row of rows)if(row.open&&!panes.some((p:any)=>p.terminal_id===row.terminalId)){row.open=false;changed=true;}if(changed)await this.store.write('views',rows);}
+ async closed(terminalId:string){await this.captureWidths();const rows=await this.records();const row=rows.find(r=>r.terminalId===terminalId);if(row){row.open=false;row.ready=false;await this.store.write('views',rows);}}
+ async reconcile(){const rows=await this.records(),response=await this.rpc.call('session.snapshot'),panes=(response.snapshot??response).panes;let changed=false;for(const row of rows)if(row.open&&!panes.some((p:any)=>p.terminal_id===row.terminalId)){row.open=false;row.ready=false;changed=true;}if(changed)await this.store.write('views',rows);}
 }

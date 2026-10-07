@@ -3,7 +3,7 @@
   "platform": "darwin",
   "arch": "arm64",
   "filename": "hat-sampler",
-  "sha256": "92d7d1f7502bf34f8506403447f7d6dee19182ccf873d2f2d21170694c2372a7",
+  "sha256": "93d0df2dd78a8eecff1ea3c9b5021d0d143d91989025daecd4e1aca4846ff2e2",
   "target": "aarch64-apple-darwin",
   "distribution": {
     "signature": "ad-hoc-development",

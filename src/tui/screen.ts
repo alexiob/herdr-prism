@@ -118,7 +118,7 @@ export function renderScreen(data:DashboardData,state:UiState,columns:number,hei
   if(session&&state.tab==='Messages'&&!document){const reader=state.messageReaders.get(session.key)!;if(rows[state.cursor]?.section==='Retained messages'){reader.anchorId=rows[state.cursor]?.sourceId??rows[state.cursor]?.action?.id;if(reader.following&&!followEnd&&state.cursor<lastMessageRow)reader.following=false;}}
   const sections:LayoutSection[]=document?document.sections.map(section=>({...section,rows:section.rows??[]})):state.tab==='Messages'?['Retained messages','Tool activity'].map(id=>({id,title:id,rows:rows.filter(row=>row.section===id),viewport:true})):groupRows(rows,state.refSources?'Mention sources':state.tab==='Agents'?'Agent tree':state.tab);
   if(state.tab==='Processes'&&!document){const table=sections.find(section=>section.id==='Owned processes');if(table)table.description=['PID · name · CPU · RSS/WS'];}
-  const result=renderLayout(data,state,sections,columns,height,now,numericTargets,document,state.tab==='Messages'&&!document?6:1);
+  const result=renderLayout(data,state,sections,columns,height,now,numericTargets,document,state.tab==='Messages'&&!document||document?.processTarget?6:1);
   state.cursorId=result.rows[state.cursor]?.id;
   return result;
 }
@@ -127,13 +127,13 @@ export function handleRowClick(state:UiState,x:number,y:number,data:DashboardDat
   if(!Number.isInteger(x)||!Number.isInteger(y)||x<1)return;
   const tab=screen.tabRegions?.find(region=>region.y===y&&x>=region.x&&x<region.x+region.width);if(tab)return state.processConfirmation?undefined:changeTab(state,tab.tab);
   const region=screen.rowRegions?.find(region=>region.y===y&&x>=region.x-1&&x<region.x+region.width);if(!region)return;
-  const row=screen.rows[region.index];if(!row||row.selectable===false)return;state.cursor=region.index;state.cursorId=row.id;state.numberPrefix='';
+  const row=screen.rows[region.index];if(!row)return;if(row.selectable===false){if(screen.sectionRegions){state.cursor=region.index;state.cursorId=row.id;}return;}state.cursor=region.index;state.cursorId=row.id;state.numberPrefix='';
   return handleKey(state,x===region.disclosureX?'space':'enter',data,screen);
 }
 
 /** Mouse wheels route to the hovered Messages viewport without touching its sibling. */
 export function handleRowWheel(state:UiState,x:number,y:number,delta:number,screen:RenderedScreen):boolean{
-  if(state.tab!=='Messages'||state.detail!==undefined||state.help||!screen.sectionRegions)return false;
+  if(state.help||!screen.sectionRegions)return false;
   const region=screen.sectionRegions.find(region=>x>=region.x&&x<region.x+region.width&&y>=region.y&&y<region.y+region.height);
   if(region?.indices.length){
     const reader=state.sectionReaders?.get(sectionReaderKey(state,region.id)),current=screen.rows[state.cursor]?.section===region.id?state.cursor:region.indices.find(index=>screen.rows[index]?.id===reader?.cursorId)??region.indices[0]!;
@@ -157,6 +157,7 @@ export function handleKey(state:UiState,key:string,data:DashboardData,screen:Ren
     const moves:Record<string,number>={up:-1,k:-1,down:1,j:1,pageup:-screen.bodyHeight,pagedown:screen.bodyHeight};
     if(key in moves){state.cursor+=moves[key]!;state.cursorId=undefined;}else if(key==='home'||key==='end'){state.cursor=key==='home'?0:screen.rows.length-1;state.cursorId=undefined;}return;
   }
+  if(key==='F'&&state.boundSessionKey&&!state.help&&!state.editingFilter&&!state.notes?.editing)return{type:'follow-bound',sessionKey:state.boundSessionKey};
   if(key==='r'&&!state.help&&!state.editingFilter&&!state.notes?.editing&&state.detailDocument?.processTarget)return{type:'process-output',sessionKey:state.selectedKey,processTarget:state.detailDocument.processTarget};
   if(key==='K'&&!state.help&&!state.editingFilter&&!state.notes?.editing){
     const target=state.detail!==undefined?state.detailDocument?.processTarget:state.tab==='Processes'?screen.rows[state.cursor]?.document?.processTarget:undefined;
@@ -169,7 +170,7 @@ export function handleKey(state:UiState,key:string,data:DashboardData,screen:Ren
   if(state.tab==='Notes'&&!state.notes?.editing&&!state.help&&state.detail===undefined){const move:Record<string,number>={up:-1,down:1,pageup:-screen.bodyHeight,pagedown:screen.bodyHeight};if(key in move){state.notesScroll=Math.max(0,(state.notesScroll??0)+move[key]!);return;}if(key==='home'||key==='end'){state.notesScroll=key==='home'?0:Number.MAX_SAFE_INTEGER;return;}}
   if(state.editingFilter){if(key==='enter'||key==='escape'){state.editingFilter=false;state.cursor=0;state.cursorId=undefined;}else if(key==='backspace')state.filter=[...state.filter].slice(0,-1).join('');else if(key.length===1)state.filter+=key;return;}
   if(key==='escape'){if(state.help)closeHelp(state);else closeDetail(state);state.numberPrefix='';state.notice=undefined;return;}
-  if(key==='?'||key==='help'){if(state.help)closeHelp(state);else{state.helpReader={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};state.helpText=screen.rows[state.cursor]?.help??'Scroll to read recorded content; Escape returns to the previous entry.';state.help=true;state.cursor=0;state.cursorId=undefined;state.scroll=0;}return;}
+  if(key==='?'||key==='help'){if(state.help)closeHelp(state);else{state.helpReader={cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};state.helpText=screen.rows[state.cursor]?.help??'Scroll to read recorded content; Escape returns to the previous entry.';if(state.boundSessionKey&&state.selectedKey!==state.boundSessionKey&&!state.pin)state.helpText+='\n\nYou are inspecting another agent. Escape closes this help; Shift+F then returns to following this panel’s bound agent.';state.help=true;state.cursor=0;state.cursorId=undefined;state.scroll=0;}return;}
   if(key==='q'||key==='ctrl+c')return {type:'quit'};
   if(key==='tab'||key==='shift+tab'){const order=orderedTabs(state),i=order.indexOf(state.tab);return changeTab(state,order[(i+(key==='tab'?1:order.length-1))%order.length]!);}
   if(state.help&&!['j','k','down','up','pageup','pagedown','home','end','g','G'].includes(key))return;
@@ -183,7 +184,7 @@ export function handleKey(state:UiState,key:string,data:DashboardData,screen:Ren
   if(key==='enter'&&state.numberPrefix){const sessionKey=state.numberTargets.get(Number(state.numberPrefix));state.numberPrefix='';return sessionKey?{type:'select',sessionKey}:undefined;}
   if((key==='b'||key==='B')&&state.tab==='Refs'&&state.detail===undefined){const reader=state.refSources??state.pagedRefs.get(state.selectedKey??''),restart=key==='B'||reader?.stale===true;if(reader&&!reader.hasMore&&!restart)return;return{type:state.refSources?'ref-sources':'page-refs',sessionKey:state.selectedKey,id:state.refSources?.reference.id,referencePageCursor:restart?undefined:reader?.cursor,restart};}
   if((key==='b'||key==='pageup'&&state.cursor===0)&&state.tab==='Messages'&&state.detail===undefined&&!state.help){const session=data.sessions.find(s=>s.key===state.selectedKey);const beforeId=session?allMessages(session,state)[0]?.id:undefined;const reader=state.selectedKey?state.messageReaders.get(state.selectedKey):undefined;if(reader){reader.following=false;reader.anchorId=beforeId;}state.cursorId=beforeId;state.cursor=0;return {type:'page-messages',sessionKey:state.selectedKey,beforeId};}
-  if(state.tab==='Messages'&&state.detail===undefined&&!state.help&&screen.sectionRegions){
+  if(!state.help&&screen.sectionRegions){
     const current=screen.sectionRegions.find(region=>region.indices.includes(state.cursor))??screen.sectionRegions[0]!;
     if(key==='left'||key==='right'){
       const available=screen.sectionRegions.filter(region=>region.indices.length),at=available.indexOf(current),next=available[(Math.max(0,at)+(key==='right'?1:available.length-1))%available.length];

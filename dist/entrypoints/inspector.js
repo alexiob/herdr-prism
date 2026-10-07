@@ -7,9 +7,9 @@ import path from 'node:path';
 import { parseArguments } from "../runtime/actions.js";
 import { serviceContext } from "../runtime/service.js";
 import { acquireAdmission } from "../runtime/admission.js";
-import { FollowSelection, inspectorVisible, localSelection as selectLocal } from "../runtime/follow.js";
+import { FollowSelection, clearInspectionOverlays, resumeBoundSelection, boundNoteAdoption, inspectorVisible, localSelection as selectLocal } from "../runtime/follow.js";
 import { RemoteCollector } from "../runtime/remote-collector.js";
-import { panelViewStore } from "../runtime/panel-views.js";
+import { panelViewStore, waitForPanelRecord } from "../runtime/panel-views.js";
 import { demoData } from "../runtime/demo.js";
 import { HerdrClient } from "../herdr/client.js";
 import { SnapshotCache } from "../herdr/subscription.js";
@@ -42,14 +42,21 @@ export async function main(argv = process.argv.slice(2)) {
     let finished = false;
     let stopping;
     let syncVisibility = () => { };
+    let syncBoundSelection = () => { };
     let panelVisible = () => true;
     let notes;
+    let notesStore;
+    let ownNotesTerminalId;
     let inputQueue = Promise.resolve();
     const ensureNotes = async (reload = false) => { if (state.tab !== 'Notes' || !state.selectedKey || notes?.value?.editing || !panelVisible())
         return; const session = data.sessions.find(s => s.key === state.selectedKey); if (!session || !notes)
-        return; const changed = notes.value?.sessionKey !== session.key; await notes.open(session.key, session.evidence.title ?? session.evidence.id, reload); if (changed)
+        return; const changed = notes.value?.sessionKey !== session.key; if (changed && notesStore && ownNotesTerminalId) {
+        const identity = boundNoteAdoption(session, state.selectedKey, state.boundSessionKey, ownNotesTerminalId);
+        if (identity)
+            await notesStore.adoptOwnPlaceholder(identity);
+    } await notes.open(session.key, session.evidence.title ?? session.evidence.id, reload); if (changed)
         state.notesScroll = 0; state.notes = notes.value; };
-    const connectNotes = (dir) => { notes = new NotesController(new NotesStore(dir)); notes.on('change', () => { state.notes = notes.value; if (!closing)
+    const connectNotes = (dir) => { notesStore = new NotesStore(dir); notes = new NotesController(notesStore); notes.on('change', () => { state.notes = notes.value; if (!closing)
         paint(); }); };
     const editorInput = async (event) => {
         if (!notes?.value?.editing)
@@ -84,7 +91,7 @@ export async function main(argv = process.argv.slice(2)) {
         }
         return notes.key(event.key, { columns: ui.columns, height: ui.rows, tabOrder: state.tabOrder });
     };
-    const paint = () => { syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
+    const paint = () => { syncBoundSelection(); syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
     if (args.options.demo) {
         data = demoData();
         state.selectedKey = data.sessions[0]?.key;
@@ -131,10 +138,9 @@ export async function main(argv = process.argv.slice(2)) {
             if (!paneId || !terminalId || typeof ownPane?.tab_id !== 'string')
                 throw new Error('Inspector requires its registered Herdr pane identity');
             const tabId = ownPane.tab_id;
-            const record = (await serverStore.read('views'))?.find(row => row.terminalId === terminalId && row.open);
-            if (!record?.targetTerminalId)
-                throw new Error('Inspector requires its registered native target terminal');
+            const record = await waitForPanelRecord(serverStore, { paneId, terminalId, tabId });
             const targetTerminalId = record.targetTerminalId;
+            ownNotesTerminalId = targetTerminalId;
             const store = panelViewStore(context.serverStateDir, tabId, targetTerminalId);
             await store.init();
             lease = await store.acquire();
@@ -143,6 +149,7 @@ export async function main(argv = process.argv.slice(2)) {
             const followSelection = new FollowSelection();
             panelVisible = () => !closing && !cache.stale && inspectorVisible(cache.snapshot, terminalId, paneId);
             syncVisibility = () => {
+                syncBoundSelection();
                 const visible = panelVisible();
                 collector.setVisibleSession(state.selectedKey, visible);
                 collector.setProcessesExpanded(visible && state.tab === 'Processes');
@@ -179,6 +186,7 @@ export async function main(argv = process.argv.slice(2)) {
             // while waiting for its detached owner to start.
             await admission.release();
             const localSelection = () => selectLocal(data, tabId, cache.snapshot, targetTerminalId);
+            syncBoundSelection = () => { state.boundSessionKey = localSelection(); };
             try {
                 await collector.start();
                 data = collector.data;
@@ -206,6 +214,8 @@ export async function main(argv = process.argv.slice(2)) {
                     const selectedKey = followSelection.observeLocal(snapshot, data, tabId, state.pin, targetTerminalId);
                     if (selectedKey) {
                         await notes?.end();
+                        if (selectedKey !== state.selectedKey)
+                            clearInspectionOverlays(state);
                         state.selectedKey = selectedKey;
                         await ensureNotes();
                         paint();
@@ -257,12 +267,30 @@ export async function main(argv = process.argv.slice(2)) {
                         contentRequest++;
                         return stop();
                     }
-                    if (action.type === 'pin') {
+                    if (action.type === 'follow-bound') {
+                        if (state.processConfirmation)
+                            return;
+                        await notes?.end();
+                        syncBoundSelection();
+                        if (!resumeBoundSelection(state)) {
+                            state.notice = 'Bound native agent is unavailable';
+                            return;
+                        }
+                        contentRequest++;
+                        outputRequest++;
+                        followSelection.reset();
+                        state.notice = undefined;
+                        syncVisibility();
                         await save();
+                        collector.invalidate();
+                        return;
+                    }
+                    if (action.type === 'pin') {
                         if (!state.pin) {
                             followSelection.reset();
                             await follow();
                         }
+                        await save();
                         return;
                     }
                     if (action.type === 'process-output') {
@@ -359,6 +387,7 @@ export async function main(argv = process.argv.slice(2)) {
                         contentRequest++;
                         const selected = data.sessions.find(session => session.key === action.sessionKey);
                         if (selected) {
+                            clearInspectionOverlays(state);
                             state.selectedKey = selected.key;
                             state.tab = 'Overview';
                             state.cursor = 0;
@@ -447,6 +476,7 @@ export async function main(argv = process.argv.slice(2)) {
                     inputQueue = inputQueue.then(() => processInput(event)); });
                 paint();
                 await follow();
+                await collector.markReady();
             }
             catch (error) {
                 await cleanup();

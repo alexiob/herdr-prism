@@ -7,9 +7,9 @@ import path from 'node:path';
 import { parseArguments } from '../runtime/actions.ts';
 import { serviceContext } from '../runtime/service.ts';
 import { acquireAdmission } from '../runtime/admission.ts';
-import { FollowSelection, inspectorVisible, localSelection as selectLocal } from '../runtime/follow.ts';
+import { FollowSelection,clearInspectionOverlays,resumeBoundSelection,boundNoteAdoption, inspectorVisible, localSelection as selectLocal } from '../runtime/follow.ts';
 import { RemoteCollector } from '../runtime/remote-collector.ts';
-import {panelViewStore} from '../runtime/panel-views.ts';
+import {panelViewStore,waitForPanelRecord} from '../runtime/panel-views.ts';
 import { demoData } from '../runtime/demo.ts';
 import { HerdrClient } from '../herdr/client.ts';
 import { SnapshotCache } from '../herdr/subscription.ts';
@@ -38,11 +38,11 @@ export async function main(argv = process.argv.slice(2)) {
     let closing = false;
     let finished = false;
     let stopping: Promise<void> | undefined;
-    let syncVisibility = () => {};let panelVisible=()=>true;
-    let notes:NotesController|undefined;
+    let syncVisibility = () => {};let syncBoundSelection=()=>{};let panelVisible=()=>true;
+    let notes:NotesController|undefined;let notesStore:NotesStore|undefined;let ownNotesTerminalId:string|undefined;
     let inputQueue=Promise.resolve();
-    const ensureNotes=async(reload=false)=>{if(state.tab!=='Notes'||!state.selectedKey||notes?.value?.editing||!panelVisible())return;const session=data.sessions.find(s=>s.key===state.selectedKey);if(!session||!notes)return;const changed=notes.value?.sessionKey!==session.key;await notes.open(session.key,session.evidence.title??session.evidence.id,reload);if(changed)state.notesScroll=0;state.notes=notes.value;};
-    const connectNotes=(dir:string)=>{notes=new NotesController(new NotesStore(dir));notes.on('change',()=>{state.notes=notes!.value;if(!closing)paint();});};
+    const ensureNotes=async(reload=false)=>{if(state.tab!=='Notes'||!state.selectedKey||notes?.value?.editing||!panelVisible())return;const session=data.sessions.find(s=>s.key===state.selectedKey);if(!session||!notes)return;const changed=notes.value?.sessionKey!==session.key;if(changed&&notesStore&&ownNotesTerminalId){const identity=boundNoteAdoption(session,state.selectedKey,state.boundSessionKey,ownNotesTerminalId);if(identity)await notesStore.adoptOwnPlaceholder(identity);}await notes.open(session.key,session.evidence.title??session.evidence.id,reload);if(changed)state.notesScroll=0;state.notes=notes.value;};
+    const connectNotes=(dir:string)=>{notesStore=new NotesStore(dir);notes=new NotesController(notesStore);notes.on('change',()=>{state.notes=notes!.value;if(!closing)paint();});};
     const editorInput=async(event:any)=>{
         if(!notes?.value?.editing)return false;
         if(event.type==='paste'){if(event.overflow)state.notice='Paste exceeds 1 MiB; nothing inserted';else notes.paste(event.text,{columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});return true;}
@@ -52,7 +52,7 @@ export async function main(argv = process.argv.slice(2)) {
         if(['tab','shift+tab','ctrl+c'].includes(event.key)){await notes.end();return false;}
         return notes.key(event.key,{columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});
     };
-    const paint = () => { syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
+    const paint = () => { syncBoundSelection();syncVisibility(); frame = renderScreen(data, state, ui.columns, ui.rows); ui.paint(frame); };
     if (args.options.demo) {
         data = demoData();
         state.selectedKey = data.sessions[0]?.key;
@@ -97,9 +97,8 @@ export async function main(argv = process.argv.slice(2)) {
             const ownPane = cache.snapshot?.panes.find(p=>p.terminal_id===terminalId);
             if (!paneId || !terminalId || typeof ownPane?.tab_id!=='string') throw new Error('Inspector requires its registered Herdr pane identity');
             const tabId = ownPane.tab_id;
-            const record=(await serverStore.read<import('../runtime/panel-views.ts').PanelRecord[]>('views'))?.find(row=>row.terminalId===terminalId&&row.open);
-            if(!record?.targetTerminalId)throw new Error('Inspector requires its registered native target terminal');
-            const targetTerminalId=record.targetTerminalId;
+            const record=await waitForPanelRecord(serverStore,{paneId,terminalId,tabId});
+            const targetTerminalId=record.targetTerminalId!;ownNotesTerminalId=targetTerminalId;
             const store = panelViewStore(context.serverStateDir,tabId,targetTerminalId);
             await store.init();lease=await store.acquire();
             const preferences=await store.read<any>('preferences');
@@ -107,6 +106,7 @@ export async function main(argv = process.argv.slice(2)) {
             const followSelection = new FollowSelection();
             panelVisible=()=>!closing&&!cache.stale&&inspectorVisible(cache.snapshot,terminalId,paneId);
             syncVisibility = () => {
+                syncBoundSelection();
                 const visible=panelVisible();
                 collector!.setVisibleSession(state.selectedKey,visible);
                 collector!.setProcessesExpanded(visible&&state.tab==='Processes');
@@ -127,6 +127,7 @@ export async function main(argv = process.argv.slice(2)) {
             // while waiting for its detached owner to start.
             await admission.release();
             const localSelection=()=>selectLocal(data,tabId,cache.snapshot,targetTerminalId);
+            syncBoundSelection=()=>{state.boundSessionKey=localSelection();};
             try {
                 await collector.start();data=collector.data;
                 if(!state.pin||!state.selectedKey||!data.sessions.some(s=>s.key===state.selectedKey))state.selectedKey=localSelection();
@@ -138,7 +139,7 @@ export async function main(argv = process.argv.slice(2)) {
                     const snapshot=cache.snapshot;
                     if(!snapshot||state.pin||state.processConfirmation||state.notes?.editing||!context.settings.follow)return;
                     const selectedKey=followSelection.observeLocal(snapshot,data,tabId,state.pin,targetTerminalId);
-                    if(selectedKey){await notes?.end();state.selectedKey=selectedKey;await ensureNotes();paint();}
+                    if(selectedKey){await notes?.end();if(selectedKey!==state.selectedKey)clearInspectionOverlays(state);state.selectedKey=selectedKey;await ensureNotes();paint();}
                 };
                 const queueFollow=()=>{inputQueue=inputQueue.then(async()=>{if(!closing){await ensureNotes();await follow();paint();}}).catch(error=>{state.notice=(error as Error).message;if(!closing)paint();});};
                 cache.on('snapshot', () => { syncVisibility(); collector!.invalidate(); queueFollow(); });
@@ -159,13 +160,19 @@ export async function main(argv = process.argv.slice(2)) {
                 };
                 const perform = async (action: UiAction) => {
                     if (action.type === 'quit'){contentRequest++;return stop();}
+                    if(action.type==='follow-bound'){
+                        if(state.processConfirmation)return;
+                        await notes?.end();syncBoundSelection();
+                        if(!resumeBoundSelection(state)){state.notice='Bound native agent is unavailable';return;}
+                        contentRequest++;outputRequest++;followSelection.reset();state.notice=undefined;
+                        syncVisibility();await save();collector!.invalidate();return;
+                    }
                     if (action.type === 'pin') {
-                        await save();
                         if (!state.pin) {
                             followSelection.reset();
                             await follow();
                         }
-                        return;
+                        await save();return;
                     }
                     if(action.type==='process-output'){if(action.sessionKey&&action.processTarget)void refreshProcessOutput(action.sessionKey,action.processTarget);return;}
                     if(action.type==='terminate-process'){const result=await collector!.terminateProcess(action.sessionKey!,action.processTarget!);state.notice=`${result.platform==='win32'?'Termination':'SIGTERM'} requested for PID ${result.pid}`;return;}
@@ -220,7 +227,7 @@ export async function main(argv = process.argv.slice(2)) {
                     }
                     if(action.type==='tab'){contentRequest++;await notes?.end();await ensureNotes();return;}
                     if(action.type==='notes-edit'){await ensureNotes(true);if(notes&&notes.value?.sessionKey===state.selectedKey)notes.begin({columns:ui.columns,height:ui.rows,tabOrder:state.tabOrder});state.notice=undefined;return;}
-                    if(action.type==='select'){await notes?.end();contentRequest++;const selected=data.sessions.find(session=>session.key===action.sessionKey);if(selected){state.selectedKey=selected.key;state.tab='Overview';state.cursor=0;state.cursorId=undefined;state.scroll=0;syncVisibility();collector!.invalidate();}return;}
+                    if(action.type==='select'){await notes?.end();contentRequest++;const selected=data.sessions.find(session=>session.key===action.sessionKey);if(selected){clearInspectionOverlays(state);state.selectedKey=selected.key;state.tab='Overview';state.cursor=0;state.cursorId=undefined;state.scroll=0;syncVisibility();collector!.invalidate();}return;}
                     if (action.type === 'focus') {
                         await notes?.end();
                         const selected = data.sessions.find(s => s.key === action.sessionKey);
@@ -287,6 +294,7 @@ export async function main(argv = process.argv.slice(2)) {
                 ui.on('input',(event:any)=>{if(!closing)inputQueue=inputQueue.then(()=>processInput(event));});
                 paint();
                 await follow();
+                await collector.markReady();
             }
             catch (error) {
                 await cleanup();

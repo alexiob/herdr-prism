@@ -9,7 +9,7 @@ import { atomicWrite, readOptional, securePluginNamespace, restrict } from '../c
 import { acquireAdmission } from './admission.ts';
 import { pluginId, source, clearPublication } from '../native/publisher.ts';
 import {openTabPanel,ensureCollectorService} from './collector-service.ts';
-import type {PanelRecord} from './panel-views.ts';
+import {requestedViewsReady,type PanelRecord} from './panel-views.ts';
 import type { Rpc } from '../model/types.ts';
 export type LifecycleContext = ReturnType<typeof runtimeContext>;
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -114,15 +114,20 @@ export async function activate(context: LifecycleContext, rpc: Rpc, options: {
     await closeOwnedPanes(serverStore,rpc,oldPanes);
     await waitForViewsStopped(context.serverStateDir,options.timeoutMs??15000);
     const openView=options.openView??((targetPaneId?:string)=>openTabPanel(context,targetPaneId));
-    let opened:any;
+    let opened:any;const requested:{paneId:string;terminalId:string}[]=[];
+    const openRequested=async(targetPaneId?:string)=>{
+        const result=await openView(targetPaneId),owned=result.plugin_pane;
+        if(owned?.plugin_id!==pluginId||owned.entrypoint!=='inspector'||typeof owned.pane?.pane_id!=='string'||typeof owned.pane?.terminal_id!=='string')throw new Error('Invalid dashboard pane ownership response');
+        requested.push({paneId:owned.pane.pane_id,terminalId:owned.pane.terminal_id});return result;
+    };
     if(remembered.length){
         const response=await rpc.call('session.snapshot'),snapshot=response.snapshot??response;
         for(const record of remembered.filter(r=>r.open)){
             const target=record.targetTerminalId?snapshot.panes.find((p:any)=>p.terminal_id===record.targetTerminalId):snapshot.agents?.find((a:any)=>a.tab_id===record.tabId);
-            if(target)opened=await openView(target.pane_id);
+            if(target)opened=await openRequested(target.pane_id);
         }
         if(!opened)await ensureCollectorService(context);
-    }else opened=await openView();
+    }else opened=await openRequested();
     if(opened){const pluginPane=opened.plugin_pane;
     if(pluginPane?.plugin_id!==pluginId||pluginPane.entrypoint!=='inspector'||typeof pluginPane.pane?.pane_id!=='string'||typeof pluginPane.pane?.terminal_id!=='string')throw new Error('Invalid dashboard pane ownership response');
     // The child may fail before it writes its controller; the server's open result
@@ -138,7 +143,7 @@ export async function activate(context: LifecycleContext, rpc: Rpc, options: {
                     ready: boolean;
                     stale: boolean;
                 }>('ping');
-                if (status.ready && !status.stale)
+                if (status.ready && !status.stale && await requestedViewsReady(serverStore,rpc,requested))
                     return { activated: true, configDir: context.configDir, stateDir: context.stateDir, mode, conflicts: changed.conflicts, ...(changed.shortcut?{shortcut:changed.shortcut}:{}) };
             }
             catch { /* Pane startup is asynchronous; wait for its authenticated ready signal. */ }

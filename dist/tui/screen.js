@@ -358,7 +358,7 @@ export function renderScreen(data, state, columns, height, now = Date.now()) {
         if (table)
             table.description = ['PID · name · CPU · RSS/WS'];
     }
-    const result = renderLayout(data, state, sections, columns, height, now, numericTargets, document, state.tab === 'Messages' && !document ? 6 : 1);
+    const result = renderLayout(data, state, sections, columns, height, now, numericTargets, document, state.tab === 'Messages' && !document || document?.processTarget ? 6 : 1);
     state.cursorId = result.rows[state.cursor]?.id;
     return result;
 }
@@ -372,8 +372,15 @@ export function handleRowClick(state, x, y, data, screen) {
     if (!region)
         return;
     const row = screen.rows[region.index];
-    if (!row || row.selectable === false)
+    if (!row)
         return;
+    if (row.selectable === false) {
+        if (screen.sectionRegions) {
+            state.cursor = region.index;
+            state.cursorId = row.id;
+        }
+        return;
+    }
     state.cursor = region.index;
     state.cursorId = row.id;
     state.numberPrefix = '';
@@ -381,7 +388,7 @@ export function handleRowClick(state, x, y, data, screen) {
 }
 /** Mouse wheels route to the hovered Messages viewport without touching its sibling. */
 export function handleRowWheel(state, x, y, delta, screen) {
-    if (state.tab !== 'Messages' || state.detail !== undefined || state.help || !screen.sectionRegions)
+    if (state.help || !screen.sectionRegions)
         return false;
     const region = screen.sectionRegions.find(region => x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height);
     if (region?.indices.length) {
@@ -452,6 +459,8 @@ export function handleKey(state, key, data, screen) {
         }
         return;
     }
+    if (key === 'F' && state.boundSessionKey && !state.help && !state.editingFilter && !state.notes?.editing)
+        return { type: 'follow-bound', sessionKey: state.boundSessionKey };
     if (key === 'r' && !state.help && !state.editingFilter && !state.notes?.editing && state.detailDocument?.processTarget)
         return { type: 'process-output', sessionKey: state.selectedKey, processTarget: state.detailDocument.processTarget };
     if (key === 'K' && !state.help && !state.editingFilter && !state.notes?.editing) {
@@ -503,6 +512,8 @@ export function handleKey(state, key, data, screen) {
         else {
             state.helpReader = { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll };
             state.helpText = screen.rows[state.cursor]?.help ?? 'Scroll to read recorded content; Escape returns to the previous entry.';
+            if (state.boundSessionKey && state.selectedKey !== state.boundSessionKey && !state.pin)
+                state.helpText += '\n\nYou are inspecting another agent. Escape closes this help; Shift+F then returns to following this panel’s bound agent.';
             state.help = true;
             state.cursor = 0;
             state.cursorId = undefined;
@@ -571,7 +582,7 @@ export function handleKey(state, key, data, screen) {
         state.cursor = 0;
         return { type: 'page-messages', sessionKey: state.selectedKey, beforeId };
     }
-    if (state.tab === 'Messages' && state.detail === undefined && !state.help && screen.sectionRegions) {
+    if (!state.help && screen.sectionRegions) {
         const current = screen.sectionRegions.find(region => region.indices.includes(state.cursor)) ?? screen.sectionRegions[0];
         if (key === 'left' || key === 'right') {
             const available = screen.sectionRegions.filter(region => region.indices.length), at = available.indexOf(current), next = available[(Math.max(0, at) + (key === 'right' ? 1 : available.length - 1)) % available.length];

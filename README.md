@@ -264,8 +264,9 @@ shortcuts; it does not reload Prism's `settings.json`.**
 | `Enter` | Open the selected detail or corresponding tab; inspect an agent inside Prism |
 | `Shift+K` in Processes or process details | Ask to terminate the selected process; Cancel is selected initially |
 | `r` in process details | Refresh the retained Output snapshot |
-| Left / right in Messages | Switch between Messages and Tool activity readers |
-| Mouse wheel in Messages | Scroll the reader under the pointer independently |
+| Left / right in Messages or process details | Switch between the independent readers |
+| Mouse wheel in Messages or process details | Scroll the reader under the pointer independently |
+| `Shift+F` | Return an inspected session to this panel's bound agent |
 | `f` in Agents | Explicitly focus the selected live Herdr pane |
 | `Space` | Fold/expand; open a reference's source history |
 | `Escape` | Return from details or close help/filter |
@@ -303,6 +304,9 @@ shared by its panels and retained across restarts/upgrades. A newer external edi
 is preserved; Prism saves the stale draft separately and reports its recovery
 path through `?` after leaving edit mode. Complete Prism removal deletes notes
 and recovery drafts along with owned state. Demo Notes use disposable files.
+When a bound agent gains its canonical session identity, Prism adopts notes from
+that exact terminal's earlier placeholder identity if the canonical note is absent.
+It keeps the original copy and never overwrites an existing canonical note.
 
 `Shift+K` opens a confirmation for the captured process name, PID, owner and collecting
 server. Press `Enter` on Cancel or `Escape` to return; select Terminate and press
@@ -330,6 +334,9 @@ same agent reuses that agent's panel. Follow tracks that bound pane's conversati
 so focusing a neighboring agent does not move an existing inspector. Explicit
 child/history inspection stays selected until the bound conversation changes.
 Pinning and Notes editing hold the selected conversation.
+The header distinguishes **Follow**, **Inspecting** and **Pinned**. Press
+`Shift+F` to return to the bound agent after inspecting a child or historical
+session. A transcript-only session has no verified live process to sample.
 
 New panels aim for **60 columns**, constrained by the available split
 space. Resize a panel using Herdr's normal pane-resize controls; Prism saves that
@@ -359,10 +366,23 @@ Prism cannot recover uncaptured output or retroactively separate stdout/stderr
 from an already-running pipe. The snapshot remains in the reader rather than
 being persisted or added to diagnostic exports. Remote captures run on the
 process-owning server.
+Process facts and Output have separate bounded scroll areas. Left/right switches
+the active reader; arrows, paging keys and the mouse wheel scroll its content
+without pushing the other area out of view.
 
 CPU and memory history start in the same column. CPU uses a scale of at least
 one logical core (100%); RSS is scaled against the displayed history peak.
 Missing readings remain gaps rather than measured zero.
+History retains measured observations when a new process is warming up its CPU
+baseline. Detail views show the latest measured time and sample count; an explicit
+collection gap stays blank. Reading one panel's history cannot discard another
+panel's newer samples.
+
+Process collection scans the host once per batch, then verifies ownership and
+precomputes each agent's resource totals once. Visible panels reuse those indices.
+The Rust helper reports collection/encoding timings and can recover from a timeout
+or exit with a bounded restart budget. CPU warms up again after a helper restart.
+See [batch collection, benchmarks and the Rust digest design](docs/process-batching.md).
 
 Install Prism on each remote Herdr server to collect that host's sessions,
 transcripts, processes and Git state. The dashboard identifies its server and

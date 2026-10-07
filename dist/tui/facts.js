@@ -2,6 +2,7 @@ import { outputHelp } from "../process/output.js";
 import { accountRows } from "./account.js";
 import { age, number, bytes, spark, cellWidth } from "./text.js";
 import { documentText, meter, pad } from "./widgets.js";
+import { resourceChart } from "./resource-charts.js";
 export const unavailable = '—';
 export const field = (label, value, role) => ({ label, value: value === undefined || value === null ? '—' : String(value), role });
 const section = (id, title, fields, column = 0) => ({ id, title, fields, column });
@@ -17,8 +18,8 @@ const percent = (value) => value === undefined ? '—' : number(value) + '%';
 const iso = (timestamp) => timestamp === undefined || !Number.isFinite(timestamp) || Math.abs(timestamp) > 8640000000000000 ? '—' : new Date(timestamp).toISOString();
 const statusRole = (value) => value === 'known' || value === 'active' || value === 'done' ? 'positive' : value === 'unavailable' || value === 'partial' || value === 'stale' ? 'warning' : 'text';
 export const rowHelp = {
-    cpu: 'Sampled user + kernel CPU delta over monotonic elapsed. 100% = one logical core; the aggregate can exceed 100%. The first sample needs warmup. Only verified owned processes count. History spans the observed period, up to 15 minutes, newest at right. CPU chart full scale is at least one core and grows in whole cores. Blanks are unobserved/unavailable gaps, never interpolated; measured zero uses a baseline mark. Enter opens the exact period and scale.',
-    memory: 'RSS sum on Unix; working-set sum on Windows. Each process counts once, but shared pages can occur in several processes. Peak is the highest observed aggregate sample, not lifetime allocation. The chart uses bytes from zero to its observed chart peak, not host memory percentage. History spans the observed period, up to 15 minutes, newest at right. Blanks are unobserved/unavailable gaps; measured zero uses a baseline mark. Enter opens measurements, period, scale and scope.',
+    cpu: 'Sampled user + kernel CPU delta over monotonic elapsed. 100% = one logical core; the aggregate can exceed 100%. The first sample needs warmup. Only verified owned processes count. History spans the observed period, up to 15 minutes, newest at right. Each column shows its last measured sample; a missing current reading does not erase earlier measurements. Explicit sampling gaps clear columns. Blanks are unobserved intervals or explicit gaps, never interpolated; measured zero uses a baseline mark. CPU chart full scale is at least one core and grows in whole cores. Enter opens the exact period, last measurement time and scale.',
+    memory: 'RSS sum on Unix; working-set sum on Windows. Each process counts once, but shared pages can occur in several processes. Peak is the highest observed aggregate sample, not lifetime allocation. The chart uses bytes from zero to its observed chart peak, not host memory percentage. History spans the observed period, up to 15 minutes, newest at right. Each column shows its last measured sample; current availability is separate. Explicit sampling gaps clear columns. Blanks are unobserved intervals or explicit gaps; measured zero uses a baseline mark. Enter opens measurements, last measurement time, period, scale and scope.',
     coverage: 'Readable/total verified process coverage. Unreadable processes remain in the denominator. A missing required CPU sample makes the aggregate unavailable. Enter opens Processes; u changes scope.',
     tokens: 'Recorded provider observations. Repeated cumulative counters are not added twice. Cache can be a subset of input or a separate category. Retained observations do not establish lifetime completeness. Enter opens all usage facts.',
     context: 'Measured current-context occupancy, separate from lifetime consumption. Percent requires a compatible actual capacity and current measurement. Enter opens exact counters and available provenance.',
@@ -52,52 +53,23 @@ ACTION parsing is enabled by default. Prism's settings.json has a top-level todo
     git: 'Git facts belong to this exact checkout and repository family. Added/deleted lines differ from untracked file counts. Missing counters are unavailable. Enter opens Git.',
     notes: 'Private per-agent Markdown on the collecting server. Enter opens Notes, then Enter edits. Autosave after 500 ms; Ctrl+S flushes. Follow is held while editing. Complete Prism state removal deletes notes.',
 };
-function historyPeriod(session, now) {
-    const points = session.history?.points, windowMs = session.history?.windowMs;
-    if (!points?.length || windowMs === undefined || !Number.isFinite(windowMs) || windowMs <= 0)
-        return;
-    const from = Math.max(now - windowMs, points.find(point => Number.isFinite(point.at) && point.at >= now - windowMs && point.at <= now)?.at ?? now);
-    return { from, to: now };
-}
 export function historyValues(session, kind, width, now) {
-    width = Math.max(0, Math.floor(width));
-    if (!width)
-        return [];
-    const values = (session.history?.[kind] ?? []).map(value => { if (value === undefined)
-        return; try {
-        const n = typeof value === 'number' ? value : Number(BigInt(value));
-        return Number.isFinite(n) && n >= 0 ? n : undefined;
-    }
-    catch {
-        return;
-    } });
-    const points = session.history?.points, period = historyPeriod(session, now);
-    if (points?.length && period) {
-        const buckets = Array(width).fill(undefined), elapsed = period.to - period.from;
-        for (let i = 0; i < points.length; i++) {
-            const point = points[i];
-            if (!Number.isFinite(point.at) || point.at < period.from || point.at > period.to)
-                continue;
-            // The right endpoint is inclusive. Newer observations supersede warmup or
-            // unavailable samples in the same time column, rather than poisoning it.
-            const index = elapsed === 0 ? width - 1 : Math.min(width - 1, Math.floor((point.at - period.from) * width / elapsed));
-            buckets[index] = point.gap ? undefined : values[i];
-        }
-        return buckets;
-    }
-    return values.slice(-width);
+    return resourceChart(session.history, kind, width, now).values;
 }
 function resourceHistory(session, kind, width, ascii, now) {
-    const values = historyValues(session, kind, width, now), valid = values.filter((value) => value !== undefined);
+    const data = resourceChart(session.history, kind, width, now), values = data.values, valid = values.filter((value) => value !== undefined);
     const peak = valid.length ? Math.max(...valid) : undefined;
     // CPU uses one logical core as the minimum full scale. Memory is a byte
     // trend against the observed chart peak, never a percentage of host RAM.
     const ceiling = peak === undefined ? undefined : kind === 'cpu' ? Math.max(100, Math.ceil(peak / 100) * 100) : Math.max(1, peak);
-    const period = historyPeriod(session, now);
-    return { chart: spark(values, width, ascii, ceiling), fields: [
-            field('History', spark(values, width, ascii, ceiling), 'quantity'),
+    const period = data.period, chart = !valid.length && data.measuredCount ? 'sampling gaps' : spark(values, width, ascii, ceiling);
+    return { chart, fields: [
+            field('History', chart, 'quantity'),
             field('Period', period ? `${duration(period.to - period.from)} observed · ending ${iso(period.to)}` : values.length ? `Recent ${values.length} samples · timestamps unavailable` : 'No recorded samples', 'duration'),
-            field('Scale', ceiling === undefined ? 'Unavailable until measured' : kind === 'cpu' ? `0–${percent(ceiling)}` : `0–${resident(BigInt(Math.floor(ceiling)).toString())} · observed chart peak, not host %`, 'quantity'),
+            field('Last measured', iso(data.latestMeasuredAt), 'duration'),
+            field('Measured samples', data.measuredCount, 'quantity'),
+            field('Sampling', `Last measured sample per column; current availability is separate. Explicit gaps clear columns (${data.explicitGaps} recorded).`),
+            field('Scale', ceiling === undefined ? data.measuredCount ? 'Unavailable while chart columns contain only gaps' : 'Unavailable until measured' : kind === 'cpu' ? `0–${percent(ceiling)}` : `0–${resident(BigInt(Math.floor(ceiling)).toString())} · observed chart peak, not host %`, 'quantity'),
         ] };
 }
 export function descendants(data, session) { const graph = new Map(data.sessions.map(s => [s.key, s])), seen = new Set([session.key]), queue = [...session.children], result = []; for (let i = 0; i < queue.length; i++) {

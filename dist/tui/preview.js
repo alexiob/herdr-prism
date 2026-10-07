@@ -1,6 +1,7 @@
 import { cellWidth, sanitize, truncate, wrap } from "./text.js";
 import { styleSpans } from "./theme.js";
 import { tabLabel } from "./types.js";
+import { processPanelHeights } from "./layout.js";
 export const inspectorPreviewTabs = ['Overview', 'Notes', 'To-do', 'Git', 'Agents', 'Processes', 'Refs', 'Messages'];
 export const previewViews = [...inspectorPreviewTabs, 'Notes editor', 'Sidebar', 'Help', 'Detail'];
 const goal = 'Build reliable monitoring for local and remote harness sessions, with readable telemetry and safe installation.';
@@ -297,6 +298,7 @@ export function renderPreview(view, options = {}) {
         });
     };
     let body, panelBodies;
+    const processPreview = view === 'Detail' && /^p\d+$/.test(options.entry?.id ?? '');
     if (view === 'Help' || view === 'Detail') {
         const entry = options.entry ?? sections.Overview[0].entries[0];
         const title = view === 'Help' ? `Help · ${entry.label}` : `Detail · ${entry.label}`;
@@ -304,6 +306,11 @@ export function renderPreview(view, options = {}) {
         const detail = view === 'Detail' ? structuredDetail(entry) : undefined;
         two = width >= 80 && Boolean(detail?.some(section => section.column === 1));
         body = two ? columns(detail.filter(section => section.column !== 1), detail.filter(section => section.column === 1)) : sectionLines(detail ?? [{ title, description: text.split('\n'), descriptionRole: 'text', entries: [] }], width);
+        if (processPreview) {
+            const heading = sectionLines([{ title: 'Process facts', entries: [] }], width);
+            panelBodies = [[heading[0], ...body, heading.at(-1)], sectionLines([{ title: 'Output · shared terminal', description: ['[DEMO] Shared harness terminal', ...Array.from({ length: 40 }, (_, i) => `Build step ${i + 1}: retained output`)], descriptionRole: 'text', entries: [] }], width)];
+            body = panelBodies.flat();
+        }
     }
     else if (view === 'Messages') {
         panelBodies = sections.Messages.map(section => sectionLines([section], width));
@@ -343,15 +350,16 @@ export function renderPreview(view, options = {}) {
         [span(width < 50 ? 'Monitor · codex · working' : 'Monitor · codex / demo-model · working', 'text')],
         [span(truncate('local/main · Self + jobs · Follow', width), 'secondary')], ...tabLines,
     ];
-    if (view === 'Messages' && chrome.length > height - 8)
+    if ((view === 'Messages' || processPreview) && chrome.length > height - 8)
         chrome.splice(1, Math.min(2, chrome.length - (height - 8)));
     const bodyStart = chrome.length, bodyHeight = Math.max(1, height - bodyStart - 2);
     const selected = Math.max(0, Math.min(options.selected ?? 0, allEntries.length - 1));
     const sectionScroll = {}, sectionRegions = [];
     if (panelBodies) {
         body = [];
+        const heights = processPreview ? processPanelHeights(panelBodies[0].length - 2, bodyHeight) : panelBodies.map((_, i) => Math.floor(bodyHeight / panelBodies.length) + (i < bodyHeight % panelBodies.length ? 1 : 0));
         for (const [i, source] of panelBodies.entries()) {
-            const id = sections.Messages[i].title, panelHeight = Math.floor(bodyHeight / panelBodies.length) + (i < bodyHeight % panelBodies.length ? 1 : 0), contentHeight = Math.max(0, panelHeight - (panelHeight >= 3 ? 2 : 1)), content = source.slice(1, -1);
+            const id = processPreview ? (i ? 'Output' : 'Process facts') : sections.Messages[i].title, panelHeight = heights[i], contentHeight = Math.max(0, panelHeight - (panelHeight >= 3 ? 2 : 1)), content = source.slice(1, -1);
             const selectedAt = content.findIndex(line => line.entries.some(entry => entry.index === selected));
             let scroll = Math.max(0, Math.min(options.sectionScroll?.[id] ?? (selectedAt >= 0 ? options.scroll ?? 0 : 0), Math.max(0, content.length - contentHeight)));
             if (selectedAt >= 0) {
@@ -392,7 +400,7 @@ export function renderPreview(view, options = {}) {
     }
     while (spans.length < height - 2)
         spans.push([span('')]);
-    const footer = view === 'Help' || view === 'Detail' ? '↑↓ scroll · Esc back · ? help' : view === 'Agents' ? 'Enter inspect · f focus · ? help' : view === 'Messages' ? '←→ panel · ↑↓ scroll · Enter · ? help' : view === 'Notes editor' ? 'Ctrl+S save · Esc read · text inserts' : view === 'Sidebar' ? 'Ctrl+B i opens Prism · ? help in Prism' : view === 'Notes' ? 'Enter edit · Ctrl+S save · ? help' : 'Enter open · Tab views · ? help';
+    const footer = processPreview ? '←→ panel · ↑↓ scroll · r refresh · Esc · ? help' : view === 'Help' || view === 'Detail' ? '↑↓ scroll · Esc back · ? help' : view === 'Agents' ? 'Enter inspect · f focus · ? help' : view === 'Messages' ? '←→ panel · ↑↓ scroll · Enter · ? help' : view === 'Notes editor' ? 'Ctrl+S save · Esc read · text inserts' : view === 'Sidebar' ? 'Ctrl+B i opens Prism · ? help in Prism' : view === 'Notes' ? 'Enter edit · Ctrl+S save · ? help' : 'Enter open · Tab views · ? help';
     spans.push([span(truncate(`DESIGN ONLY · synthetic data${body.length > bodyHeight ? ` · ${scroll + 1}/${body.length}` : ''}`, width), 'warning')], [span(truncate(footer, width), 'secondary')]);
     if (options.ascii)
         for (const line of spans)

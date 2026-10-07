@@ -25,11 +25,55 @@ test('history includes the sample captured exactly at the render time',()=>{
  assert.equal(historyValues(root,'memory',8,1000).at(-1),1395864371);
 });
 
-test('each time bucket reports its newest observation, preserving an unavailable latest CPU sample',()=>{
+test('each time bucket retains its last measured observation when current CPU needs warmup',()=>{
  const root=session();root.history={windowMs:8000,points:[{at:0},{at:10},{at:1000},{at:7900},{at:7950},{at:8000}],cpu:[undefined,50,25,70,undefined,30],memory:[]};
  assert.deepEqual(historyValues(root,'cpu',8,8000),[50,25,undefined,undefined,undefined,undefined,undefined,30]);
  root.history.points!.pop();root.history.cpu.pop();
- assert.equal(historyValues(root,'cpu',8,8000).at(-1),undefined);
+ assert.equal(historyValues(root,'cpu',8,8000).at(-1),70);
+});
+
+test('coarse CPU charts retain measurements while current aggregate CPU remains unavailable',()=>{
+ const root=session(),state=createUiState();
+ root.history={windowMs:8000,points:[{at:0},{at:10},{at:1000},{at:1100},{at:2000},{at:2100}],cpu:[50,undefined,25,undefined,0,undefined],memory:[]};
+ root.resource={...root.resource!,cpuPercent:undefined,cpuCoverage:{readable:1,total:2}};
+ const values=historyValues(root,'cpu',2,2100);
+ assert.deepEqual(values,[25,0]);
+ const fields=resourceDocument(root,'cpu',state,2100).sections[0]!.fields!;
+ assert.equal(fields.find(field=>field.label==='Current')!.value,'—');
+ assert.doesNotMatch(fields.find(field=>field.label==='History')!.value,/no history/i);
+ assert.match(fields.find(field=>field.label==='Sampling')!.value,/last measured/i);
+ assert.equal(fields.find(field=>field.label==='Last measured')!.value,new Date(2000).toISOString());
+ assert.deepEqual(root.resource.cpuCoverage,{readable:1,total:2});
+});
+
+test('explicit gaps clear chart columns without mislabeling retained measurements as no history',()=>{
+ const root=session(),state=createUiState();
+ root.history={windowMs:1000,points:[{at:0},{at:10,gap:true},{at:500},{at:510,gap:true}],cpu:[50,undefined,25,undefined],memory:['100',undefined,'200',undefined]};
+ for(const kind of ['cpu','memory'] as const){
+  assert.deepEqual(historyValues(root,kind,2,1000),[undefined,undefined]);
+  const fields=resourceDocument(root,kind,state,1000).sections[0]!.fields!;
+  assert.match(fields.find(field=>field.label==='History')!.value,/sampling gaps/i);
+  assert.equal(fields.find(field=>field.label==='Last measured')!.value,new Date(500).toISOString());
+  assert.match(fields.find(field=>field.label==='Sampling')!.value,/explicit gaps/i);
+  assert.doesNotMatch(fields.find(field=>field.label==='Scale')!.value,/until measured/i);
+ }
+});
+
+test('measurement and gap labels are metric-specific and exclude records outside the visible window',()=>{
+ const root=session(),state=createUiState();
+ root.history={windowMs:1000,points:[{at:0},{at:1500},{at:1510,gap:true}],cpu:[50,undefined,undefined],memory:['100','200',undefined]};
+ const fields=(kind:string)=>resourceDocument(root,kind,state,2000).sections[0]!.fields!;
+ assert.match(fields('cpu').find(field=>field.label==='History')!.value,/no history/i);
+ assert.equal(fields('cpu').find(field=>field.label==='Measured samples')!.value,'0');
+ assert.equal(fields('cpu').find(field=>field.label==='Last measured')!.value,'—');
+ assert.match(fields('memory').find(field=>field.label==='History')!.value,/sampling gaps/i);
+ assert.equal(fields('memory').find(field=>field.label==='Measured samples')!.value,'1');
+ assert.equal(fields('memory').find(field=>field.label==='Last measured')!.value,new Date(1500).toISOString());
+});
+
+test('a later measurement after an explicit gap is plotted without filling other empty columns',()=>{
+ const root=session();root.history={windowMs:1000,points:[{at:0},{at:100,gap:true},{at:200},{at:300},{at:900}],cpu:[50,undefined,undefined,25,undefined],memory:[]};
+ assert.deepEqual(historyValues(root,'cpu',5,1000),[undefined,25,undefined,undefined,undefined]);
 });
 
 test('history retains visibility gaps and never fills them with zero or an interpolated measurement',()=>{

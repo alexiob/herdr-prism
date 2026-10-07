@@ -1,7 +1,8 @@
 import { orderedTabs, tabLabel } from "./types.js";
 import { span, pad, summary, readableWrap, valueSpans, asciiText, fitSpans } from "./widgets.js";
 import { cellWidth, truncate, age } from "./text.js";
-export const sectionReaderKey = (state, id) => `${state.selectedKey ?? ''}:${state.tab}:${id}`;
+export const sectionReaderKey = (state, id) => `${state.selectedKey ?? ''}:${state.tab}:${state.detailDocument?.processTarget?.key ?? ''}:${id}`;
+export function processPanelHeights(factsRows, height) { const facts = factsRows + 2 <= height - 5 ? factsRows + 2 : height >= 8 ? Math.max(3, Math.min(Math.floor(height / 2), height - 5)) : Math.max(1, Math.floor(height / 2)); return [facts, Math.max(0, height - facts)]; }
 export function groupRows(rows, fallback) {
     const result = [];
     for (const row of rows) {
@@ -21,9 +22,12 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
     const session = data.sessions.find(s => s.key === state.selectedKey) ?? (!state.restrictAutomaticSelection && !state.notes?.editing ? data.sessions[0] : undefined);
     const name = session?.evidence.title ?? session?.evidence.id ?? state.notes?.title ?? 'No session';
     const stateName = session?.evidence.state ?? 'unknown', provider = session?.evidence.provider ?? '—', model = session?.evidence.model ?? session?.usage?.model ?? 'model —';
+    const inspecting = Boolean(state.boundSessionKey && state.selectedKey !== state.boundSessionKey && !state.pin), transcriptOnly = inspecting && session && !session.attachment && !session.attachments?.length;
+    const scope = state.subtree ? 'Subtree' : 'Self + jobs', server = data.server ? data.server.host + '/' + data.server.session : 'Server —';
+    const selectionMode = state.pin ? 'Pinned' : inspecting ? 'Inspecting · Shift+F follow' : 'Follow';
     const tail = ` · ${stateName}`;
     const metadata = (cellWidth(`${provider} · ${model}${tail}`) <= columns ? `${provider} · ${model}` : truncate(provider, Math.max(1, columns - cellWidth(tail)))) + tail;
-    const header = [[span(truncate(`${data.demo ? '[DEMO] ' : ''}Prism · ${name}`, columns), 'accent')], [span(metadata, 'identity')], [span(truncate(`${data.server ? data.server.host + '/' + data.server.session : 'Server —'} · ${state.subtree ? 'Subtree' : 'Self + jobs'} · ${state.pin ? 'Pinned' : 'Follow'}`, columns), 'secondary')]];
+    const header = [[span(truncate(`${data.demo ? '[DEMO] ' : ''}Prism · ${name}`, columns), 'accent')], [span(metadata, 'identity')], [span(truncate(inspecting ? `${selectionMode} · ${server} · ${scope}` : `${server} · ${scope} · ${selectionMode}`, columns), inspecting ? 'warning' : 'secondary')]];
     const tabRegions = [];
     let tabLine = [], used = 0;
     const finishTabLine = () => { if (used < columns)
@@ -86,15 +90,62 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
         return lines;
     };
     const two = columns >= 80 && sections.some(section => section.column === 1) && sections.some(section => section.column !== 1);
-    const bodyStart = header.length, bodyHeight = Math.max(1, height - bodyStart - 2), independent = !document && sections.length > 1 && sections.every(section => section.viewport), sectionRegions = [];
+    const processPanels = Boolean(document?.processTarget && sections.some(section => section.id === 'output'));
+    const bodyStart = header.length, bodyHeight = Math.max(1, height - bodyStart - 2), independent = processPanels || !document && sections.length > 1 && sections.every(section => section.viewport), sectionRegions = [];
+    const columnsBody = (items) => {
+        if (columns < 80 || !items.some(section => section.column === 1) || !items.some(section => section.column !== 1))
+            return sectionLines(items, columns);
+        const leftWidth = Math.floor((columns - 2) / 2), left = sectionLines(items.filter(section => section.column !== 1), leftWidth), right = sectionLines(items.filter(section => section.column === 1), columns - leftWidth - 2);
+        return Array.from({ length: Math.max(left.length, right.length) }, (_, i) => ({ parts: [...(left[i]?.parts ?? [span(' '.repeat(leftWidth))]), span('  '), ...(right[i]?.parts ?? [span(' '.repeat(columns - leftWidth - 2))])], positions: [...left[i]?.positions ?? [], ...(right[i]?.positions ?? []).map(position => ({ ...position, column: position.column + leftWidth + 2 }))] }));
+    };
     let body;
     if (independent) {
         body = [];
         const readers = state.sectionReaders ??= new Map();
-        for (const [i, section] of sections.entries()) {
-            const panelHeight = Math.floor(bodyHeight / sections.length) + (i < bodyHeight % sections.length ? 1 : 0), contentHeight = Math.max(0, panelHeight - (panelHeight >= 3 ? 2 : 1));
-            const source = sectionLines([section], columns), content = source.slice(1, -1), selected = content.findIndex(line => line.positions.some(position => position.index === state.cursor));
-            const reader = readers.get(sectionReaderKey(state, section.id)) ?? { cursor: section.rows[0] ? indices.get(section.rows[0]) : 0, cursorId: section.rows[0]?.id, scroll: selected >= 0 ? state.scroll : 0 };
+        let panels = processPanels ? [] : sections.map(section => ({ section, source: sectionLines([section], columns) }));
+        let heights = sections.map((_, i) => Math.floor(bodyHeight / sections.length) + (i < bodyHeight % sections.length ? 1 : 0));
+        if (processPanels) {
+            const facts = columnsBody(sections.filter(section => section.id !== 'output')), output = sections.find(section => section.id === 'output'), heading = sectionLines([{ id: 'Process facts', title: 'Process facts', rows: [] }], columns);
+            panels = [{ section: { id: 'Process facts', title: 'Process facts', rows: [] }, source: [heading[0], ...facts, heading.at(-1)] }, { section: { ...output, id: 'Output', title: 'Output · shared terminal', rows: [] }, source: sectionLines([{ ...output, title: 'Output · shared terminal' }], columns) }];
+            const actions = rows.slice();
+            rows.splice(0, rows.length);
+            for (const panel of panels)
+                for (const [i, line] of panel.source.slice(1, -1).entries()) {
+                    const action = line.positions[0], row = action ? { ...actions[action.index], section: panel.section.id } : { id: `process:${document.processTarget.key}:${panel.section.id}:${i}`, section: panel.section.id, text: line.parts.map(part => part.text).join(''), selectable: false, help: (document?.help ?? '') + '\n\nLeft/right switches facts and output. Arrows, Home/End and Page Up/Down scroll the active panel; mouse wheels scroll the hovered panel. Escape returns.' };
+                    const index = rows.length;
+                    rows.push(row);
+                    panel.section.rows.push(row);
+                    for (const position of line.positions)
+                        position.index = index;
+                    if (!line.positions.length)
+                        line.positions.push({ index, column: 1, width: columns, display: row.text });
+                }
+            const anchor = state.cursorId ? rows.findIndex(row => row.id === state.cursorId) : -1;
+            if (anchor >= 0)
+                state.cursor = anchor;
+            state.cursor = Math.max(0, Math.min(state.cursor, rows.length - 1));
+            for (const panel of panels)
+                for (const line of panel.source.slice(1, -1)) {
+                    let used = 0;
+                    for (const part of line.parts) {
+                        part.selected = false;
+                        for (const position of line.positions) {
+                            const row = rows[position.index], selected = position.index === state.cursor && row.selectable !== false, marker = position.column - 2;
+                            if (row.action && used === marker && part.text.length === 1) {
+                                part.text = selected ? '›' : ' ';
+                                part.role = selected ? 'accent' : 'text';
+                            }
+                            if (row.action && used >= marker && used < marker + position.width + 1 && part.role !== 'border')
+                                part.selected = selected;
+                        }
+                        used += cellWidth(part.text);
+                    }
+                }
+            heights = processPanelHeights(facts.length, bodyHeight);
+        }
+        for (const [i, { section, source }] of panels.entries()) {
+            const panelHeight = heights[i], contentHeight = Math.max(0, panelHeight - (panelHeight >= 3 ? 2 : 1)), content = source.slice(1, -1), selected = content.findIndex(line => line.positions.some(position => position.index === state.cursor));
+            const reader = readers.get(sectionReaderKey(state, section.id)) ?? { cursor: section.rows[0] ? rows.indexOf(section.rows[0]) : 0, cursorId: section.rows[0]?.id, scroll: selected >= 0 ? state.scroll : 0 };
             let scroll = Math.max(0, Math.min(reader.scroll, Math.max(0, content.length - contentHeight)));
             if (selected >= 0) {
                 if (selected < scroll)
@@ -110,7 +161,7 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
             readers.set(sectionReaderKey(state, section.id), reader);
             if (selected >= 0)
                 state.scroll = scroll;
-            sectionRegions.push({ id: section.id, x: 1, y: bodyStart + body.length + 1, width: columns, height: panelHeight, scroll, total: content.length, indices: section.rows.map(row => indices.get(row)) });
+            sectionRegions.push({ id: section.id, x: 1, y: bodyStart + body.length + 1, width: columns, height: panelHeight, scroll, total: content.length, indices: processPanels ? content.flatMap(line => line.positions.map(position => position.index)) : section.rows.map(row => indices.get(row)) });
             if (panelHeight)
                 body.push(source[0]);
             body.push(...content.slice(scroll, scroll + contentHeight));
@@ -129,7 +180,7 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
     else
         body = sectionLines(sections, columns);
     let selectedBody = body.findIndex(line => line.positions.some(position => position.index === state.cursor));
-    if (document || !rows.length) {
+    if (!processPanels && (document || !rows.length)) {
         const actions = rows.slice();
         const physical = body.map((line, i) => {
             const action = line.positions[0];
@@ -183,9 +234,10 @@ export function renderLayout(data, state, sections, columns, height, now, numeri
     while (spans.length < height - 2)
         spans.push([span('')]);
     const messageReader = session && state.tab === 'Messages' ? state.messageReaders.get(session.key) : undefined;
-    const status = state.notice ?? `${data.stale ? 'STALE · ' : ''}${messageReader?.newCount ? `${messageReader.newCount} new · ` : messageReader?.following ? 'Following end · ' : ''}${document?.capturedAt !== undefined ? 'Snapshot ' + age(document.capturedAt, now) : 'Evidence ' + age(data.updatedAt, now)} ago`;
-    const controls = state.processConfirmation && !state.help ? 'Enter choose · y confirm · Esc cancel · ? help' : state.editingFilter ? 'Filter: ' + state.filter : state.numberPrefix ? 'Prism agent: ' + state.numberPrefix + ' · Enter' : state.help || state.detail !== undefined ? (state.detailDocument?.processTarget && !state.help ? 'r output · Shift+K terminate · ? help' : '↑↓ scroll · Esc back · ? help') : state.tab === 'Processes' ? 'Enter detail · Shift+K terminate · ? help' : state.tab === 'Agents' ? 'Enter inspect · f focus · ? help' : state.tab === 'Messages' ? '←→ panel · ↑↓ scroll · Enter · ? help' : state.tab === 'Refs' ? 'Enter detail · Space sources · ? help' : state.tab === 'To-do' ? 'Enter detail · x check · ? help' : state.tab === 'Notes' ? 'Enter edit · Ctrl+S save · ? help' : columns < 50 ? 'Enter · ? help · Tab · q' : 'Enter open · Tab views · ? help · q close';
-    spans.push([span(truncate(status, columns), data.stale ? 'warning' : 'secondary')], [span(truncate(controls, columns), 'secondary')]);
+    const status = state.notice ?? `${inspecting ? transcriptOnly ? 'Transcript only · Shift+F follow bound agent · ' : 'Inspecting · Shift+F follow bound agent · ' : ''}${data.stale ? 'STALE · ' : ''}${messageReader?.newCount ? `${messageReader.newCount} new · ` : messageReader?.following ? 'Following end · ' : ''}${document?.capturedAt !== undefined ? 'Snapshot ' + age(document.capturedAt, now) : 'Evidence ' + age(data.updatedAt, now)} ago`;
+    const controls = state.processConfirmation && !state.help ? 'Enter choose · y confirm · Esc cancel · ? help' : state.editingFilter ? 'Filter: ' + state.filter : state.numberPrefix ? 'Prism agent: ' + state.numberPrefix + ' · Enter' : state.help || state.detail !== undefined ? (state.detailDocument?.processTarget && !state.help ? (columns < 50 ? '←→ · r · Shift+K · Esc · ?' : '←→ panel · r output · Shift+K terminate · Esc · ? help') : '↑↓ scroll · Esc back · ? help') : state.tab === 'Processes' ? 'Enter detail · Shift+K terminate · ? help' : state.tab === 'Agents' ? 'Enter inspect · f focus · ? help' : state.tab === 'Messages' ? '←→ panel · ↑↓ scroll · Enter · ? help' : state.tab === 'Refs' ? 'Enter detail · Space sources · ? help' : state.tab === 'To-do' ? 'Enter detail · x check · ? help' : state.tab === 'Notes' ? 'Enter edit · Ctrl+S save · ? help' : columns < 50 ? 'Enter · ? help · Tab · q' : 'Enter open · Tab views · ? help · q close';
+    const followHint = inspecting && !state.help && !state.processConfirmation && !state.editingFilter && !state.notes?.editing && cellWidth(controls + ' · Shift+F follow') <= columns ? ' · Shift+F follow' : '';
+    spans.push([span(truncate(status, columns), data.stale || transcriptOnly ? 'warning' : 'secondary')], [span(truncate(controls + followHint, columns), 'secondary')]);
     if (state.ascii)
         for (const line of spans)
             for (const part of line)

@@ -10,11 +10,11 @@ export class SampleHistory {
         return; if (last && point.at === last.at)
         points.pop(); points.push({ ...point }); points = points.filter(p => p.at >= point.at - this.windowMs).slice(-this.maxPoints); this.series.delete(key); this.series.set(key, points); while (this.series.size > this.maxSeries)
         this.series.delete(this.series.keys().next().value); }
+    // Presentation clocks can differ between panels. Pruning belongs to add(),
+    // not a read: an earlier view must not discard newer measured observations.
     view(session, scope, now = Date.now()) {
         const key = JSON.stringify([session, scope]);
         const raw = (this.series.get(key) ?? []).filter(p => p.at >= now - this.windowMs && p.at <= now);
-        if (this.series.has(key))
-            this.series.set(key, raw);
         const points = [];
         let peakMemoryBytes, peakCpuPercent;
         for (const p of raw) {

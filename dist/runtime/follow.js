@@ -67,3 +67,49 @@ export function inspectorVisible(snapshot, terminalId, paneId) {
         return false;
     return true;
 }
+/** End a reader overlay before changing its session; keep that session's caches. */
+export function clearInspectionOverlays(state) {
+    const position = state.detailReader ?? state.helpReader ?? { cursor: state.cursor, cursorId: state.cursorId, scroll: state.scroll };
+    if (state.readerKey)
+        state.readers.set(state.readerKey, { ...position });
+    state.help = false;
+    state.helpText = undefined;
+    state.helpReader = undefined;
+    state.detail = undefined;
+    state.detailDocument = undefined;
+    state.detailStack = undefined;
+    state.detailReader = undefined;
+    state.refSources = undefined;
+    state.refParent = undefined;
+    state.sourceDetailReader = undefined;
+    state.numberPrefix = '';
+    state.numberTargets.clear();
+    state.cursor = 0;
+    state.cursorId = undefined;
+    state.scroll = 0;
+    state.readerKey = undefined;
+}
+/** A bound return is a local inspection action; it never focuses a native pane. */
+export function resumeBoundSelection(state, key = state.boundSessionKey) {
+    if (!key || state.notes?.editing || state.processConfirmation)
+        return false;
+    clearInspectionOverlays(state);
+    state.selectedKey = key;
+    state.boundSessionKey = key;
+    state.pin = false;
+    state.tab = 'Overview';
+    state.readers.set(`${key}:Overview:${state.view}`, { cursor: 0, scroll: 0 });
+    return true;
+}
+/** Placeholder Notes belong only to this bound terminal's verified root conversation. */
+export function boundNoteAdoption(session, key, boundKey, terminalId) {
+    if (!session || !key || key !== boundKey || session.key !== key || session.parentKey || session.evidence.parentId || session.evidence.availability === 'unavailable' || session.evidence.id.startsWith('pane-'))
+        return;
+    const provider = session.evidence.provider;
+    if (key !== `${provider}:${session.evidence.id}`)
+        return;
+    const attachment = (session.attachments ?? (session.attachment ? [session.attachment] : [])).find(value => value.terminal_id === terminalId && value.agent === provider && value.agent_session?.kind === 'id' && value.agent_session.value === session.evidence.id);
+    if (!attachment)
+        return;
+    return { provider, terminalId, canonicalKey: key };
+}

@@ -85,11 +85,14 @@ export class NotesController extends EventEmitter {
 /** Exact Markdown source: wrapping never rewrites its spaces or newlines. */
 export function renderNotes(data:DashboardData,state:UiState,columns:number,height:number,now:number):RenderedScreen{
   const note=state.notes,editing=note?.editing===true;
+  const inspecting=Boolean(state.boundSessionKey&&state.selectedKey!==state.boundSessionKey&&!state.pin&&!editing),session=data.sessions.find(session=>session.key===state.selectedKey);
+  const inspection=inspecting?(session&&!session.attachment&&!session.attachments?.length?'Transcript only':'Inspecting'):undefined;
+  const returnHint=inspecting&&!state.editingFilter;
   const action:ScreenRow={id:'notes-edit',text:'Edit Markdown notes',help:'Enter edits. Text autosaves after 500 ms. Escape returns to reading; Ctrl+S flushes. Follow is held while editing. Tab leaves after saving. Complete Prism removal deletes notes.',action:{type:'notes-edit',sessionKey:state.selectedKey}};if(note?.recoveryPath)action.help+=' Recovery draft: '+note.recoveryPath;
   state.cursor=0;state.cursorId='notes-edit';
   if(!notesEditorFits({columns,height,tabOrder:state.tabOrder})){
     const small=renderLayout(data,state,[{id:'notes',title:'Notes · enlarge panel',rows:[{...action,action:undefined,selectable:false}]}],columns,height,now);
-    if(height>=2){small.spans![height-2]=fitSpans([span(editing?'Editing paused · enlarge panel':'Enlarge panel to edit','warning')],columns);small.spans![height-1]=fitSpans([span(editing?'Esc read · Ctrl+S save · Tab leave':'? help · Tab views · q close','secondary')],columns);for(const i of [height-2,height-1])small.lines[i]=small.spans![i]!.map(p=>p.text).join('');}return small;
+    if(height>=2){small.spans![height-2]=fitSpans([span(state.notice??note?.error??(editing?'Editing paused · enlarge panel':inspection?inspection+' · Enlarge panel':'Enlarge panel to edit'),'warning')],columns);small.spans![height-1]=fitSpans([span(editing?'Esc read · Ctrl+S save · Tab leave':returnHint?'Shift+F follow · ? help':'? help · Tab views · q close','secondary')],columns);for(const i of [height-2,height-1])small.lines[i]=small.spans![i]!.map(p=>p.text).join('');}return small;
   }
   const frame=renderLayout(data,state,[{id:'notes',title:'Markdown notes',rows:[action]}],columns,height,now,new Map(),undefined,3);
   const first=frame.bodyStart+2,room=Math.max(1,columns-4),visible=Math.max(1,height-first-2),text=note?.text??'';
@@ -103,9 +106,10 @@ export function renderNotes(data:DashboardData,state:UiState,columns:number,heig
   if(editing){if(cursorLine<state.scroll)state.scroll=cursorLine;if(cursorLine>=state.scroll+visible)state.scroll=cursorLine-visible+1;}
   else state.scroll=Math.max(0,Math.min(state.notesScroll??0,Math.max(0,lines.length-visible)));state.notesScroll=state.scroll;
   for(let i=first;i<height-2;i++){const line=lines[state.scroll+i-first],raw=line?.text??(!text&&i===first?'No notes yet. Enter to write.':'');let parts=[span('│ ','border'),span(raw,/^#{1,6} /.test(raw)?'accent':'text')];if(state.ascii)parts=parts.map(part=>({...part,text:asciiText(part.text)}));frame.spans![i]=fitSpans(parts,columns);frame.lines[i]=frame.spans![i]!.map(part=>part.text).join('');}
-  const status=state.notice??note?.error??(note?`${editing?'Editing · ':''}${note.status==='saved'?'Saved':note.status==='conflict'?'Draft saved · external edit preserved':note.status}${note.savedAt?' · '+new Date(note.savedAt).toLocaleTimeString():''}`:'Loading notes…');
-  frame.spans![height-2]=fitSpans([span(status,note?.status==='error'||note?.status==='conflict'?'warning':'secondary')],columns);
-  frame.spans![height-1]=fitSpans([span(editing?'Ctrl+S save · Esc read · Tab leave':'Enter edit · ↑↓ scroll · ? help · q','secondary')],columns);
+  const status=state.notice??note?.error??(note?`${editing?'Editing · ':''}${note.status==='saved'?'Saved':note.status==='conflict'?'Draft saved · external edit preserved':note.status}${inspection?' · '+inspection:''}${note.savedAt?' · '+new Date(note.savedAt).toLocaleTimeString():''}`:`Loading notes…${inspection?' · '+inspection:''}`);
+  frame.spans![height-2]=fitSpans([span(status,note?.status==='error'||note?.status==='conflict'||inspection==='Transcript only'?'warning':'secondary')],columns);
+  const controls=editing?'Ctrl+S save · Esc read · Tab leave':'Enter edit · ↑↓ scroll · ? help · q',readingControls=returnHint?(cellWidth('Shift+F follow · '+controls)<=columns?'Shift+F follow · '+controls:'Shift+F follow · Enter · ?'):controls;
+  frame.spans![height-1]=fitSpans([span(readingControls,'secondary')],columns);
   frame.lines[height-2]=frame.spans![height-2]!.map(part=>part.text).join('');frame.lines[height-1]=frame.spans![height-1]!.map(part=>part.text).join('');
   if(editing){const line=lines[cursorLine]!,offset=text.slice(line.start,cursor).replace(/\t/g,'    ');frame.terminalCursor={line:Math.min(height-2,first+cursorLine-state.scroll+1),column:Math.min(columns,cellWidth(offset)+3)};frame.selectedLine=undefined;}
   else{frame.rows=[action];}

@@ -11,7 +11,7 @@ import { serviceContext, existingController } from "./service.js";
 import { acquireAdmission } from "./admission.js";
 import { Collector } from "./collector.js";
 import { PanelViews } from "./panel-views.js";
-import { inspectorVisible } from "./follow.js";
+import { inspectorVisible, localSelection } from "./follow.js";
 import { HerdrClient } from "../herdr/client.js";
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 /** A single lease owns sampling; views only supply bounded visibility and input. */
@@ -44,8 +44,18 @@ export class CollectorHost {
             return this.views.open(p.targetPaneId);
         if (op === 'views')
             return this.views.records();
+        if (op === 'view.inspect') {
+            const record = (await this.views.records()).find(row => row.terminalId === p.terminalId);
+            if (!record)
+                throw new Error('Unowned view terminal');
+            const response = await this.rpc.call('session.snapshot'), snapshot = response.snapshot ?? response, state = this.visibility.get(record.terminalId);
+            const session = state?.key ? this.collector.dataForView(state.key, state.subtree).sessions.find(value => value.key === state.key) : undefined, resource = session?.resource, history = session?.history;
+            return { record: { tabId: record.tabId, paneId: record.paneId, terminalId: record.terminalId, targetTerminalId: record.targetTerminalId, open: record.open }, key: state?.key, boundSessionKey: localSelection(this.collector.data, record.tabId, snapshot, record.targetTerminalId), subtree: state?.subtree ?? false, reportedVisible: state?.visible === true, actualVisible: record.open && inspectorVisible(snapshot, record.terminalId, record.paneId), selected: session ? { provider: session.evidence.provider, state: session.evidence.state, attachmentCount: (session.attachments ?? (session.attachment ? [session.attachment] : [])).length, resource: resource ? { availability: resource.availability, reason: resource.reason, cpuPercent: resource.cpuPercent, memoryBytes: resource.memoryBytes, processCount: resource.processes.length, readable: resource.coverage.readable, total: resource.coverage.total, cpuReadable: resource.cpuCoverage.readable, sampledAt: resource.sampledAt } : undefined, history: history ? { pointCount: history.points?.length ?? Math.max(history.cpu.length, history.memory.length), knownCpuPoints: history.cpu.filter(value => value !== undefined).length, knownMemoryPoints: history.memory.filter(value => value !== undefined).length, peakMemoryBytes: history.peakMemoryBytes, observedFrom: history.observedFrom, observedTo: history.observedTo, windowMs: history.windowMs } : undefined } : undefined };
+        }
         if (op === 'view.register')
             return this.views.register(p.paneId, p.terminalId, p.pid);
+        if (op === 'view.ready')
+            return this.views.ready(p.paneId, p.terminalId, p.pid);
         if (op === 'view.closed') {
             await this.views.closed(p.terminalId);
             this.visibility.delete(p.terminalId);

@@ -878,3 +878,48 @@ The corrected complete feature acceptance passed on macOS and Linux arm64:
 `artifacts/prism-current-features-linux/features.json`. The Linux sampler's denied/
 exited mock now constructs paths with `path.join`, so its fixture remains valid
 on Windows without changing native Windows collection.
+
+## Pane readiness, inspection and collection batching — 2026-10-07
+
+Panel startup now waits for its exact authoritative native target record and
+activation requires each requested frontend's registered live PID, matching
+pane/terminal/tab and first interactive paint receipt. A ready collector alone
+cannot acknowledge a failed or still-starting frontend. Regression tests reproduce
+child-before-open-response ordering and collector-ready/frontend-unready timing.
+
+Manual historical/child inspection is labeled separately from Follow and Pinned;
+Shift+F returns to the bound agent without focusing a native pane. An exact own
+terminal placeholder note is copied into an absent canonical note under private
+locks, retaining the source and preserving existing canonical notes. Process facts
+and Output have bounded independent readers. History reads no longer prune newer
+samples for another view; measured CPU buckets survive ordinary warmup omissions,
+while explicit collection gaps remain blank.
+
+The existing Rust host scan remains batched. Process ownership ancestry and
+per-owner summaries now resolve once per batch, and views reuse those summaries
+without modifying CPU baselines. Optional native collection/encoding timings and
+bounded owned-helper recovery include a fresh clock epoch after restart. Synthetic
+benchmarks, limits and the deferred native agent-digest protocol are documented in
+`docs/process-batching.md`; they are not whole-plugin CPU measurements.
+
+Windows ACL arguments qualify canonical long paths for the external tool without
+weakening ownership or foreign-grant checks. A real Windows long-path/private
+atomic replacement regression is included for CI validation.
+
+Root validation before publication: macOS Node 26 ran 510 tests (485 passed,
+25 platform/opt-in skips); Linux arm64 Node 24 in Podman ran 510 (482 passed,
+28 skips). Both had zero failures. Rust pinned-toolchain tests passed (7 passed,
+1 manual benchmark ignored). Updated macOS arm64 helper was packaged, ad-hoc
+signed, checksummed and shipped with its matching Rust notices. Actual isolated
+macOS lifecycle, features and independent-panel/width/crash tests passed under
+Herdr 0.9.3. Windows native implementation remains unchanged; long-path tool
+behavior awaits actual Windows CI. No attached-client visibility API is claimed.
+
+Linux actual lifecycle/features/panels acceptance also passed; proofs are under
+`artifacts/prism-batch-linux-accepted`. Final review added a source-side revision
+reservation journal: retained placeholder notes cannot be adopted into a second
+conversation, and interrupted adoption can resume only its original canonical
+key. Notes reading preserves Inspecting/Transcript-only status and Shift+F hints.
+The final 27-test Notes/Inspect/Output/startup recheck passed, with TypeScript and
+compiled distribution rebuilt afterward. Windows and complete matrix results
+remain to be checked on the published commit.

@@ -1,5 +1,5 @@
 import type { HerdrSnapshot } from '../model/types.ts';
-import type { DashboardData } from '../tui/types.ts';
+import type { DashboardData,UiState,SessionView } from '../tui/types.ts';
 /** Automatic selection stays in the panel's tab. A reader can explicitly choose others. */
 export function localSelection(data:DashboardData,tabId:unknown,snapshot?:HerdrSnapshot,targetTerminalId?:string):string|undefined {
  const local=data.sessions.filter(s=>(s.attachments??(s.attachment?[s.attachment]:[])).some(a=>a.tab_id===tabId));
@@ -57,4 +57,30 @@ export function inspectorVisible(snapshot: HerdrSnapshot | undefined, terminalId
     const layout = snapshot.layouts?.find(layout => layout.tab_id === own.tab_id);
     if (layout?.zoomed === true && layout.focused_pane_id !== own.pane_id) return false;
     return true;
+}
+
+/** End a reader overlay before changing its session; keep that session's caches. */
+export function clearInspectionOverlays(state:UiState):void {
+ const position=state.detailReader??state.helpReader??{cursor:state.cursor,cursorId:state.cursorId,scroll:state.scroll};
+ if(state.readerKey)state.readers.set(state.readerKey,{...position});
+ state.help=false;state.helpText=undefined;state.helpReader=undefined;
+ state.detail=undefined;state.detailDocument=undefined;state.detailStack=undefined;state.detailReader=undefined;
+ state.refSources=undefined;state.refParent=undefined;state.sourceDetailReader=undefined;
+ state.numberPrefix='';state.numberTargets.clear();state.cursor=0;state.cursorId=undefined;state.scroll=0;state.readerKey=undefined;
+}
+/** A bound return is a local inspection action; it never focuses a native pane. */
+export function resumeBoundSelection(state:UiState,key=state.boundSessionKey):boolean {
+ if(!key||state.notes?.editing||state.processConfirmation)return false;
+ clearInspectionOverlays(state);state.selectedKey=key;state.boundSessionKey=key;state.pin=false;state.tab='Overview';
+ state.readers.set(`${key}:Overview:${state.view}`,{cursor:0,scroll:0});return true;
+}
+
+/** Placeholder Notes belong only to this bound terminal's verified root conversation. */
+export function boundNoteAdoption(session:SessionView|undefined,key:string|undefined,boundKey:string|undefined,terminalId:string):{provider:string;terminalId:string;canonicalKey:string}|undefined {
+ if(!session||!key||key!==boundKey||session.key!==key||session.parentKey||session.evidence.parentId||session.evidence.availability==='unavailable'||session.evidence.id.startsWith('pane-'))return;
+ const provider=session.evidence.provider;
+ if(key!==`${provider}:${session.evidence.id}`)return;
+ const attachment=(session.attachments??(session.attachment?[session.attachment]:[])).find(value=>value.terminal_id===terminalId&&value.agent===provider&&value.agent_session?.kind==='id'&&value.agent_session.value===session.evidence.id);
+ if(!attachment)return;
+ return{provider,terminalId,canonicalKey:key};
 }
