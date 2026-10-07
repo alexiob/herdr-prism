@@ -225,6 +225,8 @@ export async function atomicWrite(path, body, mode = 0o600, beforeRename) {
             await restrict(tmp);
         // Windows readers can temporarily deny delete-sharing. Keep the original
         // intact and recheck the caller's authorization before each bounded retry.
+        // Give a scheduled reader time to release its handle: up to 2.4 seconds of
+        // backoff, capped at 250 ms between attempts; persistent locks still fail.
         for (let attempt = 0;; attempt++) {
             await beforeRename?.();
             try {
@@ -232,9 +234,9 @@ export async function atomicWrite(path, body, mode = 0o600, beforeRename) {
                 break;
             }
             catch (error) {
-                if (process.platform !== 'win32' || attempt >= 4 || !['EPERM', 'EBUSY'].includes(error.code ?? ''))
+                if (process.platform !== 'win32' || attempt >= 12 || !['EPERM', 'EBUSY'].includes(error.code ?? ''))
                     throw error;
-                await new Promise(resolve => setTimeout(resolve, 25 * 2 ** attempt));
+                await new Promise(resolve => setTimeout(resolve, Math.min(250, 25 * 2 ** attempt)));
             }
         }
         try {

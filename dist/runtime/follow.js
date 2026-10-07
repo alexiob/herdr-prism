@@ -6,6 +6,28 @@ export function localSelection(data, tabId, snapshot, targetTerminalId) {
     const focused = snapshot?.agents.find(a => a.pane_id === snapshot.focused_pane_id && a.tab_id === tabId);
     return (focused && local.find(s => (s.attachments ?? (s.attachment ? [s.attachment] : [])).some(a => a.terminal_id === focused.terminal_id)) || local[0])?.key;
 }
+/** Native path references are placeholders until their header identifies the conversation. */
+export function resolveInspectorBinding(data, tabId, targetTerminalId, previousKey, options = {}) {
+    const session = data.sessions.find(s => (s.attachments ?? (s.attachment ? [s.attachment] : [])).some(a => a.tab_id === tabId && a.terminal_id === targetTerminalId));
+    if (!session)
+        return { key: previousKey, pending: true };
+    const attachment = (session.attachments ?? (session.attachment ? [session.attachment] : [])).find(a => a.tab_id === tabId && a.terminal_id === targetTerminalId);
+    const ref = attachment.agent_session;
+    if (ref?.kind === 'path' && session.evidence.id === ref.value)
+        return { key: previousKey, pending: true };
+    if (!ref && !previousKey && options.restoredSelection && options.restoredSelection !== session.key)
+        return { pending: true };
+    if (!ref && previousKey && previousKey !== session.key)
+        return { key: previousKey, pending: true };
+    return { key: session.key, pending: false };
+}
+/** A missing cached session never overrides a pin or an unresolved restored binding. */
+export function reconcileInspectorSelection(data, state, boundKey, startup = false) {
+    if (state.pin && state.selectedKey || state.boundSessionPending)
+        return;
+    if (startup || !state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey))
+        state.selectedKey = boundKey;
+}
 /** Follow genuine native focus/occupant changes; leave an inspected child alone on refresh. */
 export class FollowSelection {
     identity;
@@ -121,7 +143,11 @@ export function inspectionParentKey(data, state) {
 }
 /** Notes stay with the panel owner; an active editor keeps its captured draft. */
 export function resolveNotesSessionKey(state) {
-    return state.notes?.editing ? state.notes.sessionKey : state.boundSessionKey ?? state.selectedKey;
+    if (state.notes?.editing)
+        return state.notes.sessionKey;
+    if (state.boundSessionPending && !state.boundSessionKey)
+        return;
+    return state.boundSessionKey ?? state.selectedKey;
 }
 /** Placeholder Notes belong only to this bound terminal's verified root conversation. */
 export function boundNoteAdoption(session, key, boundKey, terminalId) {

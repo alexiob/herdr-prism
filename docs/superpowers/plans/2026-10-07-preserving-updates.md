@@ -27,6 +27,11 @@
 - Disabled installations and shortcut opt-out: remain disabled and retain the choice.
 - Foreign paths, symlinks and developer links: fail before deactivation.
 
+## CI regressions
+
+- Restored selections and Notes owners wait through unresolved path or missing native references; fresh pane notebooks remain usable.
+- Windows replacement retries tolerate temporary reader locks with bounded backoff and repeat authorization checks. A revoked authorization keeps the original file and removes only the temporary replacement.
+
 ## Tasks
 
 - [x] Shared lifecycle: `scripts/update.mjs`, `test/update.test.ts`. Test multi-server views, focus, settings and rollback with injected operations, then implement.
@@ -35,4 +40,4 @@
 - [x] Actual isolated acceptance: `scripts/live-update-test.mjs` and platform CI. Exercise managed update, independent views, synthetic Notes, focus and recovery on all CI platforms.
 - [x] Verify typecheck, full tests, build, macOS isolated installer/update and independent review.
 
-Local verification: 630 tests, 603 passed, 27 platform skips, no failures. Actual eight-stage macOS two-server acceptance, including GitHub source metadata, and the Node-absent-from-server-PATH installer rerun both pass. Integration and platform CI are tracked by the resulting Git commit and Verify platform release workflow.
+Local verification: 635 tests, 607 passed, 28 platform skips, no failures. Actual eight-stage macOS two-server acceptance, including GitHub source metadata, and the Node-absent-from-server-PATH installer rerun both pass. Integration and platform CI are tracked by the resulting Git commit and Verify platform release workflow.

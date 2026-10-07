@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as security from '../src/config/safe-file.ts';
-import {mkdtemp,mkdir,rm,symlink,readFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,rm,symlink,readFile,readdir} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {join} from 'node:path';
@@ -20,8 +20,21 @@ test('atomic Windows replacement waits for a temporary reader lock while preserv
  const script="$f=[IO.File]::Open($env:PRISM_LOCK_FILE,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read); [Console]::Out.WriteLine('LOCKED'); [Console]::Out.Flush(); [Console]::ReadLine() | Out-Null; $f.Dispose()";
  const locker=spawn('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{env:{...process.env,PRISM_LOCK_FILE:file},stdio:'pipe',windowsHide:true});t.after(()=>{if(locker.exitCode===null)locker.kill();});
  await once(locker.stdout,'data');assert.equal(await readFile(file,'utf8'),'original');let checks=0;
- await security.atomicWrite(file,'replacement',0o600,async()=>{checks++;if(checks===1)setTimeout(()=>locker.stdin.end('\n'),100);assert.equal(await readFile(file,'utf8'),'original');});
+ await security.atomicWrite(file,'replacement',0o600,async()=>{checks++;if(checks===1)setTimeout(()=>locker.stdin.end('\n'),600);assert.equal(await readFile(file,'utf8'),'original');});
  assert.ok(checks>1,'authorization is rechecked after a blocked rename');assert.equal(await readFile(file,'utf8'),'replacement');security.assertWindowsAcl(await security.readWindowsAcl(file),{strict:true});
+});
+
+test('atomic Windows replacement stops when authorization is revoked during a reader lock',{skip:process.platform!=='win32'},async t=>{
+ const root=await mkdtemp(join(tmpdir(),'prism-replace-revoked-'));await security.restrict(root);
+ const file=join(root,'result.json');await security.atomicWrite(file,'original');
+ const script="$f=[IO.File]::Open($env:PRISM_LOCK_FILE,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read); [Console]::Out.WriteLine('LOCKED'); [Console]::Out.Flush(); [Console]::ReadLine() | Out-Null; $f.Dispose()";
+ const locker=spawn('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{env:{...process.env,PRISM_LOCK_FILE:file},stdio:'pipe',windowsHide:true});
+ t.after(async()=>{if(locker.exitCode===null){const exited=once(locker,'exit');locker.kill();await exited;}await rm(root,{recursive:true,force:true});});
+ const [ready]=await once(locker.stdout,'data');assert.match(ready.toString(),/LOCKED/);
+ let checks=0;
+ await assert.rejects(security.atomicWrite(file,'replacement',0o600,async()=>{if(++checks>1)throw new Error('authorization revoked');}),/authorization revoked/);
+ assert.ok(checks>1,'authorization is checked again while replacement is blocked');
+ assert.equal(await readFile(file,'utf8'),'original');assert.deepEqual(await readdir(root),['result.json'],'failed replacement removes its temporary file');
 });
 
 test('recursive private directory creation protects every new intermediate without adopting an existing parent',{skip:process.platform!=='win32'},async t=>{

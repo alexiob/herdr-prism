@@ -7,7 +7,7 @@ import path from 'node:path';
 import { parseArguments } from "../runtime/actions.js";
 import { serviceContext } from "../runtime/service.js";
 import { acquireAdmission } from "../runtime/admission.js";
-import { FollowSelection, clearInspectionOverlays, resumeBoundSelection, boundNoteAdoption, resolveNotesSessionKey, inspectorVisible, localSelection as selectLocal } from "../runtime/follow.js";
+import { FollowSelection, resolveInspectorBinding, reconcileInspectorSelection, clearInspectionOverlays, resumeBoundSelection, boundNoteAdoption, resolveNotesSessionKey, inspectorVisible } from "../runtime/follow.js";
 import { RemoteCollector } from "../runtime/remote-collector.js";
 import { ViewFailureReporter } from "../runtime/view-failure.js";
 import { panelViewStore, waitForPanelRecord } from "../runtime/panel-views.js";
@@ -203,14 +203,13 @@ export async function main(argv = process.argv.slice(2)) {
             // The service owns its own admission check; do not hold a UI's gate
             // while waiting for its detached owner to start.
             await admission.release();
-            const localSelection = () => selectLocal(data, tabId, cache.snapshot, targetTerminalId);
-            syncBoundSelection = () => { state.boundSessionKey = localSelection(); };
+            syncBoundSelection = () => { const binding = resolveInspectorBinding(data, tabId, targetTerminalId, state.boundSessionKey, { restoredSelection: typeof preferences?.selectedKey === 'string' ? preferences.selectedKey : undefined }); state.boundSessionKey = binding.key; state.boundSessionPending = binding.pending; };
             try {
                 startupPhase = 'remote-start';
                 await collector.start();
                 data = collector.data;
-                if (!state.pin || !state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey))
-                    state.selectedKey = localSelection();
+                syncBoundSelection();
+                reconcileInspectorSelection(data, state, state.boundSessionKey, true);
                 startupPhase = 'selected-poll';
                 syncVisibility();
                 await collector.refresh();
@@ -233,7 +232,7 @@ export async function main(argv = process.argv.slice(2)) {
                 ui.start();
                 const follow = async () => {
                     const snapshot = cache.snapshot;
-                    if (!snapshot || state.pin || state.processConfirmation || state.notes?.editing || !context.settings.follow)
+                    if (!snapshot || state.pin || state.boundSessionPending || state.processConfirmation || state.notes?.editing || !context.settings.follow)
                         return;
                     const selectedKey = followSelection.observeLocal(snapshot, data, tabId, state.pin, targetTerminalId);
                     if (selectedKey) {
@@ -253,13 +252,8 @@ export async function main(argv = process.argv.slice(2)) {
                     paint(); }); };
                 cache.on('snapshot', () => { syncVisibility(); collector.invalidate(); queueFollow(); });
                 cache.on('stale', () => { collector.setVisibleSession(state.selectedKey, false); data.stale = true; paint(); });
-                collector.on('data', (next) => {
-                    data = next;
-                    if (!state.processConfirmation && !state.notes?.editing && (!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey)))
-                        state.selectedKey = localSelection();
-                    paint();
-                    queueFollow();
-                });
+                collector.on('data', (next) => { data = next; syncBoundSelection(); if (!state.processConfirmation && !state.notes?.editing)
+                    reconcileInspectorSelection(data, state, state.boundSessionKey); paint(); queueFollow(); });
                 collector.on('diagnostic', (message) => { state.notice = message; paint(); });
                 collector.once('disconnected', (error) => { inputQueue = inputQueue.then(async () => { await recordFailure(error, 'poll-disconnect'); await stop(); }); });
                 ui.on('resize', paint);

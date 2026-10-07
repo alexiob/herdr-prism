@@ -133,5 +133,7 @@ export async function readOptional(path:string){try{const info=await lstat(path)
 export async function atomicWrite(path:string,body:string,mode=0o600,beforeRename?:()=>Promise<void>){const tmp=join(dirname(path),'.hat-'+randomBytes(12).toString('hex')+'.tmp');const handle=await open(tmp,'wx',mode);try{await handle.writeFile(body);await handle.sync();await handle.close();if(process.platform==='win32')await restrict(tmp);
  // Windows readers can temporarily deny delete-sharing. Keep the original
  // intact and recheck the caller's authorization before each bounded retry.
- for(let attempt=0;;attempt++){await beforeRename?.();try{await rename(tmp,path);break;}catch(error){if(process.platform!=='win32'||attempt>=4||!['EPERM','EBUSY'].includes((error as NodeJS.ErrnoException).code??''))throw error;await new Promise(resolve=>setTimeout(resolve,25*2**attempt));}}
+ // Give a scheduled reader time to release its handle: up to 2.4 seconds of
+ // backoff, capped at 250 ms between attempts; persistent locks still fail.
+ for(let attempt=0;;attempt++){await beforeRename?.();try{await rename(tmp,path);break;}catch(error){if(process.platform!=='win32'||attempt>=12||!['EPERM','EBUSY'].includes((error as NodeJS.ErrnoException).code??''))throw error;await new Promise(resolve=>setTimeout(resolve,Math.min(250,25*2**attempt)));}}
  try{const dir=await open(dirname(path),'r');try{await dir.sync();}finally{await dir.close();}}catch(error){if(process.platform!=='win32')throw error;}}catch(error){await handle.close().catch(()=>{});await unlink(tmp).catch(()=>{});throw error;}}

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { parseArguments } from '../runtime/actions.ts';
 import { serviceContext } from '../runtime/service.ts';
 import { acquireAdmission } from '../runtime/admission.ts';
-import { FollowSelection,clearInspectionOverlays,resumeBoundSelection,boundNoteAdoption,resolveNotesSessionKey, inspectorVisible, localSelection as selectLocal } from '../runtime/follow.ts';
+import { FollowSelection,resolveInspectorBinding,reconcileInspectorSelection,clearInspectionOverlays,resumeBoundSelection,boundNoteAdoption,resolveNotesSessionKey, inspectorVisible } from '../runtime/follow.ts';
 import { RemoteCollector } from '../runtime/remote-collector.ts';
 import {ViewFailureReporter} from '../runtime/view-failure.ts';
 import {panelViewStore,waitForPanelRecord} from '../runtime/panel-views.ts';
@@ -132,26 +132,24 @@ export async function main(argv = process.argv.slice(2)) {
             // The service owns its own admission check; do not hold a UI's gate
             // while waiting for its detached owner to start.
             await admission.release();
-            const localSelection=()=>selectLocal(data,tabId,cache.snapshot,targetTerminalId);
-            syncBoundSelection=()=>{state.boundSessionKey=localSelection();};
+            syncBoundSelection=()=>{const binding=resolveInspectorBinding(data,tabId,targetTerminalId,state.boundSessionKey,{restoredSelection:typeof preferences?.selectedKey==='string'?preferences.selectedKey:undefined});state.boundSessionKey=binding.key;state.boundSessionPending=binding.pending;};
             try {
                 startupPhase='remote-start';await collector.start();data=collector.data;
-                if(!state.pin||!state.selectedKey||!data.sessions.some(s=>s.key===state.selectedKey))state.selectedKey=localSelection();
+                syncBoundSelection();reconcileInspectorSelection(data,state,state.boundSessionKey,true);
                 startupPhase='selected-poll';syncVisibility();await collector.refresh();data=collector.data;
                 if(closing){await stop();return;}
                 if(args.options.once||!process.stdin.isTTY){if(!args.options.once)await recordFailure(new Error('Inspector standard input is not a TTY'),'interactive-tty');paint();await cleanup();return;}
                 startupPhase='notes-open';connectNotes(context.serverStateDir);await ensureNotes();startupPhase='ui-start';ui.start();
                 const follow = async () => {
                     const snapshot=cache.snapshot;
-                    if(!snapshot||state.pin||state.processConfirmation||state.notes?.editing||!context.settings.follow)return;
+                    if(!snapshot||state.pin||state.boundSessionPending||state.processConfirmation||state.notes?.editing||!context.settings.follow)return;
                     const selectedKey=followSelection.observeLocal(snapshot,data,tabId,state.pin,targetTerminalId);
                     if(selectedKey){await notes?.end();if(selectedKey!==state.selectedKey)clearInspectionOverlays(state);state.selectedKey=selectedKey;await ensureNotes();paint();}
                 };
                 const queueFollow=()=>{inputQueue=inputQueue.then(async()=>{if(!closing){await ensureNotes();await follow();paint();}}).catch(error=>{state.notice=(error as Error).message;if(!closing)paint();});};
                 cache.on('snapshot', () => { syncVisibility(); collector!.invalidate(); queueFollow(); });
                 cache.on('stale', () => { collector!.setVisibleSession(state.selectedKey,false); data.stale = true; paint(); });
-                collector.on('data', (next: DashboardData) => { data = next; if (!state.processConfirmation&&!state.notes?.editing&&(!state.selectedKey || !data.sessions.some(s => s.key === state.selectedKey)))
-                    state.selectedKey = localSelection(); paint(); queueFollow(); });
+                collector.on('data', (next: DashboardData) => { data = next;syncBoundSelection();if(!state.processConfirmation&&!state.notes?.editing)reconcileInspectorSelection(data,state,state.boundSessionKey);paint();queueFollow(); });
                 collector.on('diagnostic', (message: string) => { state.notice = message; paint(); });
                 collector.once('disconnected',(error:Error)=>{inputQueue=inputQueue.then(async()=>{await recordFailure(error,'poll-disconnect');await stop();});});
                 ui.on('resize',paint);
