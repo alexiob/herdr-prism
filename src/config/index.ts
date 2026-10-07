@@ -16,11 +16,11 @@ export type NativeToken=string|{token:string;fg?:string;bold?:boolean;dim?:boole
 export function nativeRows(theme:'dark'|'light'|'mono'='dark'):NativeToken[][]{
  const light=theme==='light',mono=theme==='mono';
  const style=(token:string,fg:string,bold=false,optional=false):NativeToken=>({token,...(!mono?{fg}:{}),bold,dim:false,...(optional?{rules:[{equals:'',hide:true}]}:{})});
- return [['state_icon',style('agent',light?'#202938':'#D6DFE8',true),style('tab',light?'#374151':'#B7C9DA')],
+ return [['state_icon',style('agent',light?'#202938':'#D6DFE8',true),style('tab',light?'#374151':'#B7C9DA'),style('$hat_harness',light?'#5D6875':'#92A0AF')],
  [style('$hat_group',light?'#155E75':'#64D9E9',true,true)],
  [style('$hat_attention',light?'#854D0E':'#F2C66D',true,true)],
  [style('$hat_load',light?'#202938':'#D6DFE8')],
- ['machine',style('$hat_branch',light?'#5B317B':'#C6AFE2'),style('$hat_add',light?'#166534':'#61C28A',true,true),style('$hat_del',light?'#9F1239':'#F18B96',true,true),style('$hat_conflict',light?'#854D0E':'#F2C66D',true,true),style('$hat_harness',light?'#5D6875':'#92A0AF')]];
+ ['machine',style('$hat_branch',light?'#5B317B':'#C6AFE2'),style('$hat_add',light?'#166534':'#61C28A',true,true),style('$hat_del',light?'#9F1239':'#F18B96',true,true),style('$hat_conflict',light?'#854D0E':'#F2C66D',true,true)]];
 }
 function inlineToml(value:unknown):string {if(Array.isArray(value))return '['+value.map(inlineToml).join(', ')+']';if(value&&typeof value==='object')return '{ '+Object.entries(value).map(([key,v])=>key+' = '+inlineToml(v)).join(', ')+' }';return JSON.stringify(value);}
 function rowsToml(theme?:'dark'|'light'|'mono'){return '[\n'+nativeRows(theme).map(row=>'  '+inlineToml(row)).join(',\n')+'\n]';}

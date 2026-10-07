@@ -372,22 +372,25 @@ conflicting identities.
 
 ## Native overview and privacy
 
-The native card starts with status, a compact session name and the tab label.
+The native card starts with status, a compact session name, the tab label and
+the harness (`codex`, `claude`, `pi`, etc.) in muted text.
 The next rows show CPU and RSS (Windows: WS), then machine, branch and colored
 Git changes. Memory uses human sizes such as `3.2kB` or `1.2GB`; values have at
 most one decimal. `~` marks a cached resource sample. Full names, branches,
-Goals and descendant counts remain in the right panel. The final field on the
-machine/branch/Git row shows the harness (`codex`, `claude`, `pi`, etc.) in muted
-text.
+Goals and descendant counts remain in the right panel.
 
 Blocked agents have a bold amber **INPUT REQUIRED** row. Idle agents show
 **WAITING FOR YOU** and completed agents **READY TO REVIEW**. These labels use
 Herdr's native state, so idle means waiting for another request, not necessarily
-an unanswered approval. Empty attention and group rows are hidden.
+an unanswered approval. Cards sort by attention: input required, ready to review,
+waiting for a request, working, then unknown states. Agents at the same level
+retain their previous lineage order; native state changes update the ordering.
+Empty attention and group rows are hidden.
 
 To group native cards, add `"nativeGrouping": "project"` or `"tab"` inside the
 same `ui` object in `settings.json`, then invoke `reload-settings` as above.
-`"none"` is the default and retains agent lineage order. Project grouping uses
+`"none"` is the default and sorts all cards by attention. When grouping is
+enabled, groups stay together and attention sorting applies within each group. Project grouping uses
 cached Git repository identity or the agent's working directory; it performs no
 background Git scans. Group labels belong to the first real card in each group;
 Herdr cannot insert independent expandable group headers. Tab names follow

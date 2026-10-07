@@ -65,7 +65,10 @@ export class NativePublisher {
         const tabName=(session:SessionView)=>{const id=session.attachment?.tab_id;const tab=options.tabs?.find(t=>(t.tab_id??t.id)===id);return String(tab?.label??tab?.name??id??'');};
         const project=(session:SessionView)=>session.git?.commonDir?.replace(/[\\/]\.git$/,'')??session.git?.root??session.attachment?.foreground_cwd??session.attachment?.cwd??session.evidence.cwd??'Unknown project';
         const group=(session:SessionView)=>options.grouping==='tab'?session.attachment?.tab_id??'':options.grouping==='project'?project(session):'';
-        const ordered=[...sessions];if(options.grouping&&options.grouping!=='none')ordered.sort((a,b)=>group(a).localeCompare(group(b)));
+        const stateOf=(session:SessionView)=>{const status=session.attachment?.agent_status;return typeof status==='string'?status:status?.state??status?.status??session.evidence.state;};
+        const attention=(session:SessionView)=>{const level=['blocked','done','idle','working'].indexOf(stateOf(session)??'');return level<0?4:level;};
+        const grouped=!!options.grouping&&options.grouping!=='none';
+        const ordered=[...sessions].sort((a,b)=>(grouped?group(a).localeCompare(group(b)):0)||attention(a)-attention(b));
         let previousGroup:string|undefined;
         for (const session of ordered) {
             const pane = session.attachment;
@@ -79,7 +82,7 @@ export class NativePublisher {
             }
             const resource = session.resource, git = session.git;
             const groupKey=group(session),groupLabel=groupKey&&groupKey!==previousGroup?(options.grouping==='tab'?`Tab: ${tabName(session)}`:`Project: ${path.basename(groupKey.replace(/\\/g,'/'))}`):'';previousGroup=groupKey;
-            const state=typeof pane.agent_status==='string'?pane.agent_status:pane.agent_status?.state??pane.agent_status?.status??session.evidence.state;
+            const state=stateOf(session);
             const tokens: Record<string, string> = {
                 hat_harness: truncate(pane.agent??session.evidence.provider,16),
                 hat_line: truncate(String(pane.name??pane.terminal_title_stripped??pane.title_stripped??session.evidence.title??session.evidence.provider).split('|')[0].trim(),16),
@@ -89,7 +92,7 @@ export class NativePublisher {
                 hat_branch: truncate(git?.branch ?? git?.branchState ?? 'Git —',12), hat_add: git?.added === undefined ? '' : `+${number(git.added)}`, hat_del: git?.deleted === undefined ? '' : `-${number(git.deleted)}`,
                 hat_div: `↑${number(git?.ahead)} ↓${number(git?.behind)}`, hat_conflict: git?.conflicts ? `conflicts ${git.conflicts}` : '',
                 hat_last: truncate(session.evidence.messages.filter(m => m.kind !== 'inter-agent' && m.role === 'assistant').at(-1)?.text ?? '', 100),
-                hat_rank: `${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability==='stale'?'cached':resource?.availability ?? 'unavailable', hat_group: truncate(groupLabel,28),hat_attention:state==='blocked'?'! INPUT REQUIRED':state==='done'?'✓ READY TO REVIEW':state==='idle'?'○ WAITING FOR YOU':''
+                hat_rank: `${grouped?'':attention(session)+':'}${this.serverId}:${String(rank).padStart(10, '0')}`, hat_index: '', hat_fresh: resource?.availability === 'known' ? '' : resource?.availability==='stale'?'cached':resource?.availability ?? 'unavailable', hat_group: truncate(groupLabel,28),hat_attention:state==='blocked'?'! INPUT REQUIRED':state==='done'?'✓ READY TO REVIEW':state==='idle'?'○ WAITING FOR YOU':''
             };
             for (const key of keys)
                 tokens[key] = sanitize(tokens[key]).replace(/[\r\n\t]/g, ' ');
