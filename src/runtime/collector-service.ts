@@ -126,7 +126,10 @@ export async function ensureCollectorService(context:Context){
  if(process.platform==='win32'&&process.env.HERDR_PLUGIN_ID==='iob.herdr-prism')await securePluginNamespace(context.configDir,context.stateDir);
  let previous=await existingController(context);
  if(previous&&processIsAbsent(previous.marker.pid))previous=undefined;
- if(previous){const status=await previous.client.request<any>('ping');if(status.kind!=='collector-service')throw new Error('Restart Prism through activate to upgrade its legacy collector');if(status.ready&&!status.stale)return previous;}
+ // A live owner's mailbox can be queued behind a slow view operation. A
+ // transient first ping failure belongs in the bounded readiness loop below,
+ // and never authorizes spawning a replacement for that owner.
+ if(previous){const status=await previous.client.request<any>('ping').catch(()=>undefined);if(status){if(status.kind!=='collector-service')throw new Error('Restart Prism through activate to upgrade its legacy collector');if(status.ready&&!status.stale)return previous;}}
  let child:ReturnType<typeof spawn>|undefined;
  if(!previous){
   const admission=await acquireAdmission(context.stateDir);

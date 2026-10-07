@@ -221,12 +221,17 @@ export async function ensureCollectorService(context) {
     let previous = await existingController(context);
     if (previous && processIsAbsent(previous.marker.pid))
         previous = undefined;
+    // A live owner's mailbox can be queued behind a slow view operation. A
+    // transient first ping failure belongs in the bounded readiness loop below,
+    // and never authorizes spawning a replacement for that owner.
     if (previous) {
-        const status = await previous.client.request('ping');
-        if (status.kind !== 'collector-service')
-            throw new Error('Restart Prism through activate to upgrade its legacy collector');
-        if (status.ready && !status.stale)
-            return previous;
+        const status = await previous.client.request('ping').catch(() => undefined);
+        if (status) {
+            if (status.kind !== 'collector-service')
+                throw new Error('Restart Prism through activate to upgrade its legacy collector');
+            if (status.ready && !status.stale)
+                return previous;
+        }
     }
     let child;
     if (!previous) {

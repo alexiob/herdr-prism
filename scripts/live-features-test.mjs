@@ -85,6 +85,10 @@ export async function liveFeaturesTest({release,herdr=process.env.HERDR_BIN_PATH
    const betaPanel=await until('independent beta right panel',()=>rightOf(beta));
    assert.notEqual(alphaPanel.terminal_id,betaPanel.terminal_id);
    await until('beta reader',async()=>(await text(betaPanel.pane_id)).includes('fixture-beta'));
+   // The header is inventory metadata and can render before the first visible
+   // transcript pass. Establish a hydrated baseline before hiding this view;
+   // otherwise this probe can mistake an uncollected body for paused content.
+   await until('visible beta transcript publication',async()=>(await pane(beta.pane_id)).tokens?.[token('last')]?.includes('FIRST MESSAGE'));
    await cli(['pane','send-text',betaPanel.pane_id,'p']);await until('pin keyboard applied',async()=>(await text(betaPanel.pane_id)).includes('Pinned'));
    await rpc.call('agent.focus',{target:alpha.pane_id});await delay(1800);
    assert.equal((await ownPane(alpha.tab_id,alpha.terminal_id)).terminal_id,alphaPanel.terminal_id);

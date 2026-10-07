@@ -923,3 +923,24 @@ key. Notes reading preserves Inspecting/Transcript-only status and Shift+F hints
 The final 27-test Notes/Inspect/Output/startup recheck passed, with TypeScript and
 compiled distribution rebuilt afterward. Windows and complete matrix results
 remain to be checked on the published commit.
+
+Live publication of `22ec228` recovered the exact own Prism placeholder note:
+24 canonical bytes, equal revision, original 24-byte file retained. All four live
+panels ultimately registered ready with their own native terminal and selected
+bound identity; the active Codex panel had 45 measured CPU history points. Initial
+restoration exposed an existing-owner ping timeout before the readiness loop; the
+new regression reproduces a busy serial mailbox, and transient ping failure now
+enters the bounded loop without spawning or replacing that live owner.
+
+The first matrix run passed six jobs and found three additional boundaries:
+Linux Node22's hidden-content test hid beta after only its inventory header, so
+it now requires the first visible transcript publication before hiding. Both
+Windows jobs exposed same-process private-directory initialization before ACL
+protection completed; exact-path pending initialization is now shared, while
+completed paths and other processes retain strict verification. Windows long-path
+and source Notes reservation regressions passed before that race failure. macOS
+x64 Node22's CPU probe measured 37.9% on a busy runner; its previous40% scheduler
+assumption is replaced by independent worker CPU-counter brackets and exact unit
+conversion, preserving identity/memory/cleanup assertions. The native probe passed
+locally with the shipped helper. Actual corrected hidden-content acceptance also
+passed locally (`artifacts/prism-batch-mac-features-gate/features.json`).

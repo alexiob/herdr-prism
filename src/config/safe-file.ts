@@ -81,7 +81,15 @@ export async function restrict(path:string,created=true){
  }
  catch(error){const detail=(error as any).killed?'Windows command timed out':String((error as any).stderr|| (error as Error).message).trim().slice(0,1200);throw new Error(`Cannot ensure current-user-only Windows ACL (${stage}: ${detail}); use a new plugin-owned state directory or secure its ACL explicitly`,{cause:error});}
 }
-export async function privateDir(path:string):Promise<void>{
+const privateDirectoryFlights=new Map<string,Promise<void>>();
+export function privateDir(path:string):Promise<void>{
+ const existing=privateDirectoryFlights.get(path);if(existing)return existing;
+ // Only share this process's exact ongoing initialization. A completed call,
+ // another spelling, or another process must still verify an existing path.
+ const flight=initializePrivateDir(path).finally(()=>{privateDirectoryFlights.delete(path);});
+ privateDirectoryFlights.set(path,flight);return flight;
+}
+async function initializePrivateDir(path:string):Promise<void>{
  if(process.platform!=='win32'){const created=await mkdir(path,{recursive:true,mode:0o700});await restrict(path,created!==undefined);return;}
  // Nonrecursive mkdir proves which exact directory this invocation created.
  // Protect each missing parent before creating children, without adopting any
@@ -93,7 +101,7 @@ export async function privateDir(path:string):Promise<void>{
   if(code==='ENOENT'){
    const parent=dirname(path);if(parent===path)throw error;
    await privateDir(parent);
-   return privateDir(path);
+   return initializePrivateDir(path);
   }
   if(code!=='EEXIST')throw error;
  }

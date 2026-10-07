@@ -132,7 +132,18 @@ export async function restrict(path, created = true) {
         throw new Error(`Cannot ensure current-user-only Windows ACL (${stage}: ${detail}); use a new plugin-owned state directory or secure its ACL explicitly`, { cause: error });
     }
 }
-export async function privateDir(path) {
+const privateDirectoryFlights = new Map();
+export function privateDir(path) {
+    const existing = privateDirectoryFlights.get(path);
+    if (existing)
+        return existing;
+    // Only share this process's exact ongoing initialization. A completed call,
+    // another spelling, or another process must still verify an existing path.
+    const flight = initializePrivateDir(path).finally(() => { privateDirectoryFlights.delete(path); });
+    privateDirectoryFlights.set(path, flight);
+    return flight;
+}
+async function initializePrivateDir(path) {
     if (process.platform !== 'win32') {
         const created = await mkdir(path, { recursive: true, mode: 0o700 });
         await restrict(path, created !== undefined);
@@ -153,7 +164,7 @@ export async function privateDir(path) {
             if (parent === path)
                 throw error;
             await privateDir(parent);
-            return privateDir(path);
+            return initializePrivateDir(path);
         }
         if (code !== 'EEXIST')
             throw error;
